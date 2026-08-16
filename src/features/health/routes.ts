@@ -2,10 +2,15 @@ import { Hono } from "hono";
 import type { Client } from "minio";
 import { buckets } from "../../config/env";
 import { ok } from "../../lib/response";
-import { minio } from "../../lib/storage/minio";
+import { minio } from "../../lib/minio_storage/clients";
+
+export interface DepCheck {
+  name: string;
+  check: () => boolean;
+}
 
 // Factory form: tests inject an unreachable client to exercise the 503 path.
-export function healthRoutesFor(client: Client) {
+export function healthRoutesFor(client: Client, deps: DepCheck[] = []) {
   const routes = new Hono();
 
   routes.get("/health", (c) => ok(c, { status: "alive" }));
@@ -19,6 +24,7 @@ export function healthRoutesFor(client: Client) {
         checks[bucket] = false;
       }
     }
+    for (const dep of deps) checks[dep.name] = dep.check();
     const ready = Object.values(checks).every(Boolean);
     return ok(c, { ready, checks }, ready ? 200 : 503);
   });

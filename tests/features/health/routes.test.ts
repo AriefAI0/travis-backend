@@ -2,7 +2,7 @@ import { beforeAll, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { app } from "../../../src/app";
 import { healthRoutesFor } from "../../../src/features/health/routes";
-import { buildMinioClient, ensureBuckets } from "../../../src/lib/storage/minio";
+import { buildMinioClient, ensureBuckets } from "../../../src/lib/minio_storage/clients";
 
 // /health/ready assumes boot already ensured the buckets; do the same so the 200-path is deterministic.
 beforeAll(async () => {

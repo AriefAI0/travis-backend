@@ -6,6 +6,9 @@ out
 dist
 *.tgz
 
+# runtime data (tracker sqlite, ffmpeg temp)
+data/
+
 # code coverage
 coverage
 *.lcov
