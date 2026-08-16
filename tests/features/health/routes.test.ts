@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { app } from "../../../src/app";
 import { healthRoutesFor } from "../../../src/features/health/routes";
 import { buildMinioClient, ensureBuckets } from "../../../src/lib/minio_storage/clients";
+import { json } from "../../helpers/json";
 
 // /health/ready assumes boot already ensured the buckets; do the same so the 200-path is deterministic.
 beforeAll(async () => {
@@ -18,7 +19,7 @@ test("GET /health is always 200", async () => {
 test("GET /health/ready is 200 when MinIO from env is reachable", async () => {
   const res = await app.request("/health/ready");
   expect(res.status).toBe(200);
-  const body = await res.json();
+  const body = await json(res);
   expect(body.data.ready).toBe(true);
 });
 
@@ -26,6 +27,6 @@ test("GET /health/ready is 503 when MinIO is unreachable", async () => {
   const dead = healthRoutesFor(buildMinioClient("http://127.0.0.1:9", "k", "s"));
   const res = await new Hono().route("/", dead).request("/health/ready");
   expect(res.status).toBe(503);
-  const body = await res.json();
+  const body = await json(res);
   expect(body.data.ready).toBe(false);
 });

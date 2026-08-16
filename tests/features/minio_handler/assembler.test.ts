@@ -154,6 +154,46 @@ test("a fresh assembler over an existing ledger resumes part numbering (restart)
   expect(ops.uploads.map((u) => u.partNumber)).toEqual([1, 2]); // no part-1 collision
 });
 
+test("mixed segment sizes cut parts at byte boundaries, not segment edges", async () => {
+  const store = fakeStore();
+  const ops = fakeOps();
+  const a = makeAssembler(store, ops, 100);
+
+  // sizes: 30+45+40=115 (part 1 spills past the 100B mark), 55+20+60=135 (part 2)
+  const sizes = [30, 45, 40, 55, 20, 60];
+  for (let i = 0; i < sizes.length; i++) await a.append(i, b(sizes[i]));
+
+  expect(ops.uploads).toEqual([
+    { partNumber: 1, bytes: 115 },
+    { partNumber: 2, bytes: 135 },
+  ]);
+  expect(store.committed.map((p) => [p.firstIdx, p.lastIdx, p.sizeBytes])).toEqual([
+    [0, 2, 115],
+    [3, 5, 135],
+  ]);
+  expect(a.durableThrough).toBe(5);
+});
+
+test("a segment larger than partSize becomes its own oversized part", async () => {
+  const store = fakeStore();
+  const ops = fakeOps();
+  const a = makeAssembler(store, ops, 50);
+
+  await a.append(0, b(80)); // single seg crosses the threshold alone
+  expect(ops.uploads).toEqual([{ partNumber: 1, bytes: 80 }]);
+  expect(a.durableThrough).toBe(0);
+
+  await a.append(1, b(10)); // small tail waits for flushFinal
+  expect(a.durableThrough).toBe(0);
+
+  await a.flushFinal();
+  expect(ops.uploads).toEqual([
+    { partNumber: 1, bytes: 80 },
+    { partNumber: 2, bytes: 10 },
+  ]);
+  expect(a.durableThrough).toBe(1);
+});
+
 test("backpressure: cap rejects before storing, session stays resumable", async () => {
   const store = fakeStore();
   const a = makeAssembler(store, fakeOps(), 30, 40);

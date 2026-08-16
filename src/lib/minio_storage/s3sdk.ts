@@ -31,7 +31,7 @@ async function presign(method: string, bucket: string, key: string, params: Reco
 
 function tag(xml: string, name: string): string | null {
   const match = xml.match(new RegExp(`<(?:[a-z]+:)?${name}>([^<]+)<`));
-  return match ? match[1] : null;
+  return match?.[1] ?? null;
 }
 
 function partBlocks(xml: string): string[] {

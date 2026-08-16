@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 export interface TestServer {
   baseUrl: string;
   port: number;
+  logs: () => string[];
   stop(): Promise<void>;
   kill(): void;
 }
@@ -53,6 +54,7 @@ export async function startServer(overrides: Record<string, string> = {}): Promi
         return {
           baseUrl,
           port,
+          logs: () => logs.slice(-40), // tail for failure diagnostics
           stop: async () => {
             proc.kill();
             await proc.exited;

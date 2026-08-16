@@ -1,9 +1,10 @@
 import type { Context, ErrorHandler } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { log } from "./logger";
 
 export class AppError extends Error {
   constructor(
-    readonly status: number,
+    readonly status: ContentfulStatusCode,
     readonly code: string,
     message: string,
   ) {
@@ -12,7 +13,7 @@ export class AppError extends Error {
 }
 
 // RFC 7807-style error body.
-function problem(c: Context, status: number, code: string, title: string) {
+function problem(c: Context, status: ContentfulStatusCode, code: string, title: string) {
   return c.json({ status, code, title }, status, { "Content-Type": "application/problem+json" });
 }
 

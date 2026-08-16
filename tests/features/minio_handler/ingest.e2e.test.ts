@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import { generateSegments } from "../../helpers/fixtures";
+import { json } from "../../helpers/json";
 import { startServer, type TestServer } from "../../helpers/server";
 
 const SEG_COUNT = 45;
@@ -45,7 +46,7 @@ test(
       body: JSON.stringify({ appSessionId: "session-e2e-happy", kind: "master" }),
     });
     expect(createRes.status).toBe(201);
-    const { data: created } = await createRes.json();
+    const { data: created } = await json(createRes);
     const id = created.id;
     expect(created.status).toBe("recording");
 
@@ -57,7 +58,7 @@ test(
         body: segBytes[i],
       });
       expect(res.status).toBe(200);
-      const { data } = await res.json();
+      const { data } = await json(res);
       expect(data.receivedIndex).toBe(i);
       midStreamDurable = Math.max(midStreamDurable, data.durableThrough);
     }
@@ -71,14 +72,14 @@ test(
       body: segBytes[0],
     });
     expect(replay.status).toBe(200);
-    expect((await replay.json()).data.durableThrough).toBe(midStreamDurable);
+    expect((await json(replay)).data.durableThrough).toBe(midStreamDurable);
 
     const stopRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/stop`, { method: "POST" });
     expect(stopRes.status).toBe(202);
-    expect((await stopRes.json()).data.status).toBe("finalizing");
+    expect((await json(stopRes)).data.status).toBe("finalizing");
 
     const statusRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}`);
-    const status = (await statusRes.json()).data;
+    const status = (await json(statusRes)).data;
     expect(status.status).toBe("finalizing");
     expect(status.durableThrough).toBe(SEG_COUNT - 1);
 
@@ -112,7 +113,7 @@ test(
       body: JSON.stringify({ appSessionId: "session-e2e-happy", kind: "master" }),
     });
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = await json(res);
     expect(body.code).toBe("duplicate_session");
   },
   30_000,
@@ -130,7 +131,7 @@ test(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ appSessionId: "session-e2e-validation", kind: "clip" }),
     });
-    const id = (await createRes.json()).data.id;
+    const id = (await json(createRes)).data.id;
 
     const noIndex = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/segments`, { method: "POST", body: segBytes[0] });
     expect(noIndex.status).toBe(400);
@@ -148,8 +149,8 @@ test(
     // stop with zero segments: no part may be uploaded → finalized empty
     const stopRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/stop`, { method: "POST" });
     expect(stopRes.status).toBe(202);
-    expect((await stopRes.json()).data.status).toBe("finalized");
-    const status = (await (await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}`)).json()).data;
+    expect((await json(stopRes)).data.status).toBe("finalized");
+    const status = (await json(await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}`))).data;
     expect(status.artifactStatus).toBe("none");
   },
   60_000,
@@ -163,10 +164,10 @@ test(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ appSessionId: "session-e2e-heartbeat", kind: "clip" }),
     });
-    const id = (await createRes.json()).data.id;
+    const id = (await json(createRes)).data.id;
     const res = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/heartbeat`, { method: "POST" });
     expect(res.status).toBe(200);
-    expect((await res.json()).data.durableThrough).toBe(-1);
+    expect((await json(res)).data.durableThrough).toBe(-1);
     await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/stop`, { method: "POST" });
   },
   30_000,
@@ -181,7 +182,7 @@ test(
       body: JSON.stringify({ appSessionId: "session-e2e-order", kind: "master" }),
     });
     expect(createRes.status).toBe(201);
-    const id = (await createRes.json()).data.id;
+    const id = (await json(createRes)).data.id;
 
     // holes hold; a buffered dup replaces its slot; a post-flush dup is discarded
     const order = [0, 2, 4, 5, 6, 2, 3, ...Array.from({ length: SEG_COUNT - 7 }, (_, i) => i + 7), 1, 0];

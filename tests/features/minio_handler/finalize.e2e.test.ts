@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import { generateSegments } from "../../helpers/fixtures";
+import { json } from "../../helpers/json";
 import { startServer, type TestServer } from "../../helpers/server";
 
 // Finalize proof (spec Testing #1 tail): stop queues the job, the runner's
@@ -19,7 +20,7 @@ let server: TestServer;
 async function pollStatus(id: string, want: (d: any) => boolean, ms: number) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    const data = await (await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}`)).json();
+    const data = await json(await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}`));
     if (want(data.data)) return data.data;
     await new Promise((r) => setTimeout(r, 300));
   }
@@ -58,7 +59,7 @@ test(
       body: JSON.stringify({ appSessionId: "session-e2e-finalize", kind: "master" }),
     });
     expect(create.status).toBe(201);
-    const id = (await create.json()).data.id as string;
+    const id = (await json(create)).data.id as string;
 
     for (let i = 0; i < SEG_COUNT; i++) {
       const res = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/segments?index=${i}`, {
@@ -83,7 +84,7 @@ test(
     // presigned URLs from the artifacts route, all fetchable
     const artsRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/artifacts`);
     expect(artsRes.status).toBe(200);
-    const arts = (await artsRes.json()).data;
+    const arts = (await json(artsRes)).data;
     expect(arts.durationMs).toBeGreaterThan(80_000); // 45 segments x ~2s
     expect(arts.durationMs).toBeLessThan(95_000);
 

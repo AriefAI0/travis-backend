@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import { generateSegments } from "../../helpers/fixtures";
+import { json } from "../../helpers/json";
 import { startServer, type TestServer } from "../../helpers/server";
 
 // Crash-recovery proofs (spec Testing #3 + #4): SIGKILL mid-recording then
@@ -36,7 +37,7 @@ async function postSeg(s: TestServer, id: string, idx: number) {
     body: segBytes[idx],
   });
   expect(res.status).toBe(200);
-  return (await res.json()).data.durableThrough as number;
+  return (await json(res)).data.durableThrough as number;
 }
 
 async function createSession(s: TestServer, appSessionId: string) {
@@ -46,13 +47,13 @@ async function createSession(s: TestServer, appSessionId: string) {
     body: JSON.stringify({ appSessionId, kind: "master" }),
   });
   expect(res.status).toBe(201);
-  return (await res.json()).data.id as string;
+  return (await json(res)).data.id as string;
 }
 
 async function pollStatus(s: TestServer, id: string, want: (d: any) => boolean, ms: number) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    const data = await (await fetch(`${s.baseUrl}/api/minio_handler/sessions/${id}`)).json();
+    const data = await json(await fetch(`${s.baseUrl}/api/minio_handler/sessions/${id}`));
     if (want(data.data)) return data.data;
     await new Promise((r) => setTimeout(r, 300));
   }
