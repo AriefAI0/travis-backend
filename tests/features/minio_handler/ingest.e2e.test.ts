@@ -171,3 +171,42 @@ test(
   },
   30_000,
 );
+
+test(
+  "out-of-order + duplicate re-POSTs sew exactly once",
+  async () => {
+    const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ appSessionId: "session-e2e-order", kind: "master" }),
+    });
+    expect(createRes.status).toBe(201);
+    const id = (await createRes.json()).data.id;
+
+    // holes hold; a buffered dup replaces its slot; a post-flush dup is discarded
+    const order = [0, 2, 4, 5, 6, 2, 3, ...Array.from({ length: SEG_COUNT - 7 }, (_, i) => i + 7), 1, 0];
+    for (const i of order) {
+      const res = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/segments?index=${i}`, {
+        method: "POST",
+        headers: { "content-type": "video/mp2t" },
+        body: segBytes[i],
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const stopRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/stop`, { method: "POST" });
+    expect(stopRes.status).toBe(202);
+
+    const key = `recordings/${id}/master.ts`;
+    const stat = await minio.statObject(env.BUCKET_MASTER, key);
+    expect(stat.size).toBe(segBytes.reduce((n, b) => n + b.byteLength, 0));
+
+    const objectBytes = new Uint8Array(
+      await new Response(await minio.getObject(env.BUCKET_MASTER, key)).arrayBuffer(),
+    );
+    expect(sha256(objectBytes)).toBe(sha256Concat(segBytes)); // each index present exactly once
+
+    await minio.removeObject(env.BUCKET_MASTER, key);
+  },
+  180_000,
+);

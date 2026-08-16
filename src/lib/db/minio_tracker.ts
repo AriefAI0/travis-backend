@@ -135,15 +135,50 @@ export const tracker = {
     db.run(`UPDATE sessions SET highest_index_seen = MAX(highest_index_seen, ?) WHERE id = ?`, [index, id]);
   },
 
-  setCompleted(id: string, sizeBytes: number) {
+  setCompleted(id: string, sizeBytes: number, truncated = false) {
     db.run(
-      `UPDATE sessions SET status = 'finalizing', stopped_at = ?, size_bytes = ? WHERE id = ?`,
-      [Date.now(), sizeBytes, id],
+      `UPDATE sessions SET status = 'finalizing', stopped_at = ?, size_bytes = ?, truncated_at = ? WHERE id = ?`,
+      [Date.now(), sizeBytes, truncated ? Date.now() : null, id],
     );
   },
 
-  setFinalizedEmpty(id: string) {
-    db.run(`UPDATE sessions SET status = 'finalized', stopped_at = ?, size_bytes = 0 WHERE id = ?`, [Date.now(), id]);
+  setFinalizedEmpty(id: string, truncated = false) {
+    db.run(
+      `UPDATE sessions SET status = 'finalized', stopped_at = ?, size_bytes = 0, truncated_at = ? WHERE id = ?`,
+      [Date.now(), truncated ? Date.now() : null, id],
+    );
+  },
+
+  sessionsByStatuses(statuses: string[]): SessionRow[] {
+    return db
+      .query(`SELECT * FROM sessions WHERE status IN (${statuses.map(() => "?").join(",")}) ORDER BY created_at`)
+      .all(...statuses) as SessionRow[];
+  },
+
+  // Every upload_id ever persisted — the orphan sweep's allow-list.
+  uploadIds(): Set<string> {
+    const rows = db.query("SELECT upload_id FROM sessions WHERE upload_id IS NOT NULL").all() as { upload_id: string }[];
+    return new Set(rows.map((r) => r.upload_id));
+  },
+
+  segments(sessionId: string): { idx: number; size_bytes: number }[] {
+    return db
+      .query("SELECT idx, size_bytes FROM segments WHERE session_id = ? ORDER BY idx")
+      .all(sessionId) as { idx: number; size_bytes: number }[];
+  },
+
+  updatePartEtag(sessionId: string, partNumber: number, etag: string) {
+    db.run(`UPDATE parts SET etag = ? WHERE session_id = ? AND part_number = ?`, [etag, sessionId, partNumber]);
+  },
+
+  // Demotion cascade: drop this part and everything above it; its segments go
+  // back to awaiting re-send; durableThrough rewinds to the surviving prefix.
+  demotePartsFrom(sessionId: string, fromPartNumber: number, durableThrough: number) {
+    db.transaction(() => {
+      db.run(`DELETE FROM parts WHERE session_id = ? AND part_number >= ?`, [sessionId, fromPartNumber]);
+      db.run(`UPDATE segments SET state = 'received' WHERE session_id = ? AND idx > ?`, [sessionId, durableThrough]);
+      db.run(`UPDATE sessions SET durable_through = ? WHERE id = ?`, [durableThrough, sessionId]);
+    })();
   },
 
   upsertSegment(sessionId: string, idx: number, sizeBytes: number) {
@@ -162,7 +197,7 @@ export const tracker = {
 
   // Part row + segment flips + durableThrough move atomically: a crash can never
   // leave a part tracked without its segments marked (the reverse window is healed
-  // by the boot reconciler trusting ListParts).
+  // by boot recovery trusting ListParts).
   commitPart(sessionId: string, part: { partNumber: number; etag: string; sizeBytes: number; firstIdx: number; lastIdx: number }) {
     db.transaction(() => {
       db.run(

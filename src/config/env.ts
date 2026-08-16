@@ -14,7 +14,7 @@ const schema = z.object({
   BUFFER_CAP_BYTES: z.coerce.number().int().positive().default(67_108_864),
   MAX_ACTIVE_SESSIONS: z.coerce.number().int().positive().default(4),
   SEGMENT_STALE_SECONDS: z.coerce.number().int().positive().default(30),
-  RESUME_GRACE_MINUTES: z.coerce.number().int().positive().default(10),
+  RESUME_GRACE_MINUTES: z.coerce.number().positive().default(10),
   PRESIGN_GET_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
   DATA_DIR: z.string().min(1).default("./data"),
   FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
