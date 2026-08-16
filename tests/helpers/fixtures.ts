@@ -33,8 +33,6 @@ export async function generateSegments(dir: string, count: number): Promise<stri
       "segment",
       "-segment_time",
       "2",
-      "-reset_timestamps",
-      "1",
       `${dir}/seg%05d.ts`,
     ],
     { stdout: "ignore", stderr: "pipe" },

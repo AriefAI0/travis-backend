@@ -3,6 +3,7 @@ import { AppError } from "../../lib/error";
 import { log } from "../../lib/logger";
 import { tracker, type SessionRow } from "../../lib/db/minio_tracker";
 import { s3parts } from "../../lib/minio_storage/s3sdk";
+import { mintGetUrl } from "../../lib/minio_storage/mint";
 import { Assembler } from "./assembler";
 
 const assemblers = new Map<string, Assembler>();
@@ -88,6 +89,27 @@ export function getSessionStatus(id: string) {
     segmentsReceived: tracker.segmentsReceived(session.id),
     artifactStatus: session.status === "finalized" ? (session.size_bytes ? "ready" : "none") : "pending",
     truncatedAt: session.truncated_at,
+  };
+}
+
+// Minted playback/download URLs — available only after finalize (spec D10).
+export async function getArtifacts(id: string) {
+  const session = requireSession(id);
+  if (session.status !== "finalized" || !session.size_bytes) {
+    throw new AppError(
+      409,
+      "wrong_state",
+      session.status === "finalized" ? "recording has no artifacts" : `recording is ${session.status}`,
+    );
+  }
+  return {
+    hls: {
+      manifest: await mintGetUrl(env.BUCKET_HLS, `${id}/index.m3u8`),
+      media: await mintGetUrl(env.BUCKET_HLS, `${id}/media.ts`),
+    },
+    mkv: await mintGetUrl(env.BUCKET_MKV, `${id}.mkv`),
+    thumbnail: await mintGetUrl(env.BUCKET_THUMBNAILS, `${id}.jpg`),
+    durationMs: session.duration_ms,
   };
 }
 

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { AppError } from "../../lib/error";
 import { ok } from "../../lib/response";
-import { appendSegment, createSession, getSessionStatus, heartbeat, stopSession } from "./service";
+import { appendSegment, createSession, getArtifacts, getSessionStatus, heartbeat, stopSession } from "./service";
 
 const createBody = z.object({
   appSessionId: z.string().min(1),
@@ -38,3 +38,5 @@ minioHandlerRoutes.post("/api/minio_handler/sessions/:id/segments", async (c) =>
 minioHandlerRoutes.post("/api/minio_handler/sessions/:id/heartbeat", (c) => ok(c, heartbeat(c.req.param("id"))));
 
 minioHandlerRoutes.post("/api/minio_handler/sessions/:id/stop", async (c) => ok(c, await stopSession(c.req.param("id")), 202));
+
+minioHandlerRoutes.get("/api/minio_handler/sessions/:id/artifacts", async (c) => ok(c, await getArtifacts(c.req.param("id"))));

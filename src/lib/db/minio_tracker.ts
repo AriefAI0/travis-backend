@@ -149,6 +149,11 @@ export const tracker = {
     );
   },
 
+  // Artifacts done: only duration moves here (size was set at complete).
+  setFinalized(id: string, durationMs: number) {
+    db.run(`UPDATE sessions SET status = 'finalized', duration_ms = ? WHERE id = ?`, [durationMs, id]);
+  },
+
   sessionsByStatuses(statuses: string[]): SessionRow[] {
     return db
       .query(`SELECT * FROM sessions WHERE status IN (${statuses.map(() => "?").join(",")}) ORDER BY created_at`)
@@ -224,4 +229,42 @@ export const tracker = {
   enqueueJob(sessionId: string, type: string) {
     db.run(`INSERT INTO jobs (session_id, type, status, attempts) VALUES (?, ?, 'queued', 0)`, [sessionId, type]);
   },
+
+  // Atomically claim the oldest queued job (single process — no SKIP LOCKED needed).
+  claimNextJob(): JobRow | null {
+    return (
+      db.transaction(() => {
+        const row = db
+          .query("SELECT id, session_id, type, attempts FROM jobs WHERE status = 'queued' ORDER BY id LIMIT 1")
+          .get() as JobRow | undefined;
+        if (!row) return null;
+        db.run(`UPDATE jobs SET status = 'running', locked_at = ?, attempts = attempts + 1 WHERE id = ?`, [
+          Date.now(),
+          row.id,
+        ]);
+        return { ...row, attempts: row.attempts + 1 };
+      })() ?? null
+    );
+  },
+
+  finishJob(id: number, status: "done" | "failed", error?: string) {
+    db.run(`UPDATE jobs SET status = ?, error = ?, locked_at = NULL WHERE id = ?`, [status, error ?? null, id]);
+  },
+
+  // Failed but retryable: back to the queue for the next poll.
+  requeueJob(id: number, error: string) {
+    db.run(`UPDATE jobs SET status = 'queued', error = ? WHERE id = ?`, [error, id]);
+  },
+
+  // A crash mid-run leaves 'running' rows — requeue them at boot.
+  requeueRunningJobs() {
+    db.run(`UPDATE jobs SET status = 'queued' WHERE status = 'running'`);
+  },
 };
+
+export interface JobRow {
+  id: number;
+  session_id: string;
+  type: string;
+  attempts: number;
+}
