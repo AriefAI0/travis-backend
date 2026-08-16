@@ -1,6 +1,6 @@
 {
   "name": "travis-backend",
-  "module": "index.ts",
+  "module": "src/index.ts",
   "type": "module",
   "private": true,
   "devDependencies": {
@@ -12,6 +12,11 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
-    "test": "bun bun scripts/"
+    "test": "bun test"
+  },
+  "dependencies": {
+    "hono": "^4.13.2",
+    "minio": "^8.0.7",
+    "zod": "^4.4.3"
   }
 }
