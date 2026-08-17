@@ -56,7 +56,7 @@ test(
     const create = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appSessionId: "session-e2e-finalize", kind: "master" }),
+      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 301 }),
     });
     expect(create.status).toBe(201);
     const id = (await json(create)).data.id as string;
@@ -112,11 +112,12 @@ test(
     expect(thumb[1]).toBe(0xd8);
 
     // cleanup all five objects (raw master + four artifacts)
-    await minio.removeObject(env.BUCKET_MASTER, `recordings/${id}/master.ts`);
-    await minio.removeObject(env.BUCKET_MKV, `${id}.mkv`);
-    await minio.removeObject(env.BUCKET_HLS, `${id}/index.m3u8`);
-    await minio.removeObject(env.BUCKET_HLS, `${id}/media.ts`);
-    await minio.removeObject(env.BUCKET_THUMBNAILS, `${id}.jpg`);
+    const base = `projects/1/sessions/1/recordings/301`;
+    await minio.removeObject(env.BUCKET_RAW, `${base}/master.ts`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${base}/master.mkv`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${base}/hls/index.m3u8`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${base}/hls/media.ts`);
+    await minio.removeObject(env.BUCKET_THUMBNAILS, `${base}/thumb.jpg`);
   },
   180_000,
 );

@@ -5,6 +5,7 @@ import { tracker, type SessionRow } from "../../lib/db/minio_tracker";
 import { s3parts } from "../../lib/minio_storage/s3sdk";
 import { mintGetUrl } from "../../lib/minio_storage/mint";
 import { Assembler } from "./assembler";
+import { baseKey, identityString, leafKeys, rawKey, type RecordingIdentity } from "./paths";
 
 const assemblers = new Map<string, Assembler>();
 
@@ -33,34 +34,34 @@ function requireUploadable(session: SessionRow) {
   }
 }
 
-export async function createSession(appSessionId: string, kind: "master" | "clip") {
+export async function createSession(identity: RecordingIdentity) {
   if (tracker.countActive() >= env.MAX_ACTIVE_SESSIONS) {
     throw new AppError(429, "too_many_sessions", `max ${env.MAX_ACTIVE_SESSIONS} active sessions`);
   }
 
   const id = crypto.randomUUID();
-  const bucket = kind === "master" ? env.BUCKET_MASTER : env.BUCKET_CLIP;
-  const objectKey = `recordings/${id}/master.ts`;
+  const appSessionId = identityString(identity);
+  const objectKey = baseKey(identity); // base key; MPU ops derive the raw leaf
 
   try {
-    tracker.createSession({ id, appSessionId, kind, bucket, objectKey });
+    tracker.createSession({ id, appSessionId, kind: identity.kind, bucket: env.BUCKET_RAW, objectKey });
   } catch (err) {
     if (String(err).includes("UNIQUE")) {
-      throw new AppError(409, "duplicate_session", `session ${appSessionId} (${kind}) already exists`);
+      throw new AppError(409, "duplicate_session", `recording ${appSessionId} already exists`);
     }
     throw err;
   }
 
   let uploadId: string;
   try {
-    uploadId = await s3parts.initiate(bucket, objectKey);
+    uploadId = await s3parts.initiate(env.BUCKET_RAW, rawKey(identity.kind, objectKey));
   } catch (err) {
     // Row stays in 'created'; boot recovery re-initiates (spec D4).
     log.error("initiate failed", { session: id, err: String(err) });
     throw new AppError(503, "storage_unavailable", "MinIO unreachable");
   }
   tracker.setRecording(id, uploadId);
-  log.info("session opened", { session: id, kind, appSessionId });
+  log.info("session opened", { session: id, kind: identity.kind, identity: appSessionId });
   return { id, status: "recording" as const };
 }
 
@@ -102,13 +103,14 @@ export async function getArtifacts(id: string) {
       session.status === "finalized" ? "recording has no artifacts" : `recording is ${session.status}`,
     );
   }
+  const keys = leafKeys(session.kind, session.object_key!);
   return {
     hls: {
-      manifest: await mintGetUrl(env.BUCKET_HLS, `${id}/index.m3u8`),
-      media: await mintGetUrl(env.BUCKET_HLS, `${id}/media.ts`),
+      manifest: await mintGetUrl(env.BUCKET_MEDIA, keys.hlsManifest),
+      media: await mintGetUrl(env.BUCKET_MEDIA, keys.hlsMedia),
     },
-    mkv: await mintGetUrl(env.BUCKET_MKV, `${id}.mkv`),
-    thumbnail: await mintGetUrl(env.BUCKET_THUMBNAILS, `${id}.jpg`),
+    mkv: await mintGetUrl(env.BUCKET_MEDIA, keys.mkv),
+    thumbnail: await mintGetUrl(env.BUCKET_THUMBNAILS, keys.thumb),
     durationMs: session.duration_ms,
   };
 }
@@ -123,7 +125,7 @@ export async function finalizeRecording(session: SessionRow, opts: { truncated?:
   // recording finalizes empty (no artifacts).
   if (parts.length === 0) {
     if (session.upload_id) {
-      await s3parts.abort(session.bucket!, session.object_key!, session.upload_id);
+      await s3parts.abort(session.bucket!, rawKey(session.kind, session.object_key!), session.upload_id);
     }
     tracker.setFinalizedEmpty(session.id, opts.truncated);
     log.warn("session finalized with zero durable bytes", { session: session.id, truncated: opts.truncated });
@@ -133,7 +135,7 @@ export async function finalizeRecording(session: SessionRow, opts: { truncated?:
   try {
     await s3parts.complete(
       session.bucket!,
-      session.object_key!,
+      rawKey(session.kind, session.object_key!),
       session.upload_id!,
       parts.map((p) => ({ partNumber: p.part_number, etag: p.etag })),
     );

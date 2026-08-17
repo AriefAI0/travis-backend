@@ -16,16 +16,16 @@ beforeAll(async () => {
   rmSync(DATA_DIR, { recursive: true, force: true }); // guarantee a clean tracker
 
   // leak an MPU directly into the bucket, bypassing the server entirely
-  key = `recordings/orphan-e2e-${crypto.randomUUID()}/master.ts`;
-  uploadId = await s3parts.initiate(env.BUCKET_MASTER, key);
-  const before = await s3parts.listUploads(env.BUCKET_MASTER);
+  key = `projects/9/sessions/9/recordings/orphan-e2e-${crypto.randomUUID()}/master.ts`;
+  uploadId = await s3parts.initiate(env.BUCKET_RAW, key);
+  const before = await s3parts.listUploads(env.BUCKET_RAW);
   expect(before.some((u) => u.uploadId === uploadId)).toBe(true);
 });
 
 afterAll(async () => {
   await server?.stop().catch(() => {});
   // best-effort: abort if the sweep somehow failed
-  await s3parts.abort(env.BUCKET_MASTER, key, uploadId).catch(() => {});
+  await s3parts.abort(env.BUCKET_RAW, key, uploadId).catch(() => {});
   rmSync(DATA_DIR, { recursive: true, force: true });
 });
 
@@ -34,6 +34,6 @@ test("an MPU with no session row is aborted at boot", async () => {
   // answers the sweep has already decided
   server = await startServer({ DATA_DIR });
 
-  const after = await s3parts.listUploads(env.BUCKET_MASTER);
+  const after = await s3parts.listUploads(env.BUCKET_RAW);
   expect(after.some((u) => u.uploadId === uploadId)).toBe(false);
 }, 60_000);

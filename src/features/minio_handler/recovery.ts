@@ -3,6 +3,7 @@ import { log } from "../../lib/logger";
 import { tracker, type PartRow, type SessionRow } from "../../lib/db/minio_tracker";
 import { minio } from "../../lib/minio_storage/clients";
 import { s3parts, type RemotePart } from "../../lib/minio_storage/s3sdk";
+import { rawKey } from "./paths";
 import { finalizeRecording } from "./service";
 
 export interface RecoveryPlan {
@@ -91,7 +92,7 @@ export async function recoveryBoot(): Promise<void> {
 // re-initiate can never race the sweep (audit fix F5).
 async function sweepOrphans() {
   const known = tracker.uploadIds();
-  for (const bucket of [env.BUCKET_MASTER, env.BUCKET_CLIP]) {
+  for (const bucket of [env.BUCKET_RAW]) {
     for (const up of await s3parts.listUploads(bucket)) {
       if (!known.has(up.uploadId)) {
         await s3parts.abort(bucket, up.key, up.uploadId);
@@ -106,7 +107,7 @@ async function recoverSession(session: SessionRow) {
 
   // crash between ledger insert and initiate: row exists, upload never opened
   if (!cur.upload_id) {
-    const uploadId = await s3parts.initiate(cur.bucket!, cur.object_key!);
+    const uploadId = await s3parts.initiate(cur.bucket!, rawKey(cur.kind, cur.object_key!));
     tracker.setRecording(cur.id, uploadId);
     log.info("recovery re-initiated upload", { session: cur.id });
     return;
@@ -133,7 +134,7 @@ async function recoverSession(session: SessionRow) {
 
 async function listPartsOrNull(session: SessionRow): Promise<RemotePart[] | null> {
   try {
-    return await s3parts.listParts(session.bucket!, session.object_key!, session.upload_id!);
+    return await s3parts.listParts(session.bucket!, rawKey(session.kind, session.object_key!), session.upload_id!);
   } catch (err) {
     if (String(err).includes("NoSuchUpload")) return null;
     throw err;
@@ -146,7 +147,7 @@ async function listPartsOrNull(session: SessionRow): Promise<RemotePart[] | null
 async function healVanishedUpload(session: SessionRow) {
   if (session.status === "stopping") {
     try {
-      const stat = await minio.statObject(session.bucket!, session.object_key!);
+      const stat = await minio.statObject(session.bucket!, rawKey(session.kind, session.object_key!));
       tracker.setCompleted(session.id, stat.size);
       tracker.enqueueJob(session.id, "finalize");
       log.info("recovery found completed object", { session: session.id, bytes: stat.size });
@@ -157,7 +158,7 @@ async function healVanishedUpload(session: SessionRow) {
     return;
   }
   tracker.demotePartsFrom(session.id, 1, -1);
-  const uploadId = await s3parts.initiate(session.bucket!, session.object_key!);
+  const uploadId = await s3parts.initiate(session.bucket!, rawKey(session.kind, session.object_key!));
   tracker.setRecording(session.id, uploadId);
   log.warn("recovery: upload vanished, re-initiated from zero", { session: session.id });
 }

@@ -43,7 +43,7 @@ test(
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appSessionId: "session-e2e-happy", kind: "master" }),
+      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 101 }),
     });
     expect(createRes.status).toBe(201);
     const { data: created } = await json(createRes);
@@ -83,34 +83,36 @@ test(
     expect(status.status).toBe("finalizing");
     expect(status.durableThrough).toBe(SEG_COUNT - 1);
 
-    const key = `recordings/${id}/master.ts`;
-    const stat = await minio.statObject(env.BUCKET_MASTER, key);
+    const base = `projects/1/sessions/1/recordings/101`;
+    const key = `${base}/master.ts`;
+    const stat = await minio.statObject(env.BUCKET_RAW, key);
     const total = segBytes.reduce((n, b) => n + b.byteLength, 0);
     expect(stat.size).toBe(total);
 
+    // one prefix-list walks the whole recording
     const listed: string[] = [];
-    for await (const obj of minio.listObjects(env.BUCKET_MASTER, `recordings/${id}/`, false)) {
+    for await (const obj of minio.listObjects(env.BUCKET_RAW, `${base}/`, false)) {
       listed.push(obj.name);
     }
     expect(listed).toEqual([key]);
 
     const objectBytes = new Uint8Array(
-      await new Response(await minio.getObject(env.BUCKET_MASTER, key)).arrayBuffer(),
+      await new Response(await minio.getObject(env.BUCKET_RAW, key)).arrayBuffer(),
     );
     expect(sha256(objectBytes)).toBe(sha256Concat(segBytes));
 
-    await minio.removeObject(env.BUCKET_MASTER, key);
+    await minio.removeObject(env.BUCKET_RAW, key);
   },
   180_000,
 );
 
 test(
-  "duplicate create for same appSessionId+kind → 409",
+  "duplicate create for same identity → 409",
   async () => {
     const res = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appSessionId: "session-e2e-happy", kind: "master" }),
+      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 101 }),
     });
     expect(res.status).toBe(409);
     const body = await json(res);
@@ -129,7 +131,7 @@ test(
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appSessionId: "session-e2e-validation", kind: "clip" }),
+      body: JSON.stringify({ kind: "clip", projectId: 1, sessionId: 1, itemId: 1, clipId: 201 }),
     });
     const id = (await json(createRes)).data.id;
 
@@ -142,7 +144,7 @@ test(
     const badBody = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appSessionId: "x" }),
+      body: JSON.stringify({ kind: "master", projectId: 1 }),
     });
     expect(badBody.status).toBe(400);
 
@@ -162,7 +164,7 @@ test(
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appSessionId: "session-e2e-heartbeat", kind: "clip" }),
+      body: JSON.stringify({ kind: "clip", projectId: 1, sessionId: 1, itemId: 1, clipId: 202 }),
     });
     const id = (await json(createRes)).data.id;
     const res = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/heartbeat`, { method: "POST" });
@@ -179,7 +181,7 @@ test(
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appSessionId: "session-e2e-order", kind: "master" }),
+      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 103 }),
     });
     expect(createRes.status).toBe(201);
     const id = (await json(createRes)).data.id;
@@ -198,16 +200,16 @@ test(
     const stopRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/stop`, { method: "POST" });
     expect(stopRes.status).toBe(202);
 
-    const key = `recordings/${id}/master.ts`;
-    const stat = await minio.statObject(env.BUCKET_MASTER, key);
+    const key = `projects/1/sessions/1/recordings/103/master.ts`;
+    const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(segBytes.reduce((n, b) => n + b.byteLength, 0));
 
     const objectBytes = new Uint8Array(
-      await new Response(await minio.getObject(env.BUCKET_MASTER, key)).arrayBuffer(),
+      await new Response(await minio.getObject(env.BUCKET_RAW, key)).arrayBuffer(),
     );
     expect(sha256(objectBytes)).toBe(sha256Concat(segBytes)); // each index present exactly once
 
-    await minio.removeObject(env.BUCKET_MASTER, key);
+    await minio.removeObject(env.BUCKET_RAW, key);
   },
   180_000,
 );

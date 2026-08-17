@@ -40,11 +40,11 @@ async function postSeg(s: TestServer, id: string, idx: number) {
   return (await json(res)).data.durableThrough as number;
 }
 
-async function createSession(s: TestServer, appSessionId: string) {
+async function createSession(s: TestServer, recordingId: number) {
   const res = await fetch(`${s.baseUrl}/api/minio_handler/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ appSessionId, kind: "master" }),
+    body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId }),
   });
   expect(res.status).toBe(201);
   return (await json(res)).data.id as string;
@@ -77,7 +77,7 @@ test(
   async () => {
     const s1 = await startServer({ PART_SIZE_BYTES: PART, DATA_DIR: DATA_DIR_CRASH });
     servers.push(s1);
-    const id = await createSession(s1, "session-e2e-crash");
+    const id = await createSession(s1, 501);
 
     // send until at least one part is durable, then stop sending
     let durable = -1;
@@ -101,16 +101,16 @@ test(
     expect(stopRes.status, stopBody).toBe(202);
     expect(JSON.parse(stopBody).data.status).toBe("finalizing");
 
-    const key = `recordings/${id}/master.ts`;
-    const stat = await minio.statObject(env.BUCKET_MASTER, key);
+    const key = `projects/1/sessions/1/recordings/501/master.ts`;
+    const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(segBytes.reduce((n, b) => n + b.byteLength, 0));
 
     const objectBytes = new Uint8Array(
-      await new Response(await minio.getObject(env.BUCKET_MASTER, key)).arrayBuffer(),
+      await new Response(await minio.getObject(env.BUCKET_RAW, key)).arrayBuffer(),
     );
     expect(sha256(objectBytes)).toBe(sha256Concat(segBytes)); // seamless vs uninterrupted run
 
-    await minio.removeObject(env.BUCKET_MASTER, key);
+    await minio.removeObject(env.BUCKET_RAW, key);
   },
   180_000,
 );
@@ -126,7 +126,7 @@ test(
       RESUME_GRACE_MINUTES: "0.05",
     });
     servers.push(s);
-    const id = await createSession(s, "session-e2e-stale");
+    const id = await createSession(s, 502);
 
     let durable = -1;
     for (let i = 0; i < SEG_COUNT && durable < 0; i++) {
@@ -140,16 +140,16 @@ test(
     expect(final.durableThrough).toBe(durable);
 
     // object = exactly the durable prefix (RAM-buffered tail was never durable)
-    const key = `recordings/${id}/master.ts`;
+    const key = `projects/1/sessions/1/recordings/502/master.ts`;
     const prefix = segBytes.slice(0, durable + 1);
-    const stat = await minio.statObject(env.BUCKET_MASTER, key);
+    const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(prefix.reduce((n, b) => n + b.byteLength, 0));
     const objectBytes = new Uint8Array(
-      await new Response(await minio.getObject(env.BUCKET_MASTER, key)).arrayBuffer(),
+      await new Response(await minio.getObject(env.BUCKET_RAW, key)).arrayBuffer(),
     );
     expect(sha256(objectBytes)).toBe(sha256Concat(prefix));
 
-    await minio.removeObject(env.BUCKET_MASTER, key);
+    await minio.removeObject(env.BUCKET_RAW, key);
   },
   120_000,
 );

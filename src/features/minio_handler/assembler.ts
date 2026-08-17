@@ -2,6 +2,7 @@ import { env } from "../../config/env";
 import { AppError } from "../../lib/error";
 import { tracker, type SessionRow } from "../../lib/db/minio_tracker";
 import { s3parts, type S3Parts } from "../../lib/minio_storage/s3sdk";
+import { rawKey } from "./paths";
 
 // Storage surface the assembler needs — injectable so unit tests run flush
 // logic against in-memory fakes (no MinIO, no sqlite rows).
@@ -36,12 +37,15 @@ export class Assembler {
   private readonly store: AssemblerStore;
   private readonly partSize: number;
   private readonly cap: number;
+  private readonly mpuKey: string;
 
   constructor(private session: SessionRow, deps: AssemblerDeps = {}) {
     this.ops = deps.ops ?? s3parts;
     this.store = deps.store ?? tracker;
     this.partSize = deps.partSizeBytes ?? env.PART_SIZE_BYTES;
     this.cap = deps.bufferCapBytes ?? env.BUFFER_CAP_BYTES;
+    // MPU target: raw leaf derived from the stored base key (paths.ts owns shapes)
+    this.mpuKey = rawKey(session.kind, session.object_key!);
     // Resume counter from the ledger — snake_case rows, matching tracker.part()'s shape.
     this.nextPartNumber = (this.store.parts(session.id).at(-1)?.part_number ?? 0) + 1;
   }
@@ -101,7 +105,7 @@ export class Assembler {
       try {
         const etag = await this.ops.uploadPart(
           this.session.bucket!,
-          this.session.object_key!,
+          this.mpuKey,
           this.session.upload_id!,
           this.nextPartNumber,
           body,

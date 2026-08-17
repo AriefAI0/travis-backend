@@ -42,8 +42,9 @@ function fakeOps() {
 function makeAssembler(store: AssemblerStore, ops: Pick<S3Parts, "uploadPart">, partSize: number, cap = 100_000) {
   const session = {
     id: crypto.randomUUID(),
-    bucket: "b",
-    object_key: "k",
+    kind: "master" as const,
+    bucket: "travis-raw",
+    object_key: "projects/9/sessions/9/recordings/9",
     upload_id: "u",
     durable_through: -1,
   } as unknown as SessionRow;
@@ -132,8 +133,9 @@ test("a fresh assembler over an existing ledger resumes part numbering (restart)
   const ops = fakeOps();
   const session = {
     id: crypto.randomUUID(),
-    bucket: "b",
-    object_key: "k",
+    kind: "master" as const,
+    bucket: "travis-raw",
+    object_key: "projects/9/sessions/9/recordings/9",
     upload_id: "u",
     durable_through: -1,
   } as unknown as SessionRow;

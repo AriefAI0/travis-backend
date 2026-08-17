@@ -5,10 +5,8 @@ const schema = z.object({
   MINIO_ENDPOINT: z.string().url(),
   MINIO_ACCESS_KEY: z.string().min(1),
   MINIO_SECRET_KEY: z.string().min(1),
-  BUCKET_MASTER: z.string().min(1).default("travis-media"),
-  BUCKET_CLIP: z.string().min(1).default("travis-clip"),
-  BUCKET_HLS: z.string().min(1).default("travis-hls"),
-  BUCKET_MKV: z.string().min(1).default("travis-mkv"),
+  BUCKET_RAW: z.string().min(1).default("travis-raw"),
+  BUCKET_MEDIA: z.string().min(1).default("travis-media"),
   BUCKET_THUMBNAILS: z.string().min(1).default("travis-thumbs"),
   PART_SIZE_BYTES: z.coerce.number().int().positive().default(16_777_216),
   BUFFER_CAP_BYTES: z.coerce.number().int().positive().default(67_108_864),
@@ -35,10 +33,4 @@ if (!parsed.success) {
 export const env = parsed.data;
 
 // Every bucket the server owns. All are ensured to exist at boot.
-export const buckets = [
-  env.BUCKET_MASTER,
-  env.BUCKET_CLIP,
-  env.BUCKET_HLS,
-  env.BUCKET_MKV,
-  env.BUCKET_THUMBNAILS,
-] as const;
+export const buckets = [env.BUCKET_RAW, env.BUCKET_MEDIA, env.BUCKET_THUMBNAILS] as const;

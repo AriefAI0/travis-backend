@@ -25,7 +25,7 @@ console.log(`server up on ${server.baseUrl}`);
 const create = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ appSessionId: "demo-recording", kind: "master" }),
+  body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 901 }),
 });
 if (create.status !== 201) throw new Error(`create failed: ${create.status} ${await create.text()}`);
 const id = (await json<{ data: { id: string } }>(create)).data.id;
@@ -66,10 +66,9 @@ const arts = (await json<{ data: any }>(
 )).data;
 
 console.log(`\nfinalized in MinIO — duration ${(arts.durationMs / 1000).toFixed(1)}s, objects (left for you):`);
-console.log(`  travis-media   recordings/${id}/master.ts   raw sewn TS — plays clean in VLC`);
-console.log(`  travis-mkv     ${id}.mkv                      finalized video — plays anywhere`);
-console.log(`  travis-hls     ${id}/index.m3u8 + ${id}/media.ts`);
-console.log(`  travis-thumbs  ${id}.jpg`);
+console.log(`  travis-raw     projects/1/sessions/1/recordings/901/master.ts   raw sewn TS — plays clean in VLC`);
+console.log(`  travis-media   .../recordings/901/master.mkv + hls/              finalized video — plays anywhere`);
+console.log(`  travis-thumbs  .../recordings/901/thumb.jpg                      thumbnail`);
 console.log(`\npresigned URLs (valid 7 days — MinIO console objects never expire):`);
 for (const [label, url] of [
   ["mkv", arts.mkv],

@@ -88,7 +88,7 @@ test(
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appSessionId: "session-e2e-backpressure", kind: "master" }),
+      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 401 }),
     });
     expect(createRes.status).toBe(201);
     const id = ((await createRes.json()) as { data: { id: string } }).data.id;
@@ -103,7 +103,7 @@ test(
     const createWhileDown = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appSessionId: "session-e2e-create-down", kind: "master" }),
+      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 402 }),
     });
     expect(createWhileDown.status).toBe(503);
 
@@ -140,11 +140,11 @@ test(
     expect(stopRes.status, stopBody).toBe(202);
 
     // object is byte-identical to the uninterrupted equivalent
-    const key = `recordings/${id}/master.ts`;
-    const stat = await minio.statObject(env.BUCKET_MASTER, key);
+    const key = `projects/1/sessions/1/recordings/401/master.ts`;
+    const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(segBytes.reduce((n, b) => n + b.byteLength, 0));
     const objectBytes = new Uint8Array(
-      await new Response(await minio.getObject(env.BUCKET_MASTER, key)).arrayBuffer(),
+      await new Response(await minio.getObject(env.BUCKET_RAW, key)).arrayBuffer(),
     );
     expect(sha256(objectBytes)).toBe(sha256Concat(segBytes));
 
@@ -164,11 +164,12 @@ test(
     const manifest = await (await fetch(manifestUrl)).text();
     expect(manifest).toContain("media.ts");
 
-    await minio.removeObject(env.BUCKET_MASTER, key);
-    await minio.removeObject(env.BUCKET_MKV, `${id}.mkv`);
-    await minio.removeObject(env.BUCKET_HLS, `${id}/index.m3u8`);
-    await minio.removeObject(env.BUCKET_HLS, `${id}/media.ts`);
-    await minio.removeObject(env.BUCKET_THUMBNAILS, `${id}.jpg`);
+    const base = `projects/1/sessions/1/recordings/401`;
+    await minio.removeObject(env.BUCKET_RAW, key);
+    await minio.removeObject(env.BUCKET_MEDIA, `${base}/master.mkv`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${base}/hls/index.m3u8`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${base}/hls/media.ts`);
+    await minio.removeObject(env.BUCKET_THUMBNAILS, `${base}/thumb.jpg`);
   },
   300_000,
 );

@@ -4,19 +4,27 @@ import { AppError } from "../../lib/error";
 import { ok } from "../../lib/response";
 import { appendSegment, createSession, getArtifacts, getSessionStatus, heartbeat, stopSession } from "./service";
 
-const createBody = z.object({
-  appSessionId: z.string().min(1),
-  kind: z.enum(["master", "clip"]),
-});
+// integer DB ids from the app side
+const id = z.number().int().positive();
+
+// master: one composited stream; clip: one evidence clip (no source level)
+const createBody = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("master"), projectId: id, sessionId: id, recordingId: id }),
+  z.object({ kind: z.literal("clip"), projectId: id, sessionId: id, itemId: id, clipId: id }),
+]);
 
 export const minioHandlerRoutes = new Hono();
 
 minioHandlerRoutes.post("/api/minio_handler/sessions", async (c) => {
   const parsed = createBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
-    throw new AppError(400, "bad_request", "body must be { appSessionId: string, kind: 'master' | 'clip' }");
+    throw new AppError(
+      400,
+      "bad_request",
+      "body must be { kind: 'master', projectId, sessionId, recordingId } or { kind: 'clip', projectId, sessionId, itemId, clipId }",
+    );
   }
-  const rec = await createSession(parsed.data.appSessionId, parsed.data.kind);
+  const rec = await createSession(parsed.data);
   return ok(c, rec, 201);
 });
 

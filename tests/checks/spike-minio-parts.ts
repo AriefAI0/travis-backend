@@ -3,7 +3,7 @@
 import { minio } from "../../src/lib/minio_storage/clients";
 import { env } from "../../src/config/env";
 
-const bucket = env.BUCKET_MASTER;
+const bucket = env.BUCKET_RAW;
 const key = `spikes/spike-minio-parts-${Date.now()}.ts`;
 const c = minio as any;
 

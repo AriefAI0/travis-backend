@@ -23,7 +23,7 @@ const s1 = await startServer({ PART_SIZE_BYTES: PART, DATA_DIR });
 const create = await fetch(`${s1.baseUrl}/api/minio_handler/sessions`, {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ appSessionId: "spike-crash", kind: "master" }),
+  body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 601 }),
 });
 const id = (await json<{ data: { id: string } }>(create)).data.id;
 
@@ -55,7 +55,7 @@ console.log("stop:", stop.status, await stop.text());
 dump("after-stop");
 
 // remove the zeros master object — its finalize job would fail on non-media bytes anyway
-await minio.removeObject(env.BUCKET_MASTER, `recordings/${id}/master.ts`);
+await minio.removeObject(env.BUCKET_RAW, `projects/1/sessions/1/recordings/601/master.ts`);
 
 await s2.stop();
 rmSync(DATA_DIR, { recursive: true, force: true });

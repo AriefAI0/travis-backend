@@ -43,7 +43,7 @@ a bad value.
 ```
 GET  /health                                  liveness
 GET  /health/ready                            db+minio readiness
-POST /api/minio_handler/sessions              create {appSessionId, kind}
+POST /api/minio_handler/sessions              create {kind, projectId, sessionId, recordingId | itemId, clipId}
 GET  /api/minio_handler/sessions/:id          status (durableThrough, artifacts)
 POST /api/minio_handler/sessions/:id/segments?index=N   upload one segment
 POST /api/minio_handler/sessions/:id/heartbeat
