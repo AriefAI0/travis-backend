@@ -12,7 +12,8 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "test:live": "bun run tests/checks/run-demo-recording.ts"
   },
   "dependencies": {
     "hono": "^4.13.2",
