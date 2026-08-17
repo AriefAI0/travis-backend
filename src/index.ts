@@ -5,7 +5,7 @@ import { ensureBuckets } from "./lib/minio_storage/clients";
 import { registerJobHandler, startQueueWorker } from "./lib/jobs/worker";
 import { recoveryBoot } from "./features/minio_handler/recovery";
 import { startStaleTimer } from "./features/minio_handler/stale";
-import { finalizeJob } from "./features/minio_handler/jobs/finalize";
+import { finalizeJob } from "./features/minio_handler/jobs/ffmpeg_finalize";
 
 // flow: buckets > orphan sweep > recover sessions > stale timer + job runner > serve.
 // Boot even when MinIO is down — /health/ready is what reports it.

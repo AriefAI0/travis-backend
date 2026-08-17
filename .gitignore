@@ -39,6 +39,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 skills-lock.json
 .planning/
+docs/
 .debug/ 
 skills-lock.json
 .claude/
