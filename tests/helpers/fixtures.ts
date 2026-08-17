@@ -1,5 +1,7 @@
 // Real MPEG-TS fixtures — H.264 ultrafast + AAC, ~2s keyframe-aligned segments
 // (synthetic bytes can't survive ffmpeg remux in later phases; spec Testing).
+// initial_discontinuity marks each segment's CC restart so players resync
+// without blipping; 128k audio because 64k mono aac emits one glitchy frame.
 export async function generateSegments(dir: string, count: number): Promise<string[]> {
   await Bun.$`mkdir -p ${dir}`.quiet();
   const duration = count * 2 + 4;
@@ -28,11 +30,13 @@ export async function generateSegments(dir: string, count: number): Promise<stri
       "-c:a",
       "aac",
       "-b:a",
-      "64k",
+      "128k",
       "-f",
       "segment",
       "-segment_time",
       "2",
+      "-segment_format_options",
+      "mpegts_flags=+initial_discontinuity",
       `${dir}/seg%05d.ts`,
     ],
     { stdout: "ignore", stderr: "pipe" },

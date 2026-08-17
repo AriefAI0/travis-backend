@@ -66,7 +66,7 @@ const arts = (await json<{ data: any }>(
 )).data;
 
 console.log(`\nfinalized in MinIO — duration ${(arts.durationMs / 1000).toFixed(1)}s, objects (left for you):`);
-console.log(`  travis-media   recordings/${id}/master.ts   raw sewn TS — VLC: continuous beep`);
+console.log(`  travis-media   recordings/${id}/master.ts   raw sewn TS — plays clean in VLC`);
 console.log(`  travis-mkv     ${id}.mkv                      finalized video — plays anywhere`);
 console.log(`  travis-hls     ${id}/index.m3u8 + ${id}/media.ts`);
 console.log(`  travis-thumbs  ${id}.jpg`);
