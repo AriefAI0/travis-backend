@@ -49,3 +49,8 @@ POST /api/minio_handler/sessions/:id/segments?index=N   upload one segment
 POST /api/minio_handler/sessions/:id/heartbeat
 POST /api/minio_handler/sessions/:id/stop     202 -> finalize job
 ```
+## DB CLI command 
+```
+bun run db:generate # creates ./migrations/*.sql — REVIEW the SQL
+bun run db:push # applies it to the travis database
+```
