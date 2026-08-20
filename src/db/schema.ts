@@ -392,8 +392,8 @@ export const resultGvi = pgTable(
       .primaryKey()
       .generatedByDefaultAsIdentity()
       .references(() => result.resultId, { onDelete: "cascade" }),
-    gviCp: integer("gvi_cp"),
-    gviUt: integer("gvi_ut"),
+    gviCP: integer("gvi_cp"),
+    gviUT: integer("gvi_ut"),
     condition: gviCondition("condition").notNull(),
 
     ...createdAt,
