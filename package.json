@@ -4,7 +4,9 @@
   "type": "module",
   "private": true,
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.10"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -13,11 +15,16 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "test": "bun test",
-    "test:live": "bun run tests/checks/run-demo-recording.ts"
+    "test:live": "bun run tests/checks/run-demo-recording.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.13.2",
     "minio": "^8.0.7",
+    "pg": "^8.23.0",
     "zod": "^4.4.3"
   }
 }

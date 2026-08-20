@@ -6,7 +6,7 @@ import { minio } from "../../lib/minio_storage/clients";
 
 export interface DepCheck {
   name: string;
-  check: () => boolean;
+  check: () => boolean | Promise<boolean>;
 }
 
 // Factory form: tests inject an unreachable client to exercise the 503 path.
@@ -24,7 +24,7 @@ export function healthRoutesFor(client: Client, deps: DepCheck[] = []) {
         checks[bucket] = false;
       }
     }
-    for (const dep of deps) checks[dep.name] = dep.check();
+    for (const dep of deps) checks[dep.name] = await dep.check();
     const ready = Object.values(checks).every(Boolean);
     return ok(c, { ready, checks }, ready ? 200 : 503);
   });

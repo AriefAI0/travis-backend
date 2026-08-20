@@ -2,6 +2,12 @@ import { z } from "zod";
 
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(8788),
+  DATABASE_URL: z
+    .string()
+    .min(1)
+    .refine((v) => v.startsWith("postgres://") || v.startsWith("postgresql://"), {
+      message: "must start with postgres:// or postgresql://",
+    }),
   MINIO_ENDPOINT: z.string().url(),
   MINIO_ACCESS_KEY: z.string().min(1),
   MINIO_SECRET_KEY: z.string().min(1),

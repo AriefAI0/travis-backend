@@ -82,7 +82,7 @@ export async function generateSegments(dir: string, count: number): Promise<stri
     cuts.push(best.pos - (best.pos % 188)); // snap to TS packet boundary
   }
   for (let i = 1; i < cuts.length; i++) {
-    if (cuts[i] <= cuts[i - 1]) throw new Error(`fixture cut not monotonic at ${i}`);
+    if (cuts[i]! <= cuts[i - 1]!) throw new Error(`fixture cut not monotonic at ${i}`);
   }
 
   // slice the continuous stream — bytes are never re-muxed
@@ -90,9 +90,10 @@ export async function generateSegments(dir: string, count: number): Promise<stri
   const edges = [0, ...cuts];
   const paths: string[] = [];
   for (let i = 0; i < count; i++) {
-    if (buf[edges[i]] !== 0x47) throw new Error(`cut ${i} not on a TS sync byte`);
+    const start = edges[i]!; // bounds guaranteed by loop + edges length
+    if (buf[start] !== 0x47) throw new Error(`cut ${i} not on a TS sync byte`);
     const path = `${dir}/seg${String(i).padStart(5, "0")}.ts`;
-    await Bun.write(path, buf.subarray(edges[i], edges[i + 1]));
+    await Bun.write(path, buf.subarray(start, edges[i + 1]!));
     paths.push(path);
   }
   await Bun.$`rm -f ${master}`.quiet();
