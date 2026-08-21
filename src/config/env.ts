@@ -24,6 +24,7 @@ const schema = z.object({
   FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
   FFMPEG_CONCURRENCY: z.coerce.number().int().positive().default(1),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });
 
 // Report every invalid/missing var in one shot so a single boot surfaces them all.

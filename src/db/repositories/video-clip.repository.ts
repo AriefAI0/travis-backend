@@ -65,6 +65,13 @@ export const findActiveVideoClipByResultId = async (
     orderBy: asc(videoClip.startOffsetMs),
   })) ?? null;
 
+// open clips across all results (endOffsetMs null = open, regardless of status)
+export const listActiveVideoClipRecords = async (database: DbOrTx = db) =>
+  database.query.videoClip.findMany({
+    where: isNull(videoClip.endOffsetMs),
+    orderBy: asc(videoClip.startOffsetMs),
+  });
+
 export const listVideoClipRecordsByMasterVideoId = async (
   masterVideoId: number,
   database: DbOrTx = db,

@@ -22,6 +22,7 @@ import {
   deleteVideoClipById,
   findVideoClipById,
   findVideoClipPlaybackRowById,
+  listActiveVideoClipRecords,
   listVideoClipPlaybackRowsByResultId,
   listVideoClipPlaybackRowsByResultIds,
   listVideoClipRecords,
@@ -1138,6 +1139,11 @@ export const listUnfinishedVideoClips = async (database?: DbOrTx) =>
     ],
     database,
   );
+
+// active inspections: open clips (endOffsetMs null); status is unreliable
+// because created clips default to 'finalized' until the recorder flips it
+export const listActiveVideoClips = async (database?: DbOrTx) =>
+  listActiveVideoClipRecords(database);
 
 export const deleteVideoClip = async (clipId: number, database?: DbOrTx) =>
   deleteVideoClipById(clipId, database);
