@@ -2,10 +2,10 @@ import { env } from "../../config/env";
 import { AppError } from "../../lib/error";
 import { log } from "../../lib/logger";
 import { tracker, type SessionRow } from "../../lib/db/minio_tracker";
-import { PART_UPLOAD_TTL_SECONDS, presignPartUpload, presignPutObject, s3parts } from "../../lib/minio_storage/s3sdk";
+import { PART_UPLOAD_TTL_SECONDS, presignPartUpload, s3parts } from "../../lib/minio_storage/s3sdk";
 import { mintGetUrl } from "../../lib/minio_storage/mint";
 import { Assembler } from "./assembler";
-import { baseKey, identityString, leafKeys, probeKey, rawKey, type RecordingIdentity } from "./paths";
+import { baseKey, identityString, leafKeys, rawKey, type RecordingIdentity } from "./paths";
 
 const assemblers = new Map<string, Assembler>();
 
@@ -61,10 +61,8 @@ export async function createSession(identity: RecordingIdentity) {
     throw new AppError(503, "storage_unavailable", "MinIO unreachable");
   }
   tracker.setRecording(id, uploadId);
-  // arm-time contract: accumulate threshold + throwaway reachability probe
-  const probeUrl = await presignPutObject(env.BUCKET_RAW, probeKey(id));
   log.info("session opened", { session: id, kind: identity.kind, identity: appSessionId });
-  return { id, status: "recording" as const, partSizeBytes: env.PART_SIZE_BYTES, probeUrl };
+  return { id, status: "recording" as const, partSizeBytes: env.PART_SIZE_BYTES };
 }
 
 export async function appendSegment(id: string, idx: number, bytes: Uint8Array) {

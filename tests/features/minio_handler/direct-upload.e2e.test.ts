@@ -91,11 +91,6 @@ test(
     const id = created.id;
     expect(created.status).toBe("recording");
     expect(created.partSizeBytes).toBe(5 * MB);
-    expect(created.probeUrl).toBeTruthy();
-
-    // arm-time probe: app PUTs 16 bytes directly to MinIO
-    const probe = await fetch(created.probeUrl, { method: "PUT", body: new Uint8Array(16) });
-    expect(probe.status).toBe(200);
 
     // two 5 MiB parts uploaded straight to MinIO via presigned tickets
     const parts: { bytes: Uint8Array; etag: string }[] = [];

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { baseKey, identityString, leafKeys, probeKey, rawKey, timelineKey } from "../../../src/features/minio_handler/paths";
+import { baseKey, identityString, leafKeys, rawKey, timelineKey } from "../../../src/features/minio_handler/paths";
 
 const MASTER = { kind: "master", projectId: 3, sessionId: 12, recordingId: 45 } as const;
 const CLIP = { kind: "clip", projectId: 3, sessionId: 12, itemId: 7, clipId: 45 } as const;
@@ -57,11 +57,5 @@ describe("timelineKey", () => {
   test("zero-pads seconds to 6 digits", () => {
     expect(timelineKey(MASTER_BASE, 0)).toBe(`${MASTER_BASE}/timeline/000000.jpg`);
     expect(timelineKey(MASTER_BASE, 123)).toBe(`${MASTER_BASE}/timeline/000123.jpg`);
-  });
-});
-
-describe("probeKey", () => {
-  test("nests under the _preflight prefix with the session id", () => {
-    expect(probeKey("abc123")).toBe("_preflight/abc123");
   });
 });
