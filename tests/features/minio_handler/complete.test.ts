@@ -111,21 +111,16 @@ test("wrong part number returns 409 wrong_part with expected/received", async ()
   expect(body.received).toBe(3);
 });
 
-test("part under 5 MiB rejected while recording, allowed while stopping", async () => {
+test("small parts are accepted while recording (final drain precedes stop)", async () => {
   const id = newRecording();
   await complete(id, 1, { etag: '"a"', firstIndex: 0, lastIndex: 15, sizeBytes: 16 * MB });
 
+  // the app flushes its sub-threshold tail BEFORE calling stop, while the
+  // session is still 'recording' — the size minimum is MinIO's to enforce
+  // at MPU complete (EntityTooSmall), not the ledger's
   const small = await complete(id, 2, { etag: '"b"', firstIndex: 16, lastIndex: 18, sizeBytes: 4 * MB });
-  expect(small.status).toBe(400);
-  const body = await small.json();
-  expect(body.code).toBe("small_part");
-  expect(body.minimum).toBe(5 * MB);
-  expect(body.sessionStatus).toBe("recording");
-
-  tracker.setStatus(id, "stopping"); // final part at stop time may be small
-  const finalSmall = await complete(id, 2, { etag: '"b"', firstIndex: 16, lastIndex: 18, sizeBytes: 4 * MB });
-  expect(finalSmall.status).toBe(200);
-  expect((await finalSmall.json()).data.durableThrough).toBe(18);
+  expect(small.status).toBe(200);
+  expect((await small.json()).data.durableThrough).toBe(18);
 });
 
 test("inverted range returns 400 bad_range", async () => {

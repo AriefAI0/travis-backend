@@ -175,15 +175,13 @@ test(
     expect(gap.body.code).toBe("out_of_order");
     expect(gap.body.durableThrough).toBe(15);
 
-    // under-minimum part during recording
-    const small = await complete(id, 2, { etag: '"fake"', firstIndex: 16, lastIndex: 20, sizeBytes: 4 * MB });
-    expect(small.status).toBe(400);
-    expect(small.body.code).toBe("small_part");
-    expect(small.body.minimum).toBe(5 * MB);
-
-    await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/stop`, { method: "POST" });
-    await awaitTerminal(id);
-    await minio.removeObject(env.BUCKET_RAW, `projects/1/sessions/1/recordings/9002/master.ts`);
+    // small final part lands while 'recording' — the app drains before stop.
+    // NOT stopped afterwards: a fake etag would wedge the MPU complete with
+    // InvalidPart (in production a lying etag surfaces as a loud stop-time 503).
+    // The orphan sweep aborts this session's MPU on the next boot.
+    const small = await complete(id, 2, { etag: '"fake"', firstIndex: 16, lastIndex: 20, sizeBytes: 64 });
+    expect(small.status).toBe(200);
+    expect(small.body.data.durableThrough).toBe(20);
   },
   60_000,
 );

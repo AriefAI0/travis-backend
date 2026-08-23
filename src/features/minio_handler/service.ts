@@ -105,12 +105,13 @@ export async function reservePart(id: string) {
   return { partNumber, url, expiresInSeconds: PART_UPLOAD_TTL_SECONDS };
 }
 
-// S3 multipart minimum; only the final part at stop time may be smaller.
-const MIN_PART_BYTES = 5 * 1024 * 1024;
-
-// flow: complete > replay check > shape > state > part number > contiguity > size > commit
+// flow: complete > replay check > shape > state > part number > contiguity > commit
 // The gatekeeper: app reports an uploaded part (ETag in hand), server proves the
 // segment range extends the durable prefix exactly, then advances the ledger.
+// No size minimum here: the app flushes sub-threshold parts only on its final
+// drain (before stop), so the session is never 'stopping' yet — and only-the-
+// last-part-may-be-small is enforced absolutely by MinIO's EntityTooSmall at
+// MPU complete time (a loud 503 at stop, never silent byte loss).
 export async function completePart(
   id: string,
   partNumber: number,
@@ -152,13 +153,6 @@ export async function completePart(
       durableThrough: session.durable_through,
       expected: session.durable_through + 1,
       received: body.firstIndex,
-    });
-  }
-  if (body.sizeBytes < MIN_PART_BYTES && session.status !== "stopping") {
-    throw new AppError(400, "small_part", `part is ${body.sizeBytes} bytes, minimum is ${MIN_PART_BYTES}`, {
-      size: body.sizeBytes,
-      minimum: MIN_PART_BYTES,
-      sessionStatus: session.status,
     });
   }
 
