@@ -43,6 +43,14 @@ export async function presignPartUpload(
   return presign("PUT", bucket, key, { partNumber: String(partNumber), uploadId }, expiry);
 }
 
+// Probe tickets live 1 minute: arm-time connectivity check, then worthless.
+export const PROBE_TTL_SECONDS = 60;
+
+// Plain-object PUT ticket (probe URL): proves the app->MinIO path before arming.
+export async function presignPutObject(bucket: string, key: string, expiry = PROBE_TTL_SECONDS): Promise<string> {
+  return presign("PUT", bucket, key, {}, expiry);
+}
+
 function tag(xml: string, name: string): string | null {
   const match = xml.match(new RegExp(`<(?:[a-z]+:)?${name}>([^<]+)<`));
   return match?.[1] ?? null;

@@ -53,3 +53,8 @@ export function leafKeys(kind: "master" | "clip", base: string) {
 export function timelineKey(base: string, seconds: number): string {
   return `${base}/timeline/${String(seconds).padStart(6, "0")}.jpg`;
 }
+
+// throwaway connectivity-test object; 16-byte probes, lifecycle-ignorable
+export function probeKey(sessionId: string): string {
+  return `_preflight/${sessionId}`;
+}
