@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import type { Client } from "minio";
 import { buckets } from "../../config/env";
-import { ok } from "../../lib/response";
 import { minio } from "../../lib/minio_storage/clients";
 
 export interface DepCheck {
@@ -10,10 +9,11 @@ export interface DepCheck {
 }
 
 // Factory form: tests inject an unreachable client to exercise the 503 path.
+// Root probes stay OUTSIDE the {ok,data} envelope — bare JSON for probes.
 export function healthRoutesFor(client: Client, deps: DepCheck[] = []) {
   const routes = new Hono();
 
-  routes.get("/health", (c) => ok(c, { status: "alive" }));
+  routes.get("/health", (c) => c.json({ status: "alive" }));
 
   routes.get("/health/ready", async (c) => {
     const checks: Record<string, boolean> = {};
@@ -26,7 +26,7 @@ export function healthRoutesFor(client: Client, deps: DepCheck[] = []) {
     }
     for (const dep of deps) checks[dep.name] = await dep.check();
     const ready = Object.values(checks).every(Boolean);
-    return ok(c, { ready, checks }, ready ? 200 : 503);
+    return c.json({ ready, checks }, ready ? 200 : 503);
   });
 
   return routes;
