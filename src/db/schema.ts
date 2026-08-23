@@ -1,4 +1,4 @@
-import { pgTable, pgEnum, text, integer, boolean, doublePrecision, timestamp, index, unique,check,} from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, text, integer, boolean, doublePrecision, timestamp, index, unique, uniqueIndex, check,} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /* =================== CHANGABLE ENUMRATIONS =================== */
@@ -96,6 +96,7 @@ export const session = pgTable(
       .references(() => project.projectId, { onDelete: "cascade" }),
 
     name: text("name"),
+    displayNumber: integer("display_number"),
     startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
     endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }),
 
@@ -105,6 +106,10 @@ export const session = pgTable(
   },
   (table) => ({
     idxSessionProjectId: index("idx_session_project_id").on(table.projectId),
+    uniqSessionProjectDisplay: uniqueIndex("uniq_session_project_display").on(
+      table.projectId,
+      table.displayNumber,
+    ),
   })
 );
 
@@ -457,6 +462,9 @@ export const masterVideo = pgTable(
     fileUrl: text("file_url").notNull(),
     thumbnailUrl: text("thumbnail_url"),
 
+   
+    storageStem: text("storage_stem"),
+
     startEpoch: integer("start_epoch").notNull(), // epoch SECONDS, stays an int
     endEpoch: integer("end_epoch"),
     recordingStatus: recordingStatus("recording_status").notNull().default("finalized"),
@@ -491,6 +499,7 @@ export const timelineThumbnail = pgTable(
 
     timestampMs: integer("timestamp_ms").notNull(),
     imagePath: text("image_path").notNull(),
+    storageStem: text("storage_stem"),
     width: integer("width").notNull(),
     height: integer("height").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
@@ -511,7 +520,6 @@ export const videoClip = pgTable(
       .notNull()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
-    // intentionally NO cascade — clips survive master deletion
     masterVideoId: integer("master_video_id")
       .notNull()
       .references(() => masterVideo.masterVideoId),
@@ -520,6 +528,7 @@ export const videoClip = pgTable(
     endOffsetMs: integer("end_offset_ms"),
     clipFileUrl: text("clip_file_url"),
     thumbnailUrl: text("thumbnail_url"),
+    storageStem: text("storage_stem"),
     recordingStatus: recordingStatus("recording_status").notNull().default("finalized"),
     recordingStartedAt: timestamp("recording_started_at", { withTimezone: true, mode: "date" }),
     recordingStoppedAt: timestamp("recording_stopped_at", { withTimezone: true, mode: "date" }),
@@ -546,6 +555,7 @@ export const resultImage = pgTable(
 
     rawUrl: text("raw_url").notNull(),
     annotatedUrl: text("annotated_url"),
+    storageStem: text("storage_stem"),
     remarks: text("remarks"),
   }
 );
