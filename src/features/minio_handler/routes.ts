@@ -2,10 +2,18 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { AppError } from "../../lib/error";
 import { ok } from "../../lib/response";
-import { appendSegment, createSession, getArtifacts, getSessionStatus, heartbeat, reservePart, stopSession } from "./service";
+import { appendSegment, completePart, createSession, getArtifacts, getSessionStatus, heartbeat, reservePart, stopSession } from "./service";
 
 // integer DB ids from the app side
 const id = z.number().int().positive();
+
+// app's receipt of a direct part upload: MinIO's ETag + the range it covers
+const completeBody = z.object({
+  etag: z.string().min(1),
+  firstIndex: z.number().int().nonnegative(),
+  lastIndex: z.number().int().nonnegative(),
+  sizeBytes: z.number().int().positive(),
+});
 
 // master: one composited stream; clip: one evidence clip (no source level)
 const createBody = z.discriminatedUnion("kind", [
@@ -47,6 +55,19 @@ minioHandlerRoutes.post("/api/minio_handler/sessions/:id/segments", async (c) =>
 minioHandlerRoutes.post("/api/minio_handler/sessions/:id/parts", async (c) =>
   ok(c, await reservePart(c.req.param("id"))),
 );
+
+// flow: complete > validate contiguity > commit ETag > advance durable marker
+minioHandlerRoutes.post("/api/minio_handler/sessions/:id/parts/:partNumber/complete", async (c) => {
+  const partNumber = Number(c.req.param("partNumber"));
+  if (!Number.isInteger(partNumber) || partNumber < 1) {
+    throw new AppError(400, "bad_part_number", "partNumber must be an integer >= 1");
+  }
+  const parsed = completeBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    throw new AppError(400, "bad_request", "body must be { etag, firstIndex, lastIndex, sizeBytes }");
+  }
+  return ok(c, await completePart(c.req.param("id"), partNumber, parsed.data));
+});
 
 minioHandlerRoutes.post("/api/minio_handler/sessions/:id/heartbeat", (c) => ok(c, heartbeat(c.req.param("id"))));
 

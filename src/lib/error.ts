@@ -7,6 +7,8 @@ export class AppError extends Error {
     readonly status: ContentfulStatusCode,
     readonly code: string,
     message: string,
+    // machine-readable extras the app branches on (e.g. durableThrough on resync)
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -17,8 +19,8 @@ export const notFound = (what: string) =>
   new AppError(404, "not_found", `${what} not found`);
 
 // RFC 7807-style error body.
-function problem(c: Context, status: ContentfulStatusCode, code: string, title: string) {
-  return c.json({ status, code, title }, status, { "Content-Type": "application/problem+json" });
+function problem(c: Context, status: ContentfulStatusCode, code: string, title: string, details?: Record<string, unknown>) {
+  return c.json({ status, code, title, ...details }, status, { "Content-Type": "application/problem+json" });
 }
 
 // service-layer message -> app error vocabulary (codes steve branches on)
@@ -40,7 +42,7 @@ const pgErrorCode = (err: unknown): string | undefined => {
 
 export const onError: ErrorHandler = (err, c) => {
   if (err instanceof AppError) {
-    return problem(c, err.status, err.code, err.message);
+    return problem(c, err.status, err.code, err.message, err.details);
   }
   const message = err instanceof Error ? err.message : String(err);
   if (WRONG_STATE.test(message)) {

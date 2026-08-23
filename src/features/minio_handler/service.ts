@@ -101,6 +101,69 @@ export async function reservePart(id: string) {
   return { partNumber, url, expiresInSeconds: PART_UPLOAD_TTL_SECONDS };
 }
 
+// S3 multipart minimum; only the final part at stop time may be smaller.
+const MIN_PART_BYTES = 5 * 1024 * 1024;
+
+// flow: complete > replay check > shape > state > part number > contiguity > size > commit
+// The gatekeeper: app reports an uploaded part (ETag in hand), server proves the
+// segment range extends the durable prefix exactly, then advances the ledger.
+export async function completePart(
+  id: string,
+  partNumber: number,
+  body: { etag: string; firstIndex: number; lastIndex: number; sizeBytes: number },
+) {
+  const session = requireSession(id);
+
+  // replay first: an already-committed part sits behind durable_through, so
+  // contiguity would reject it — same etag acks, different etag is app error
+  const existing = tracker.getPart(id, partNumber);
+  if (existing) {
+    if (existing.etag !== body.etag) {
+      throw new AppError(409, "wrong_part", `part ${partNumber} already recorded with a different etag`, {
+        reason: "etag_mismatch",
+        expected: session.next_part_number,
+        received: partNumber,
+      });
+    }
+    return { durableThrough: session.durable_through, nextPartNumber: session.next_part_number };
+  }
+
+  if (body.lastIndex < body.firstIndex) {
+    throw new AppError(400, "bad_range", "lastIndex must be >= firstIndex", {
+      firstIndex: body.firstIndex,
+      lastIndex: body.lastIndex,
+    });
+  }
+  if (["truncating", "finalizing", "finalized"].includes(session.status)) {
+    throw new AppError(409, "wrong_state", `recording is ${session.status}`, { status: session.status });
+  }
+  if (partNumber !== session.next_part_number) {
+    throw new AppError(409, "wrong_part", `expected part ${session.next_part_number}, got ${partNumber}`, {
+      expected: session.next_part_number,
+      received: partNumber,
+    });
+  }
+  if (body.firstIndex !== session.durable_through + 1) {
+    throw new AppError(409, "out_of_order", `expected firstIndex ${session.durable_through + 1}, got ${body.firstIndex}`, {
+      durableThrough: session.durable_through,
+      expected: session.durable_through + 1,
+      received: body.firstIndex,
+    });
+  }
+  if (body.sizeBytes < MIN_PART_BYTES && session.status !== "stopping") {
+    throw new AppError(400, "small_part", `part is ${body.sizeBytes} bytes, minimum is ${MIN_PART_BYTES}`, {
+      size: body.sizeBytes,
+      minimum: MIN_PART_BYTES,
+      sessionStatus: session.status,
+    });
+  }
+
+  tracker.reportPart(id, { partNumber, etag: body.etag, sizeBytes: body.sizeBytes, firstIdx: body.firstIndex, lastIdx: body.lastIndex });
+  tracker.touch(id);
+  log.info("part reported", { session: id, partNumber, firstIndex: body.firstIndex, lastIndex: body.lastIndex });
+  return { durableThrough: body.lastIndex, nextPartNumber: partNumber + 1 };
+}
+
 export function getSessionStatus(id: string) {
   const session = requireSession(id);
   return {

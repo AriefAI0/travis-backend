@@ -221,6 +221,37 @@ export const tracker = {
       .all(sessionId) as PartRow[];
   },
 
+  getPart(sessionId: string, partNumber: number): PartRow | undefined {
+    return db
+      .query("SELECT part_number, etag, size_bytes, first_idx, last_idx FROM parts WHERE session_id = ? AND part_number = ?")
+      .get(sessionId, partNumber) as PartRow | undefined;
+  },
+
+  // New-flow complete: part row + segment flips + durableThrough + reservation
+  // counter move in ONE transaction. ON CONFLICT/MAX guards make a replay after
+  // a crash between commit and counter-increment converge instead of sticking.
+  reportPart(
+    sessionId: string,
+    part: { partNumber: number; etag: string; sizeBytes: number; firstIdx: number; lastIdx: number },
+  ) {
+    db.transaction(() => {
+      db.run(
+        `INSERT INTO parts (session_id, part_number, etag, size_bytes, first_idx, last_idx) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id, part_number) DO NOTHING`,
+        [sessionId, part.partNumber, part.etag, part.sizeBytes, part.firstIdx, part.lastIdx],
+      );
+      db.run(
+        `UPDATE segments SET state = 'in_part' WHERE session_id = ? AND idx >= ? AND idx <= ?`,
+        [sessionId, part.firstIdx, part.lastIdx],
+      );
+      db.run(`UPDATE sessions SET durable_through = MAX(durable_through, ?), next_part_number = MAX(next_part_number, ?) WHERE id = ?`, [
+        part.lastIdx,
+        part.partNumber + 1,
+        sessionId,
+      ]);
+    })();
+  },
+
   // Part row + segment flips + durableThrough move atomically: a crash can never
   // leave a part tracked without its segments marked (the reverse window is healed
   // by boot recovery trusting ListParts).
