@@ -76,6 +76,8 @@ export async function appendSegment(id: string, idx: number, bytes: Uint8Array) 
   return { durableThrough: assembler.durableThrough, receivedIndex: idx };
 }
 
+// heartbeat drives staleness: touching here is what keeps a session live,
+// even when no bytes flow (parts are large, uploads are bursty)
 export function heartbeat(id: string) {
   const session = requireSession(id);
   requireUploadable(session);
