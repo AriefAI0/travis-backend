@@ -4,18 +4,22 @@ import { tracker, type JobRow } from "../db/minio_tracker";
 
 // Heavy work never blocks a request: routes enqueue, this loop works the queue.
 export type JobHandler = (job: JobRow) => Promise<void>;
+export type JobExhaustedHook = (job: JobRow) => void;
 
 const handlers = new Map<string, JobHandler>();
+const exhaustedHooks = new Map<string, JobExhaustedHook>();
 const MAX_ATTEMPTS = 3;
 const POLL_MS = 1000;
 
 // features register their job types at boot; dispatch is by type name.
-export function registerJobHandler(type: string, handler: JobHandler) {
+// onExhausted (optional): feature-level fallout when retries are spent.
+export function registerJobHandler(type: string, handler: JobHandler, onExhausted?: JobExhaustedHook) {
   handlers.set(type, handler);
+  if (onExhausted) exhaustedHooks.set(type, onExhausted);
 }
 
 // claim > dispatch > settle. True when a job ran (caller keeps draining).
-async function workOnce(): Promise<boolean> {
+export async function workOnce(): Promise<boolean> {
   const job = tracker.claimNextJob();
   if (!job) return false;
 
@@ -34,6 +38,7 @@ async function workOnce(): Promise<boolean> {
     const msg = String(err).slice(0, 500);
     if (job.attempts >= MAX_ATTEMPTS) {
       tracker.finishJob(job.id, "failed", msg);
+      exhaustedHooks.get(job.type)?.(job); // e.g. session flips to finalization_failed
       log.error("job failed permanently", { job: job.id, type: job.type, session: job.session_id, err: msg });
     } else {
       tracker.requeueJob(job.id, msg);

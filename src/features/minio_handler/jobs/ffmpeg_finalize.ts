@@ -68,6 +68,16 @@ function ffprobePath() {
   return env.FFMPEG_PATH.endsWith("ffmpeg") ? env.FFMPEG_PATH.slice(0, -6) + "ffprobe" : "ffprobe";
 }
 
+// Retries exhausted: the session is terminally dead, not endlessly 'finalizing' —
+// the app's poll loop sees finalization_failed and stops waiting.
+export function finalizeExhausted(job: JobRow) {
+  const session = tracker.getSession(job.session_id);
+  if (session && session.status === "finalizing") {
+    tracker.setStatus(session.id, "finalization_failed");
+    log.error("finalization permanently failed", { session: session.id });
+  }
+}
+
 async function probeDurationMs(path: string): Promise<number> {
   const proc = Bun.spawn([ffprobePath(), "-v", "error", "-show_entries", "format=duration", "-of", "json", path], {
     stdout: "pipe",
