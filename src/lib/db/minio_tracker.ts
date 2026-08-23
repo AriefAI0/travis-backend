@@ -17,12 +17,13 @@ db.run(`CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   app_session_id TEXT NOT NULL,
   kind TEXT NOT NULL CHECK(kind IN ('master','clip')),
-  status TEXT NOT NULL,
+  status TEXT NOT NULL, -- created|recording|stale|stopping|truncating|finalizing|finalized|finalization_failed
   upload_id TEXT,
   bucket TEXT,
   object_key TEXT,
   durable_through INTEGER NOT NULL DEFAULT -1,
   highest_index_seen INTEGER NOT NULL DEFAULT -1,
+  next_part_number INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER,
   stopped_at INTEGER,
   last_seen_at INTEGER,
@@ -31,6 +32,12 @@ db.run(`CREATE TABLE IF NOT EXISTS sessions (
   size_bytes INTEGER,
   UNIQUE(app_session_id, kind)
 )`);
+// In-place upgrade: dev DBs predating the reservation counter gain the column.
+try {
+  db.run("ALTER TABLE sessions ADD COLUMN next_part_number INTEGER NOT NULL DEFAULT 1");
+} catch (e) {
+  if (!String(e).includes("duplicate column name")) throw e; // fresh DBs already have it
+}
 db.run(`CREATE TABLE IF NOT EXISTS segments (
   session_id TEXT,
   idx INTEGER,
@@ -67,6 +74,7 @@ export interface SessionRow {
   object_key: string | null;
   durable_through: number;
   highest_index_seen: number;
+  next_part_number: number;
   created_at: number | null;
   stopped_at: number | null;
   last_seen_at: number | null;
@@ -133,6 +141,19 @@ export const tracker = {
 
   setHighestSeen(id: string, index: number) {
     db.run(`UPDATE sessions SET highest_index_seen = MAX(highest_index_seen, ?) WHERE id = ?`, [index, id]);
+  },
+
+  // Reservation counter: which part number the app should upload next.
+  getNextPartNumber(id: string): number | undefined {
+    const row = db.query("SELECT next_part_number FROM sessions WHERE id = ?").get(id) as
+      | { next_part_number: number }
+      | undefined;
+    return row?.next_part_number;
+  },
+
+  // Sticky until a part is reported complete: reserve never advances it.
+  incrementPartNumber(id: string) {
+    db.run(`UPDATE sessions SET next_part_number = next_part_number + 1 WHERE id = ?`, [id]);
   },
 
   setCompleted(id: string, sizeBytes: number, truncated = false) {
