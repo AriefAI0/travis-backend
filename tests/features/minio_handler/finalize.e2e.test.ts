@@ -112,12 +112,12 @@ test(
     expect(thumb[1]).toBe(0xd8);
 
     // cleanup all five objects (raw master + four artifacts)
-    const base = `projects/1/sessions/1/recordings/301`;
-    await minio.removeObject(env.BUCKET_RAW, `${base}/master.ts`);
-    await minio.removeObject(env.BUCKET_MEDIA, `${base}/master.mkv`);
-    await minio.removeObject(env.BUCKET_MEDIA, `${base}/hls/index.m3u8`);
-    await minio.removeObject(env.BUCKET_MEDIA, `${base}/hls/media.ts`);
-    await minio.removeObject(env.BUCKET_THUMBNAILS, `${base}/thumb.jpg`);
+    const stem = `p1/s1/master_301`;
+    await minio.removeObject(env.BUCKET_RAW, `${stem}.ts`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${stem}/video.mkv`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${stem}/hls/index.m3u8`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${stem}/hls/media.ts`);
+    await minio.removeObject(env.BUCKET_THUMBNAILS, `${stem}/poster.jpg`);
   },
   180_000,
 );

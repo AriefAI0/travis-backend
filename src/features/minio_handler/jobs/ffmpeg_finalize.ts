@@ -4,7 +4,7 @@ import { env } from "../../../config/env";
 import { log } from "../../../lib/logger";
 import { tracker, type JobRow } from "../../../lib/db/minio_tracker";
 import { minio } from "../../../lib/minio_storage/clients";
-import { leafKeys } from "../paths";
+import { clipLeaves, masterLeaves } from "../paths";
 
 // flow: download master > remux mkv > probe duration > single-file hls >
 // thumbnail > upload all > mark finalized. Stream-copy only (spec D9).
@@ -16,9 +16,9 @@ export async function finalizeJob(job: JobRow) {
   const dir = join(env.DATA_DIR, "tmp", session.id);
   await mkdir(dir, { recursive: true });
   try {
-    const keys = leafKeys(session.kind, session.object_key);
+    const leaves = session.kind === "master" ? masterLeaves(session.object_key) : clipLeaves(session.object_key);
     const masterPath = join(dir, "master.ts");
-    await minio.fGetObject(session.bucket, keys.raw, masterPath);
+    await minio.fGetObject(leaves.raw.bucket, leaves.raw.key, masterPath);
 
     const mkvPath = join(dir, "out.mkv");
     await runFF(["-y", "-i", masterPath, "-c", "copy", mkvPath]);
@@ -35,10 +35,10 @@ export async function finalizeJob(job: JobRow) {
     await makeThumb(masterPath, thumbPath);
 
     // upload all four; overwrites make retries idempotent
-    await minio.fPutObject(env.BUCKET_MEDIA, keys.mkv, mkvPath, { "Content-Type": "video/x-matroska" });
-    await minio.fPutObject(env.BUCKET_MEDIA, keys.hlsManifest, manifestPath, { "Content-Type": "application/vnd.apple.mpegurl" });
-    await minio.fPutObject(env.BUCKET_MEDIA, keys.hlsMedia, mediaPath, { "Content-Type": "video/mp2t" });
-    await minio.fPutObject(env.BUCKET_THUMBNAILS, keys.thumb, thumbPath, { "Content-Type": "image/jpeg" });
+    await minio.fPutObject(leaves.mkv.bucket, leaves.mkv.key, mkvPath, { "Content-Type": "video/x-matroska" });
+    await minio.fPutObject(leaves.hlsManifest.bucket, leaves.hlsManifest.key, manifestPath, { "Content-Type": "application/vnd.apple.mpegurl" });
+    await minio.fPutObject(leaves.hlsMedia.bucket, leaves.hlsMedia.key, mediaPath, { "Content-Type": "video/mp2t" });
+    await minio.fPutObject(leaves.poster.bucket, leaves.poster.key, thumbPath, { "Content-Type": "image/jpeg" });
 
     tracker.setFinalized(session.id, durationMs);
     log.info("finalize complete", { session: session.id, durationMs });

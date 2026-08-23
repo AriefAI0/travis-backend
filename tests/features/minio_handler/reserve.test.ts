@@ -47,7 +47,7 @@ test("first reserve returns part 1 with a presigned PUT ticket", async () => {
   expect(body.data.expiresInSeconds).toBe(300);
   expect(body.data.url).toContain("partNumber=1");
   expect(body.data.url).toContain(`uploadId=upload-${id}`);
-  expect(body.data.url).toContain(`reserve-test/${id}/master.ts`);
+  expect(body.data.url).toContain(`reserve-test/${id}.ts`);
 });
 
 test("reserve is sticky: repeated calls return the same part number", async () => {

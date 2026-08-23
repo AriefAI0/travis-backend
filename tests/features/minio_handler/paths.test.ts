@@ -1,11 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { baseKey, identityString, leafKeys, rawKey, timelineKey } from "../../../src/features/minio_handler/paths";
+import {
+  clipLeaves,
+  clipStem,
+  identityString,
+  masterLeaves,
+  masterStem,
+  rawLeaf,
+  snipImages,
+  snipStem,
+  timelineStill,
+} from "../../../src/features/minio_handler/paths";
 
 const MASTER = { kind: "master", projectId: 3, sessionId: 12, recordingId: 45 } as const;
 const CLIP = { kind: "clip", projectId: 3, sessionId: 12, itemId: 7, clipId: 45 } as const;
 
-const MASTER_BASE = "projects/3/sessions/12/recordings/45";
-const CLIP_BASE = "projects/3/sessions/12/items/7/clips/45";
+const MASTER_STEM = "p3/s12/master_45";
+const CLIP_STEM = "p3/s12/clip_45";
+const SNIP_STEM = "p3/s12/result_88";
 
 describe("identityString", () => {
   test("encodes each kind canonically", () => {
@@ -23,39 +34,59 @@ describe("identityString", () => {
   });
 });
 
-describe("baseKey", () => {
-  test("master nests under recordings, clip under items/clips", () => {
-    expect(baseKey(MASTER)).toBe(MASTER_BASE);
-    expect(baseKey(CLIP)).toBe(CLIP_BASE);
+describe("stems", () => {
+  test("two hierarchy levels only, kind-prefixed PK last", () => {
+    expect(masterStem(3, 12, 45)).toBe(MASTER_STEM);
+    expect(clipStem(3, 12, 45)).toBe(CLIP_STEM);
+    expect(snipStem(3, 12, 88)).toBe(SNIP_STEM);
   });
 });
 
-describe("rawKey / leafKeys", () => {
-  test("master leaves", () => {
-    expect(rawKey("master", MASTER_BASE)).toBe(`${MASTER_BASE}/master.ts`);
-    expect(leafKeys("master", MASTER_BASE)).toEqual({
-      raw: `${MASTER_BASE}/master.ts`,
-      mkv: `${MASTER_BASE}/master.mkv`,
-      hlsManifest: `${MASTER_BASE}/hls/index.m3u8`,
-      hlsMedia: `${MASTER_BASE}/hls/media.ts`,
-      thumb: `${MASTER_BASE}/thumb.jpg`,
-    });
-  });
-
-  test("clip leaves", () => {
-    expect(leafKeys("clip", CLIP_BASE)).toEqual({
-      raw: `${CLIP_BASE}/clip.ts`,
-      mkv: `${CLIP_BASE}/clip.mkv`,
-      hlsManifest: `${CLIP_BASE}/hls/index.m3u8`,
-      hlsMedia: `${CLIP_BASE}/hls/media.ts`,
-      thumb: `${CLIP_BASE}/thumb.jpg`,
-    });
+describe("rawLeaf", () => {
+  test("one flat object per recording in the raw bucket", () => {
+    expect(rawLeaf(MASTER_STEM)).toEqual({ bucket: "travis-raw", key: `${MASTER_STEM}.ts` });
   });
 });
 
-describe("timelineKey", () => {
-  test("zero-pads seconds to 6 digits", () => {
-    expect(timelineKey(MASTER_BASE, 0)).toBe(`${MASTER_BASE}/timeline/000000.jpg`);
-    expect(timelineKey(MASTER_BASE, 123)).toBe(`${MASTER_BASE}/timeline/000123.jpg`);
+describe("masterLeaves / clipLeaves", () => {
+  test("derived buckets hold one directory per recording", () => {
+    const expected = (stem: string) => ({
+      raw: { bucket: "travis-raw", key: `${stem}.ts` },
+      mkv: { bucket: "travis-media", key: `${stem}/video.mkv` },
+      hlsManifest: { bucket: "travis-media", key: `${stem}/hls/index.m3u8` },
+      hlsMedia: { bucket: "travis-media", key: `${stem}/hls/media.ts` },
+      poster: { bucket: "travis-thumbs", key: `${stem}/poster.jpg` },
+    });
+    expect(masterLeaves(MASTER_STEM)).toEqual(expected(MASTER_STEM));
+    expect(clipLeaves(CLIP_STEM)).toEqual(expected(CLIP_STEM));
+  });
+
+  test("every leaf carries its bucket — no bare strings", () => {
+    for (const leaf of Object.values(masterLeaves(MASTER_STEM))) {
+      expect(leaf.bucket).toBeTruthy();
+      expect(leaf.key.startsWith(MASTER_STEM)).toBe(true);
+    }
+  });
+});
+
+describe("timelineStill", () => {
+  test("zero-pads ms to 9 digits so lexicographic order = time order", () => {
+    expect(timelineStill(MASTER_STEM, 0).key).toBe(`${MASTER_STEM}/timeline/000000000.jpg`);
+    expect(timelineStill(MASTER_STEM, 1500).key).toBe(`${MASTER_STEM}/timeline/000001500.jpg`);
+    expect(timelineStill(MASTER_STEM, 120_000).key).toBe(`${MASTER_STEM}/timeline/000120000.jpg`);
+    expect(timelineStill(MASTER_STEM, 1500).key < timelineStill(MASTER_STEM, 120_000).key).toBe(true);
+  });
+
+  test("stills live in the thumbs bucket", () => {
+    expect(timelineStill(MASTER_STEM, 1).bucket).toBe("travis-thumbs");
+  });
+});
+
+describe("snipImages", () => {
+  test("annotated lives beside raw in the images bucket", () => {
+    expect(snipImages(SNIP_STEM, 12)).toEqual({
+      raw: { bucket: "travis-images", key: `${SNIP_STEM}/img_12_raw.jpg` },
+      annotated: { bucket: "travis-images", key: `${SNIP_STEM}/img_12_annotated.jpg` },
+    });
   });
 });

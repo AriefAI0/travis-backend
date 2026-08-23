@@ -14,6 +14,7 @@ const schema = z.object({
   BUCKET_RAW: z.string().min(1).default("travis-raw"),
   BUCKET_MEDIA: z.string().min(1).default("travis-media"),
   BUCKET_THUMBNAILS: z.string().min(1).default("travis-thumbs"),
+  BUCKET_IMAGES: z.string().min(1).default("travis-images"),
   PART_SIZE_BYTES: z.coerce.number().int().positive().default(16_777_216),
   BUFFER_CAP_BYTES: z.coerce.number().int().positive().default(67_108_864),
   MAX_ACTIVE_SESSIONS: z.coerce.number().int().positive().default(4),
@@ -40,4 +41,9 @@ if (!parsed.success) {
 export const env = parsed.data;
 
 // Every bucket the server owns. All are ensured to exist at boot.
-export const buckets = [env.BUCKET_RAW, env.BUCKET_MEDIA, env.BUCKET_THUMBNAILS] as const;
+export const buckets = [
+  env.BUCKET_RAW,
+  env.BUCKET_MEDIA,
+  env.BUCKET_THUMBNAILS,
+  env.BUCKET_IMAGES,
+] as const;

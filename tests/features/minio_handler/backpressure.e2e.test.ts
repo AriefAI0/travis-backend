@@ -140,7 +140,7 @@ test(
     expect(stopRes.status, stopBody).toBe(202);
 
     // object is byte-identical to the uninterrupted equivalent
-    const key = `projects/1/sessions/1/recordings/401/master.ts`;
+    const key = `p1/s1/master_401.ts`;
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(segBytes.reduce((n, b) => n + b.byteLength, 0));
     const objectBytes = new Uint8Array(
@@ -164,12 +164,12 @@ test(
     const manifest = await (await fetch(manifestUrl)).text();
     expect(manifest).toContain("media.ts");
 
-    const base = `projects/1/sessions/1/recordings/401`;
-    await minio.removeObject(env.BUCKET_RAW, key);
-    await minio.removeObject(env.BUCKET_MEDIA, `${base}/master.mkv`);
-    await minio.removeObject(env.BUCKET_MEDIA, `${base}/hls/index.m3u8`);
-    await minio.removeObject(env.BUCKET_MEDIA, `${base}/hls/media.ts`);
-    await minio.removeObject(env.BUCKET_THUMBNAILS, `${base}/thumb.jpg`);
+    const stem = `p1/s1/master_401`;
+    await minio.removeObject(env.BUCKET_RAW, `${stem}.ts`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${stem}/video.mkv`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${stem}/hls/index.m3u8`);
+    await minio.removeObject(env.BUCKET_MEDIA, `${stem}/hls/media.ts`);
+    await minio.removeObject(env.BUCKET_THUMBNAILS, `${stem}/poster.jpg`);
   },
   300_000,
 );

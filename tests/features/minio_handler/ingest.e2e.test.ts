@@ -83,15 +83,15 @@ test(
     expect(status.status).toBe("finalizing");
     expect(status.durableThrough).toBe(SEG_COUNT - 1);
 
-    const base = `projects/1/sessions/1/recordings/101`;
-    const key = `${base}/master.ts`;
+    const stem = `p1/s1/master_101`;
+    const key = `${stem}.ts`;
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     const total = segBytes.reduce((n, b) => n + b.byteLength, 0);
     expect(stat.size).toBe(total);
 
     // one prefix-list walks the whole recording
     const listed: string[] = [];
-    for await (const obj of minio.listObjects(env.BUCKET_RAW, `${base}/`, false)) {
+    for await (const obj of minio.listObjects(env.BUCKET_RAW, stem, false)) {
       listed.push(obj.name);
     }
     expect(listed).toEqual([key]);
@@ -200,7 +200,7 @@ test(
     const stopRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/stop`, { method: "POST" });
     expect(stopRes.status).toBe(202);
 
-    const key = `projects/1/sessions/1/recordings/103/master.ts`;
+    const key = `p1/s1/master_103.ts`;
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(segBytes.reduce((n, b) => n + b.byteLength, 0));
 

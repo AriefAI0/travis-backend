@@ -130,8 +130,7 @@ test(
     expect((await json(stopRes)).data.status).toBe("finalizing");
 
     // exactly ONE master object holds every uploaded byte, in order
-    const base = `projects/1/sessions/1/recordings/9001`;
-    const key = `${base}/master.ts`;
+    const key = `p1/s1/master_9001.ts`;
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     const total = parts.reduce((n, p) => n + p.bytes.byteLength, 0);
     expect(stat.size).toBe(total);

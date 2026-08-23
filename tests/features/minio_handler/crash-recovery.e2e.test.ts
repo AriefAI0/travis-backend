@@ -101,7 +101,7 @@ test(
     expect(stopRes.status, stopBody).toBe(202);
     expect(JSON.parse(stopBody).data.status).toBe("finalizing");
 
-    const key = `projects/1/sessions/1/recordings/501/master.ts`;
+    const key = `p1/s1/master_501.ts`;
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(segBytes.reduce((n, b) => n + b.byteLength, 0));
 
@@ -140,7 +140,7 @@ test(
     expect(final.durableThrough).toBe(durable);
 
     // object = exactly the durable prefix (RAM-buffered tail was never durable)
-    const key = `projects/1/sessions/1/recordings/502/master.ts`;
+    const key = `p1/s1/master_502.ts`;
     const prefix = segBytes.slice(0, durable + 1);
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(prefix.reduce((n, b) => n + b.byteLength, 0));

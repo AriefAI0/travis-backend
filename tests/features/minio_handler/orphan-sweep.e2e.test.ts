@@ -16,7 +16,7 @@ beforeAll(async () => {
   rmSync(DATA_DIR, { recursive: true, force: true }); // guarantee a clean tracker
 
   // leak an MPU directly into the bucket, bypassing the server entirely
-  key = `projects/9/sessions/9/recordings/orphan-e2e-${crypto.randomUUID()}/master.ts`;
+  key = `p9/s9/orphan-e2e-${crypto.randomUUID()}.ts`;
   uploadId = await s3parts.initiate(env.BUCKET_RAW, key);
   const before = await s3parts.listUploads(env.BUCKET_RAW);
   expect(before.some((u) => u.uploadId === uploadId)).toBe(true);

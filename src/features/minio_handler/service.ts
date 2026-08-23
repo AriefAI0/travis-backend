@@ -5,7 +5,7 @@ import { tracker, type SessionRow } from "../../lib/db/minio_tracker";
 import { PART_UPLOAD_TTL_SECONDS, presignPartUpload, s3parts } from "../../lib/minio_storage/s3sdk";
 import { mintGetUrl } from "../../lib/minio_storage/mint";
 import { Assembler } from "./assembler";
-import { baseKey, identityString, leafKeys, rawKey, type RecordingIdentity } from "./paths";
+import { clipStem, identityString, masterLeaves, masterStem, clipLeaves, rawLeaf, type Leaf, type RecordingIdentity } from "./paths";
 
 const assemblers = new Map<string, Assembler>();
 
@@ -41,10 +41,14 @@ export async function createSession(identity: RecordingIdentity) {
 
   const id = crypto.randomUUID();
   const appSessionId = identityString(identity);
-  const objectKey = baseKey(identity); // base key; MPU ops derive the raw leaf
+  // interim: stem from client ids; phase 3 passes the server-assigned PK
+  const stem =
+    identity.kind === "master"
+      ? masterStem(identity.projectId, identity.sessionId, identity.recordingId)
+      : clipStem(identity.projectId, identity.sessionId, identity.clipId);
 
   try {
-    tracker.createSession({ id, appSessionId, kind: identity.kind, bucket: env.BUCKET_RAW, objectKey });
+    tracker.createSession({ id, appSessionId, kind: identity.kind, bucket: env.BUCKET_RAW, objectKey: stem });
   } catch (err) {
     if (String(err).includes("UNIQUE")) {
       throw new AppError(409, "duplicate_session", `recording ${appSessionId} already exists`);
@@ -54,7 +58,7 @@ export async function createSession(identity: RecordingIdentity) {
 
   let uploadId: string;
   try {
-    uploadId = await s3parts.initiate(env.BUCKET_RAW, rawKey(identity.kind, objectKey));
+    uploadId = await s3parts.initiate(env.BUCKET_RAW, rawLeaf(stem).key);
   } catch (err) {
     // Row stays in 'created'; boot recovery re-initiates (spec D4).
     log.error("initiate failed", { session: id, err: String(err) });
@@ -94,9 +98,10 @@ export async function reservePart(id: string) {
     throw new AppError(409, "wrong_state", "recording upload not initialized");
   }
   const partNumber = tracker.getNextPartNumber(id)!;
+  const raw = rawLeaf(session.object_key);
   const url = await presignPartUpload(
-    session.bucket,
-    rawKey(session.kind, session.object_key),
+    raw.bucket,
+    raw.key,
     session.upload_id,
     partNumber,
   );
@@ -173,6 +178,8 @@ export function getSessionStatus(id: string) {
 }
 
 // Minted playback/download URLs — available only after finalize (spec D10).
+const mint = (leaf: Leaf) => mintGetUrl(leaf.bucket, leaf.key);
+
 export async function getArtifacts(id: string) {
   const session = requireSession(id);
   if (session.status !== "finalized" || !session.size_bytes) {
@@ -182,14 +189,14 @@ export async function getArtifacts(id: string) {
       session.status === "finalized" ? "recording has no artifacts" : `recording is ${session.status}`,
     );
   }
-  const keys = leafKeys(session.kind, session.object_key!);
+  const leaves = session.kind === "master" ? masterLeaves(session.object_key!) : clipLeaves(session.object_key!);
   return {
     hls: {
-      manifest: await mintGetUrl(env.BUCKET_MEDIA, keys.hlsManifest),
-      media: await mintGetUrl(env.BUCKET_MEDIA, keys.hlsMedia),
+      manifest: await mint(leaves.hlsManifest),
+      media: await mint(leaves.hlsMedia),
     },
-    mkv: await mintGetUrl(env.BUCKET_MEDIA, keys.mkv),
-    thumbnail: await mintGetUrl(env.BUCKET_THUMBNAILS, keys.thumb),
+    mkv: await mint(leaves.mkv),
+    thumbnail: await mint(leaves.poster),
     durationMs: session.duration_ms,
   };
 }
@@ -204,7 +211,8 @@ export async function finalizeRecording(session: SessionRow, opts: { truncated?:
   // recording finalizes empty (no artifacts).
   if (parts.length === 0) {
     if (session.upload_id) {
-      await s3parts.abort(session.bucket!, rawKey(session.kind, session.object_key!), session.upload_id);
+      const raw = rawLeaf(session.object_key!);
+      await s3parts.abort(raw.bucket, raw.key, session.upload_id);
     }
     tracker.setFinalizedEmpty(session.id, opts.truncated);
     log.warn("session finalized with zero durable bytes", { session: session.id, truncated: opts.truncated });
@@ -212,9 +220,10 @@ export async function finalizeRecording(session: SessionRow, opts: { truncated?:
   }
 
   try {
+    const raw = rawLeaf(session.object_key!);
     await s3parts.complete(
-      session.bucket!,
-      rawKey(session.kind, session.object_key!),
+      raw.bucket,
+      raw.key,
       session.upload_id!,
       parts.map((p) => ({ partNumber: p.part_number, etag: p.etag })),
     );

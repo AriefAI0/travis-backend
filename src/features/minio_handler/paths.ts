@@ -1,5 +1,12 @@
-// The ONE place app identity becomes bucket keys (docs/bucket-layout.md).
-// flow: identity > base key > leaf keys; no key literals anywhere else.
+// The ONE place app identity becomes bucket+key pairs (spec: path module owns
+// every leaf). flow: identity > stem > leaf pairs; no key literal anywhere else.
+
+import { env } from "../../config/env";
+
+export interface Leaf {
+  bucket: string;
+  key: string;
+}
 
 export interface MasterIdentity {
   kind: "master";
@@ -18,38 +25,59 @@ export interface ClipIdentity {
 
 export type RecordingIdentity = MasterIdentity | ClipIdentity;
 
-// canonical uniqueness string — stored in tracker.app_session_id
+// canonical uniqueness string — stored in tracker identity_string column
 export function identityString(id: RecordingIdentity): string {
   if (id.kind === "master") return `p${id.projectId}-s${id.sessionId}-r${id.recordingId}`;
   return `p${id.projectId}-s${id.sessionId}-i${id.itemId}-c${id.clipId}`;
 }
 
-// shared prefix of every leaf of one recording — stored in tracker.object_key
-export function baseKey(id: RecordingIdentity): string {
-  if (id.kind === "master") {
-    return `projects/${id.projectId}/sessions/${id.sessionId}/recordings/${id.recordingId}`;
-  }
-  return `projects/${id.projectId}/sessions/${id.sessionId}/items/${id.itemId}/clips/${id.clipId}`;
+// storage stem — path prefix, no bucket, no extension; Postgres stores it and
+// every leaf derives from it. Interim callers pass client ids as PK stand-ins;
+// phase 3 (create inversion) passes server-assigned PKs.
+export function masterStem(projectId: number, sessionId: number, pk: number): string {
+  return `p${projectId}/s${sessionId}/master_${pk}`;
 }
 
-// MPU target key for a stored session (object_key holds the base)
-export function rawKey(kind: "master" | "clip", base: string): string {
-  return `${base}/${kind === "master" ? "master" : "clip"}.ts`;
+export function clipStem(projectId: number, sessionId: number, pk: number): string {
+  return `p${projectId}/s${sessionId}/clip_${pk}`;
 }
 
-// every leaf object of one recording, derived from base + kind
-export function leafKeys(kind: "master" | "clip", base: string) {
-  const stem = kind === "master" ? "master" : "clip";
+// snip set stem — one result, many images
+export function snipStem(projectId: number, sessionId: number, resultId: number): string {
+  return `p${projectId}/s${sessionId}/result_${resultId}`;
+}
+
+// MPU target: raw is one flat object per recording (rebuildable? no)
+export function rawLeaf(stem: string): Leaf {
+  return { bucket: env.BUCKET_RAW, key: `${stem}.ts` };
+}
+
+// derived leaves shared by master and clip recordings (media + thumbs rebuild from raw)
+function recordingLeaves(stem: string) {
   return {
-    raw: `${base}/${stem}.ts`,
-    mkv: `${base}/${stem}.mkv`,
-    hlsManifest: `${base}/hls/index.m3u8`,
-    hlsMedia: `${base}/hls/media.ts`,
-    thumb: `${base}/thumb.jpg`,
+    raw: rawLeaf(stem),
+    mkv: { bucket: env.BUCKET_MEDIA, key: `${stem}/video.mkv` },
+    hlsManifest: { bucket: env.BUCKET_MEDIA, key: `${stem}/hls/index.m3u8` },
+    hlsMedia: { bucket: env.BUCKET_MEDIA, key: `${stem}/hls/media.ts` },
+    poster: { bucket: env.BUCKET_THUMBNAILS, key: `${stem}/poster.jpg` },
   };
 }
 
-// filmstrip still — prefix locked, format may evolve (doc §5)
-export function timelineKey(base: string, seconds: number): string {
-  return `${base}/timeline/${String(seconds).padStart(6, "0")}.jpg`;
+export const masterLeaves = recordingLeaves;
+export const clipLeaves = recordingLeaves;
+
+// filmstrip still — 9-digit ms padding keeps lexicographic order = time order
+export function timelineStill(stem: string, timestampMs: number): Leaf {
+  return {
+    bucket: env.BUCKET_THUMBNAILS,
+    key: `${stem}/timeline/${String(timestampMs).padStart(9, "0")}.jpg`,
+  };
+}
+
+// snip originals live beside their annotated twins in the images bucket
+export function snipImages(stem: string, imageId: number) {
+  return {
+    raw: { bucket: env.BUCKET_IMAGES, key: `${stem}/img_${imageId}_raw.jpg` },
+    annotated: { bucket: env.BUCKET_IMAGES, key: `${stem}/img_${imageId}_annotated.jpg` },
+  };
 }
