@@ -10,6 +10,9 @@ export function buildMinioClient(endpoint: string, accessKey: string, secretKey:
     useSSL: url.protocol === "https:",
     accessKey,
     secretKey,
+    // pin the region: presigning stays offline (unset, minio-js does a
+    // GetBucketLocation round-trip per first presign per bucket)
+    region: "us-east-1",
   });
 }
 

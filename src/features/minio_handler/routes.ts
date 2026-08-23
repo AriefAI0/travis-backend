@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { AppError } from "../../lib/error";
 import { ok } from "../../lib/response";
-import { appendSegment, createSession, getArtifacts, getSessionStatus, heartbeat, stopSession } from "./service";
+import { appendSegment, createSession, getArtifacts, getSessionStatus, heartbeat, reservePart, stopSession } from "./service";
 
 // integer DB ids from the app side
 const id = z.number().int().positive();
@@ -42,6 +42,11 @@ minioHandlerRoutes.post("/api/minio_handler/sessions/:id/segments", async (c) =>
   const res = await appendSegment(c.req.param("id"), idx, body);
   return ok(c, res);
 });
+
+// flow: reserve > sticky part number + fresh presigned upload URL (direct upload)
+minioHandlerRoutes.post("/api/minio_handler/sessions/:id/parts", async (c) =>
+  ok(c, await reservePart(c.req.param("id"))),
+);
 
 minioHandlerRoutes.post("/api/minio_handler/sessions/:id/heartbeat", (c) => ok(c, heartbeat(c.req.param("id"))));
 

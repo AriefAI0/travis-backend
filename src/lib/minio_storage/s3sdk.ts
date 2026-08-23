@@ -20,13 +20,27 @@ export interface S3Parts {
   listUploads(bucket: string): Promise<{ uploadId: string; key: string }[]>;
 }
 
+// Reserve tickets live 5 minutes: long enough for a slow part, short enough to rotate.
+export const PART_UPLOAD_TTL_SECONDS = 300;
+
 // The minio SDK has no public API for manual multipart ops; presignedUrl with
 // query params (proved live in .planning/spikes/spike-minio-parts.ts) is the transport.
-async function presign(method: string, bucket: string, key: string, params: Record<string, string>) {
+async function presign(method: string, bucket: string, key: string, params: Record<string, string>, expiry = PART_UPLOAD_TTL_SECONDS) {
   const client = minio as unknown as {
     presignedUrl(method: string, bucket: string, key: string, expiry: number, params: Record<string, string>): Promise<string>;
   };
-  return client.presignedUrl(method, bucket, key, 300, params);
+  return client.presignedUrl(method, bucket, key, expiry, params);
+}
+
+// Direct-upload ticket: the app PUTs one MPU part to MinIO itself (reserve endpoint).
+export async function presignPartUpload(
+  bucket: string,
+  key: string,
+  uploadId: string,
+  partNumber: number,
+  expiry = PART_UPLOAD_TTL_SECONDS,
+): Promise<string> {
+  return presign("PUT", bucket, key, { partNumber: String(partNumber), uploadId }, expiry);
 }
 
 function tag(xml: string, name: string): string | null {
@@ -59,7 +73,7 @@ export const s3parts: S3Parts = {
   },
 
   async uploadPart(bucket, key, uploadId, partNumber, body) {
-    const url = await presign("PUT", bucket, key, { partNumber: String(partNumber), uploadId });
+    const url = await presignPartUpload(bucket, key, uploadId, partNumber);
     const res = await fetch(url, { method: "PUT", body });
     const etag = res.headers.get("etag");
     if (!res.ok || !etag) throw new Error(`uploadPart ${partNumber}: ${res.status} (etag ${etag ?? "missing"})`);

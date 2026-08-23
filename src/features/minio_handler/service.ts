@@ -2,7 +2,7 @@ import { env } from "../../config/env";
 import { AppError } from "../../lib/error";
 import { log } from "../../lib/logger";
 import { tracker, type SessionRow } from "../../lib/db/minio_tracker";
-import { s3parts } from "../../lib/minio_storage/s3sdk";
+import { PART_UPLOAD_TTL_SECONDS, presignPartUpload, s3parts } from "../../lib/minio_storage/s3sdk";
 import { mintGetUrl } from "../../lib/minio_storage/mint";
 import { Assembler } from "./assembler";
 import { baseKey, identityString, leafKeys, rawKey, type RecordingIdentity } from "./paths";
@@ -79,6 +79,26 @@ export function heartbeat(id: string) {
   requireUploadable(session);
   tracker.touch(id);
   return { durableThrough: session.durable_through };
+}
+
+// flow: reserve > state check > sticky part number > presigned PUT ticket
+// Idempotent ticket counter: the number only moves when a part is reported
+// complete, so retries before complete always get the SAME part number back.
+export async function reservePart(id: string) {
+  const session = requireSession(id);
+  requireUploadable(session); // wrong_state past recording; stale flips to recording
+  tracker.touch(id); // proof of life: a just-resumed session must not re-stale
+  if (!session.upload_id || !session.bucket || !session.object_key) {
+    throw new AppError(409, "wrong_state", "recording upload not initialized");
+  }
+  const partNumber = tracker.getNextPartNumber(id)!;
+  const url = await presignPartUpload(
+    session.bucket,
+    rawKey(session.kind, session.object_key),
+    session.upload_id,
+    partNumber,
+  );
+  return { partNumber, url, expiresInSeconds: PART_UPLOAD_TTL_SECONDS };
 }
 
 export function getSessionStatus(id: string) {
