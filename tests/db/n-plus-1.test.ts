@@ -89,7 +89,7 @@ const seedItemResultSidebar = async (
   await db.insert(schema.masterVideo).values({
     masterVideoId: 1,
     sessionId: 1,
-    fileUrl: "file://master.mkv",
+    storageStem: "file://master.mkv",
     startEpoch: 1_000,
     endEpoch: 2_000,
   });
@@ -121,7 +121,7 @@ const seedItemResultSidebar = async (
       await db.insert(schema.resultImage).values({
         imageId,
         resultId,
-        rawUrl: `raw-${imageId}`,
+        storageStem: `raw-${imageId}`,
       });
 
       clipId += 1;
@@ -144,7 +144,7 @@ const seedMasterVideoPlayback = async (resultsWithClips: number) => {
   await db.insert(schema.masterVideo).values({
     masterVideoId: 1,
     sessionId: 1,
-    fileUrl: "C:/rec/session.mkv",
+    storageStem: "C:/rec/session.mkv",
     startEpoch: 1_000,
     endEpoch: 2_000,
     recordingStatus: "finalized",
@@ -185,7 +185,7 @@ const seedMasterVideoPlayback = async (resultsWithClips: number) => {
     await db.insert(schema.resultImage).values({
       imageId: r,
       resultId: r,
-      rawUrl: `raw-${r}`,
+      storageStem: `raw-${r}`,
     });
   }
 };
@@ -198,7 +198,7 @@ const seedProjectSummary = async (resultCount: number) => {
   await db.insert(schema.masterVideo).values({
     masterVideoId: 1,
     sessionId: 1,
-    fileUrl: "file://master.mkv",
+    storageStem: "file://master.mkv",
     startEpoch: 1_000,
     endEpoch: 2_000,
   });

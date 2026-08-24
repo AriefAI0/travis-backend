@@ -181,15 +181,15 @@ test(
     expect(mv.duration_ms).toBeGreaterThan(80_000);
     expect(mv.duration_ms).toBeLessThan(95_000);
     expect(Number(mv.file_size)).toBe(totalBytes);
-    expect(mv.span_s).toBeGreaterThanOrEqual(80);
+    expect(Number(mv.span_s)).toBeGreaterThanOrEqual(80); // bigint arrives as string
 
     // finished recording leaves the app's unfinished list (story 1)
     expect(await unfinishedIds()).not.toContain(createdData.masterVideoId);
 
-    // timeline filmstrip: one row per slot, 9-digit keys, time order (story 4-5)
+    // timeline filmstrip: one row per slot, stem-keyed, time order (story 4-5)
     const tt = (
       await pool.query(
-        "select timestamp_ms, image_path, storage_stem, width, height, size_bytes" +
+        "select timestamp_ms, storage_stem, width, height, size_bytes" +
           " from timeline_thumbnail where master_video_id = $1 order by timestamp_ms",
         [createdData.masterVideoId],
       )
@@ -197,13 +197,14 @@ test(
     expect(tt.length).toBeGreaterThanOrEqual(9); // ~90s take, 10s interval
     expect(tt[0].timestamp_ms).toBe(0);
     for (const r of tt) {
-      expect(r.image_path).toBe(`${stem}/timeline/${String(r.timestamp_ms).padStart(9, "0")}.jpg`);
       expect(r.storage_stem).toBe(stem);
       expect(r.width).toBeGreaterThan(0);
       expect(r.height).toBeGreaterThan(0);
       expect(Number(r.size_bytes)).toBeGreaterThan(0);
     }
-    const stillStat = await minio.statObject(env.BUCKET_THUMBNAILS, tt[0].image_path);
+    // keys derive from the stem + padded timestamp via the path module
+    const firstStillKey = `${stem}/timeline/${String(tt[0].timestamp_ms).padStart(9, "0")}.jpg`;
+    const stillStat = await minio.statObject(env.BUCKET_THUMBNAILS, firstStillKey);
     expect(stillStat.size).toBe(Number(tt[0].size_bytes));
 
     // re-running the job on a finalized session is a no-op — no dup rows
@@ -222,7 +223,9 @@ test(
     await minio.removeObject(env.BUCKET_MEDIA, `${stem}/hls/index.m3u8`);
     await minio.removeObject(env.BUCKET_MEDIA, `${stem}/hls/media.ts`);
     await minio.removeObject(env.BUCKET_THUMBNAILS, `${stem}/poster.jpg`);
-    for (const r of tt) await minio.removeObject(env.BUCKET_THUMBNAILS, r.image_path);
+    for (const r of tt) {
+      await minio.removeObject(env.BUCKET_THUMBNAILS, `${stem}/timeline/${String(r.timestamp_ms).padStart(9, "0")}.jpg`);
+    }
   },
   180_000,
 );

@@ -9,7 +9,6 @@ import {
 } from "../helpers/db";
 import * as schema from "../../src/db/schema";
 import {
-  completeVideoClip,
   createMasterVideo,
   createVideoClip,
   deleteMasterVideo,
@@ -24,7 +23,6 @@ import {
   listVideoClips,
   listVideoClipsByMasterVideoId,
   listVideoClipsByResultId,
-  startVideoClip,
   updateMasterVideo,
   updateVideoClip,
 } from "../../src/db/services/video.service";
@@ -145,7 +143,7 @@ describe("video.service", () => {
     const createdMasterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        fileUrl: " file://inspection-videos/cvi-day-1.mp4 ",
+        storageStem: " file://inspection-videos/cvi-day-1.mp4 ",
         startEpoch: 1_760_000_000,
         endEpoch: 1_760_003_600,
       },
@@ -155,7 +153,7 @@ describe("video.service", () => {
     const secondMasterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        fileUrl: "file://inspection-videos/cvi-day-2.mp4",
+        storageStem: "file://inspection-videos/cvi-day-2.mp4",
         startEpoch: 1_760_086_400,
         endEpoch: null,
       },
@@ -165,7 +163,7 @@ describe("video.service", () => {
     const thirdMasterVideo = await createMasterVideo(
       {
         sessionId: 102,
-        fileUrl: "file://inspection-videos/cp-day-1.mp4",
+        storageStem: "file://inspection-videos/cp-day-1.mp4",
         startEpoch: 1_760_172_800,
         endEpoch: null,
       },
@@ -174,7 +172,7 @@ describe("video.service", () => {
 
     expect(createdMasterVideo).toMatchObject({
       sessionId: 101,
-      fileUrl: "file://inspection-videos/cvi-day-1.mp4",
+      storageStem: "file://inspection-videos/cvi-day-1.mp4",
       startEpoch: 1_760_000_000,
       endEpoch: 1_760_003_600,
     });
@@ -183,7 +181,7 @@ describe("video.service", () => {
     expect(
       await getMasterVideoById(createdMasterVideo!.masterVideoId, testDb),
     ).toMatchObject({
-      fileUrl: "file://inspection-videos/cvi-day-1.mp4",
+      storageStem: "file://inspection-videos/cvi-day-1.mp4",
     });
 
     const sessionMasterVideos = await listMasterVideosBySessionId(101, testDb);
@@ -229,7 +227,7 @@ describe("video.service", () => {
     const firstProjectOldRecording = await createMasterVideo(
       {
         sessionId: 101,
-        fileUrl:
+        storageStem:
           "C:\\Users\\arief\\Videos\\Travis\\recordings\\project-1\\session-001_20260508_100000.mkv",
         startEpoch: 1_768_000_000,
         endEpoch: 1_768_000_500,
@@ -240,7 +238,7 @@ describe("video.service", () => {
     const firstProjectNewRecording = await createMasterVideo(
       {
         sessionId: 102,
-        fileUrl:
+        storageStem:
           "C:\\Users\\arief\\Videos\\Travis\\recordings\\project-1\\session-002_20260508_110000.mkv",
         startEpoch: 1_768_003_600,
         endEpoch: null,
@@ -251,7 +249,7 @@ describe("video.service", () => {
     await createMasterVideo(
       {
         sessionId: 201,
-        fileUrl:
+        storageStem:
           "C:\\Users\\arief\\Videos\\Travis\\recordings\\project-2\\session-001_20260508_120000.mkv",
         startEpoch: 1_768_007_200,
         endEpoch: null,
@@ -268,10 +266,8 @@ describe("video.service", () => {
         masterVideoId: firstProjectOldRecording!.masterVideoId,
         sessionId: 101,
         sessionName: "session-001",
-        fileUrl:
+        storageStem:
           "C:\\Users\\arief\\Videos\\Travis\\recordings\\project-1\\session-001_20260508_100000.mkv",
-        fileName: "session-001_20260508_100000.mkv",
-        thumbnailUrl: null,
         startEpoch: 1_768_000_000,
         endEpoch: 1_768_000_500,
         recordingStatus: "finalized",
@@ -286,10 +282,8 @@ describe("video.service", () => {
         masterVideoId: firstProjectNewRecording!.masterVideoId,
         sessionId: 102,
         sessionName: "session-002",
-        fileUrl:
+        storageStem:
           "C:\\Users\\arief\\Videos\\Travis\\recordings\\project-1\\session-002_20260508_110000.mkv",
-        fileName: "session-002_20260508_110000.mkv",
-        thumbnailUrl: null,
         startEpoch: 1_768_003_600,
         endEpoch: null,
         recordingStatus: "finalized",
@@ -309,7 +303,7 @@ describe("video.service", () => {
     const masterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        fileUrl: "file://inspection-videos/cvi-day-1.mp4",
+        storageStem: "file://inspection-videos/cvi-day-1.mp4",
         startEpoch: 1_760_000_000,
         endEpoch: 1_760_003_600,
       },
@@ -322,8 +316,7 @@ describe("video.service", () => {
         masterVideoId: masterVideo!.masterVideoId,
         startOffsetMs: 320_000,
         endOffsetMs: 350_000,
-        clipFileUrl: " clips/clip-5001-gvi.mp4 ",
-        thumbnailUrl: " thumbnails/clip-5001-gvi.jpg ",
+        storageStem: " clips/clip-5001-gvi.mp4 ",
       },
       testDb,
     );
@@ -353,8 +346,7 @@ describe("video.service", () => {
       masterVideoId: masterVideo!.masterVideoId,
       startOffsetMs: 320_000,
       endOffsetMs: 350_000,
-      clipFileUrl: "clips/clip-5001-gvi.mp4",
-      thumbnailUrl: "thumbnails/clip-5001-gvi.jpg",
+      storageStem: "clips/clip-5001-gvi.mp4",
     });
     expect(createdVideoClip?.clipId).toBeTypeOf("number");
     expect(await listVideoClips(testDb)).toHaveLength(3);
@@ -378,14 +370,12 @@ describe("video.service", () => {
       sourceIndex: 1,
       sourceName: null,
       isPrimary: false,
-      fileUrl: "file://inspection-videos/cvi-day-1.mp4",
+      storageStem: "clips/clip-5001-gvi.mp4",
       masterVideoStartEpoch: 1_760_000_000,
       masterVideoEndEpoch: 1_760_003_600,
       masterVideoDurationMs: 3_600_000,
       startOffsetMs: 320_000,
       endOffsetMs: 350_000,
-      clipFileUrl: "clips/clip-5001-gvi.mp4",
-      thumbnailUrl: "thumbnails/clip-5001-gvi.jpg",
       durationMs: 30_000,
       startEpochMs: 1_760_000_320_000,
       endEpochMs: 1_760_000_350_000,
@@ -396,8 +386,7 @@ describe("video.service", () => {
       {
         startOffsetMs: 321_000,
         endOffsetMs: 351_000,
-        clipFileUrl: "clips/clip-5001-gvi-updated.mp4",
-        thumbnailUrl: "thumbnails/clip-5001-gvi-updated.jpg",
+        storageStem: "clips/clip-5001-gvi-updated.mp4",
       },
       testDb,
     );
@@ -406,8 +395,7 @@ describe("video.service", () => {
       clipId: createdVideoClip!.clipId,
       startOffsetMs: 321_000,
       endOffsetMs: 351_000,
-      clipFileUrl: "clips/clip-5001-gvi-updated.mp4",
-      thumbnailUrl: "thumbnails/clip-5001-gvi-updated.jpg",
+      storageStem: "clips/clip-5001-gvi-updated.mp4",
     });
 
     const deletedVideoClip = await deleteVideoClip(thirdVideoClip!.clipId, testDb);
@@ -424,24 +412,26 @@ describe("video.service", () => {
     expect(remainingVideoClip).toBeUndefined();
   });
 
-  it("supports active video clip lifecycle before and after clip completion", async () => {
+  it("supports open video clip lifecycle before and after completion", async () => {
     await seedVideoContext();
 
     const masterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        fileUrl: "file://inspection-videos/cvi-day-1.mp4",
+        storageStem: "p1/s101/master_1",
         startEpoch: 1_760_000_000,
         endEpoch: 1_760_003_600,
       },
       testDb,
     );
 
-    const activeVideoClip = await startVideoClip(
+    // open clip: endOffsetMs null until completion flips it
+    const activeVideoClip = await createVideoClip(
       {
         resultId: 5001,
         masterVideoId: masterVideo!.masterVideoId,
         startOffsetMs: 120_000,
+        endOffsetMs: null,
       },
       testDb,
     );
@@ -451,8 +441,6 @@ describe("video.service", () => {
       masterVideoId: masterVideo!.masterVideoId,
       startOffsetMs: 120_000,
       endOffsetMs: null,
-      clipFileUrl: null,
-      thumbnailUrl: null,
     });
 
     expect(await getVideoClipPlaybackById(activeVideoClip!.clipId, testDb)).toEqual({
@@ -462,26 +450,20 @@ describe("video.service", () => {
       sourceIndex: 1,
       sourceName: null,
       isPrimary: false,
-      fileUrl: "file://inspection-videos/cvi-day-1.mp4",
+      storageStem: null,
       masterVideoStartEpoch: 1_760_000_000,
       masterVideoEndEpoch: 1_760_003_600,
       masterVideoDurationMs: 3_600_000,
       startOffsetMs: 120_000,
       endOffsetMs: null,
-      clipFileUrl: null,
-      thumbnailUrl: null,
       durationMs: null,
       startEpochMs: 1_760_000_120_000,
       endEpochMs: null,
     });
 
-    const completedVideoClip = await completeVideoClip(
+    const completedVideoClip = await updateVideoClip(
       activeVideoClip!.clipId,
-      {
-        endOffsetMs: 180_000,
-        clipFileUrl: " clips/clip-5001-cvi.mp4 ",
-        thumbnailUrl: " thumbnails/clip-5001-cvi.jpg ",
-      },
+      { endOffsetMs: 180_000, storageStem: " p1/s101/clip_9 " },
       testDb,
     );
 
@@ -489,8 +471,7 @@ describe("video.service", () => {
       clipId: activeVideoClip!.clipId,
       startOffsetMs: 120_000,
       endOffsetMs: 180_000,
-      clipFileUrl: "clips/clip-5001-cvi.mp4",
-      thumbnailUrl: "thumbnails/clip-5001-cvi.jpg",
+      storageStem: "p1/s101/clip_9",
     });
   });
 
@@ -500,7 +481,7 @@ describe("video.service", () => {
     const masterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        fileUrl: "file://inspection-videos/mgi-day-1.mp4",
+        storageStem: "file://inspection-videos/mgi-day-1.mp4",
         startEpoch: 1_760_000_000,
         endEpoch: 1_760_003_600,
       },
@@ -513,7 +494,7 @@ describe("video.service", () => {
         masterVideoId: masterVideo!.masterVideoId,
         startOffsetMs: 320_000,
         endOffsetMs: 350_000,
-        clipFileUrl: "clips/clip-5001-mgi.mp4",
+        storageStem: "clips/clip-5001-mgi.mp4",
       },
       testDb,
     );
@@ -540,7 +521,7 @@ describe("video.service", () => {
       createMasterVideo(
         {
           sessionId: 101,
-          fileUrl: "file://inspection-videos/invalid.mp4",
+          storageStem: "file://inspection-videos/invalid.mp4",
           startEpoch: 1_760_000_000,
           endEpoch: 1_759_999_999,
         },
@@ -551,7 +532,7 @@ describe("video.service", () => {
     const masterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        fileUrl: "file://inspection-videos/cvi-day-1.mp4",
+        storageStem: "file://inspection-videos/cvi-day-1.mp4",
         startEpoch: 1_760_000_000,
         endEpoch: 1_760_000_100,
       },

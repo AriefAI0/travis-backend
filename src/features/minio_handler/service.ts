@@ -97,8 +97,6 @@ export async function createSession(identity: CreateRecordingSession) {
       const video = await videoService.createMasterVideo(
         {
           sessionId: identity.sessionId,
-          // NOT NULL placeholder; rewritten to the stem-derived key below in this tx
-          fileUrl: "pending",
           startEpoch: Math.floor(Date.now() / 1000),
           recordingStatus: videoService.RECORDING_PERSISTENCE_STATUS.recording,
           sourceIndex: 0,
@@ -109,9 +107,10 @@ export async function createSession(identity: CreateRecordingSession) {
       );
       if (!video) throw new Error("master video insert returned no row");
       const stem = masterStem(projectId, identity.sessionId, video.masterVideoId);
+      // stem embeds the assigned PK: insert > returning > set stem, one tx
       await videoService.updateMasterVideo(
         video.masterVideoId,
-        { fileUrl: `${stem}.ts`, storageStem: stem },
+        { storageStem: stem },
         tx,
       );
       const identityStr = identityString({
@@ -137,8 +136,6 @@ export async function createSession(identity: CreateRecordingSession) {
         masterVideoId: parent.masterVideoId,
         startOffsetMs: 0,
         endOffsetMs: null,
-        clipFileUrl: null,
-        thumbnailUrl: null,
         recordingStatus: videoService.RECORDING_PERSISTENCE_STATUS.recording,
       },
       tx,
@@ -147,7 +144,7 @@ export async function createSession(identity: CreateRecordingSession) {
     const stem = clipStem(projectId, identity.sessionId, clip.clipId);
     await videoService.updateVideoClip(
       clip.clipId,
-      { clipFileUrl: `${stem}.ts`, storageStem: stem },
+      { storageStem: stem },
       tx,
     );
     const identityStr = identityString({

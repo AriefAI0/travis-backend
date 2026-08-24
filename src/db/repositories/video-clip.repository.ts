@@ -10,13 +10,11 @@ export type VideoClipPlaybackRow = {
   sourceIndex: number;
   sourceName: string | null;
   isPrimary: boolean;
-  fileUrl: string;
+  storageStem: string | null;
   masterVideoStartEpoch: number;
   masterVideoEndEpoch: number | null;
   startOffsetMs: number;
   endOffsetMs: number | null;
-  clipFileUrl: string | null;
-  thumbnailUrl: string | null;
 };
 
 export const createVideoClipRecord = async (
@@ -93,13 +91,11 @@ export const findVideoClipPlaybackRowById = async (
       sourceIndex: masterVideo.sourceIndex,
       sourceName: masterVideo.sourceName,
       isPrimary: masterVideo.isPrimary,
-      fileUrl: masterVideo.fileUrl,
+      storageStem: videoClip.storageStem,
       masterVideoStartEpoch: masterVideo.startEpoch,
       masterVideoEndEpoch: masterVideo.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
-      clipFileUrl: videoClip.clipFileUrl,
-      thumbnailUrl: videoClip.thumbnailUrl,
     })
     .from(videoClip)
     .innerJoin(
@@ -121,13 +117,11 @@ export const listVideoClipPlaybackRowsByResultId = async (
       sourceIndex: masterVideo.sourceIndex,
       sourceName: masterVideo.sourceName,
       isPrimary: masterVideo.isPrimary,
-      fileUrl: masterVideo.fileUrl,
+      storageStem: videoClip.storageStem,
       masterVideoStartEpoch: masterVideo.startEpoch,
       masterVideoEndEpoch: masterVideo.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
-      clipFileUrl: videoClip.clipFileUrl,
-      thumbnailUrl: videoClip.thumbnailUrl,
     })
     .from(videoClip)
     .innerJoin(
@@ -154,13 +148,11 @@ export const listVideoClipPlaybackRowsByResultIds = async (
       sourceIndex: masterVideo.sourceIndex,
       sourceName: masterVideo.sourceName,
       isPrimary: masterVideo.isPrimary,
-      fileUrl: masterVideo.fileUrl,
+      storageStem: videoClip.storageStem,
       masterVideoStartEpoch: masterVideo.startEpoch,
       masterVideoEndEpoch: masterVideo.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
-      clipFileUrl: videoClip.clipFileUrl,
-      thumbnailUrl: videoClip.thumbnailUrl,
     })
     .from(videoClip)
     .innerJoin(

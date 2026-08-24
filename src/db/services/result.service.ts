@@ -38,8 +38,8 @@ export type CreateResultInput = {
 
 export type CreateResultImageInput = {
   resultId: number;
-  rawUrl: string;
-  annotatedUrl?: string | null;
+  // required: keys derive from the stem alone (no URL column remains)
+  storageStem: string;
   remarks?: string | null;
 };
 
@@ -98,16 +98,12 @@ const normalizeResultImageUpdate = (
     nextData.resultId = data.resultId;
   }
 
-  if ("rawUrl" in data) {
-    if (data.rawUrl === undefined) {
-      throw new Error("Result image rawUrl is required");
+  if ("storageStem" in data) {
+    if (data.storageStem === undefined || !data.storageStem.trim()) {
+      throw new Error("Result image storage stem is required");
     }
 
-    nextData.rawUrl = data.rawUrl;
-  }
-
-  if ("annotatedUrl" in data) {
-    nextData.annotatedUrl = normalizeOptionalText(data.annotatedUrl);
+    nextData.storageStem = data.storageStem;
   }
 
   if ("remarks" in data) {
@@ -554,11 +550,9 @@ export const getItemResultSidebar = async (
               sourceIndex: clipPlayback.sourceIndex,
               sourceName: clipPlayback.sourceName,
               isPrimary: clipPlayback.isPrimary,
-              fileUrl: clipPlayback.fileUrl,
-              clipFileUrl: clipPlayback.clipFileUrl,
+              storageStem: clipPlayback.storageStem,
               startOffsetMs: clipPlayback.startOffsetMs,
               endOffsetMs: clipPlayback.endOffsetMs,
-              thumbnailUrl: clipPlayback.thumbnailUrl,
               durationMs: clipPlayback.durationMs,
               startEpochMs: clipPlayback.startEpochMs,
               endEpochMs: clipPlayback.endEpochMs,
@@ -701,11 +695,9 @@ export const getResultEvidence = async (
     sourceIndex: clipPlayback.sourceIndex,
     sourceName: clipPlayback.sourceName,
     isPrimary: clipPlayback.isPrimary,
-    fileUrl: clipPlayback.fileUrl,
-    clipFileUrl: clipPlayback.clipFileUrl,
+    storageStem: clipPlayback.storageStem,
     startOffsetMs: clipPlayback.startOffsetMs,
     endOffsetMs: clipPlayback.endOffsetMs,
-    thumbnailUrl: clipPlayback.thumbnailUrl,
     durationMs: clipPlayback.durationMs,
     startEpochMs: clipPlayback.startEpochMs,
     endEpochMs: clipPlayback.endEpochMs,
@@ -736,8 +728,7 @@ export const createResultImage = async (
   createResultImageRecord(
     {
       resultId: data.resultId,
-      rawUrl: data.rawUrl,
-      annotatedUrl: normalizeOptionalText(data.annotatedUrl),
+      storageStem: data.storageStem,
       remarks: normalizeOptionalText(data.remarks),
     },
     database,

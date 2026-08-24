@@ -294,7 +294,7 @@ describe("project.service", () => {
         .values({
           masterVideoId: 9001,
           sessionId: session.sessionId,
-          fileUrl: `file://video_9001.mkv`,
+          storageStem: `file://video_9001.mkv`,
           // pg integer columns reject fractional seconds — floor the epoch
           startEpoch: Math.floor(Date.now() / 1000),
           recordingStatus: "finalized",
@@ -309,7 +309,7 @@ describe("project.service", () => {
           resultId: result.resultId,
           masterVideoId: masterVideo.masterVideoId,
           startOffsetMs: 0,
-          clipFileUrl: `file://clip_10001.mkv`,
+          storageStem: `file://clip_10001.mkv`,
           recordingStatus: "finalized",
         })
         .returning()

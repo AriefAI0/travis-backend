@@ -215,11 +215,9 @@ export type ItemResultSidebarClip = {
   sourceIndex: number;
   sourceName: string | null;
   isPrimary: boolean;
-  fileUrl: string;
-  clipFileUrl: string | null;
+  storageStem: string | null;
   startOffsetMs: number;
   endOffsetMs: number | null;
-  thumbnailUrl: string | null;
   durationMs: number | null;
   startEpochMs: number;
   endEpochMs: number | null;
@@ -227,8 +225,7 @@ export type ItemResultSidebarClip = {
 
 export type ItemResultSidebarImage = {
   imageId: number;
-  rawUrl: string;
-  annotatedUrl: string | null;
+  storageStem: string;
   remarks: string | null;
 };
 
@@ -290,9 +287,7 @@ export type ProjectRecordingListItem = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
-  fileUrl: string;
-  fileName: string;
-  thumbnailUrl: string | null;
+  storageStem: string | null;
   startEpoch: number; // epoch seconds, as stored
   endEpoch: number | null;
   recordingStatus: string;
@@ -337,84 +332,13 @@ export type ResultEvidence = {
 };
 
 /* =========================================================
-   inspectionClip (app: src/shared/inspectionClip.ts)
-========================================================= */
-export type InspectionClipResultStatus = "in_progress" | "completed";
-
-export type StartInspectionClipInput = {
-  sessionItemId: number;
-  inspectionTypeCode: InspectionTypeCode;
-  projectId: number;
-  assetId: number;
-  componentId: number;
-  itemId: number;
-  sessionId: number;
-  masterVideoId: number;
-  startOffsetMs: number;
-  remarks?: string | null;
-};
-
-export type StartRecordingInspectionClipInput = {
-  sessionId: number;
-  itemId: number;
-  inspectionTypeCode: InspectionTypeCode;
-  masterVideoId?: number;
-  startOffsetMs: number;
-  remarks?: string | null;
-};
-
-export type StopInspectionClipInput = {
-  clipId: number;
-  endOffsetMs: number;
-  thumbnailUrl?: string | null;
-  remarks?: string | null;
-  payload?: unknown; // typed detail — discriminated union per inspectionTypeCode
-};
-
-export type CancelInspectionClipInput = {
-  clipId: number;
-};
-
-export type ActiveInspectionClipInput = {
-  sessionItemId: number;
-  inspectionTypeCode: InspectionTypeCode;
-};
-
-export type InspectionClipResult = {
-  resultId: number;
-  sessionItemId: number;
-  inspectionTypeCode: InspectionTypeCode;
-  projectId: number;
-  assetId: number;
-  componentId: number;
-  itemId: number;
-  sessionId: number;
-  remarks: string | null;
-};
-
-export type InspectionClipRecord = {
-  clipId: number;
-  resultId: number;
-  masterVideoId: number;
-  startOffsetMs: number;
-  endOffsetMs: number | null;
-  clipFileUrl: string | null;
-  thumbnailUrl: string | null;
-};
-
-export type InspectionClipLifecycle = {
-  result: InspectionClipResult;
-  clip: InspectionClipRecord;
-};
-
-/* =========================================================
    playbackWorkspace (app: src/shared/playbackWorkspace.ts)
 ========================================================= */
 export type MasterVideoTimelineThumbnail = {
   thumbnailId: number;
   masterVideoId: number;
   timestampMs: number;
-  imagePath: string;
+  storageStem: string;
   width: number;
   height: number;
   sizeBytes: number;
@@ -431,8 +355,7 @@ export type MasterVideoPlaybackEvent = {
   startOffsetMs: number;
   endOffsetMs: number | null;
   remarks: string | null;
-  clipFileUrl: string | null;
-  thumbnailUrl: string | null;
+  storageStem: string | null;
   images: ItemResultSidebarImage[];
   imageCount: number;
 };
@@ -442,8 +365,7 @@ export type MasterVideoSource = {
   sourceIndex: number;
   isPrimary: boolean;
   sourceName: string | null;
-  fileName: string;
-  fileUrl: string;
+  storageStem: string | null;
   recordingStatus: string;
 };
 
@@ -451,9 +373,7 @@ export type MasterVideoPlaybackData = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
-  fileUrl: string;
-  fileName: string;
-  thumbnailUrl: string | null;
+  storageStem: string | null;
   startEpoch: number;
   endEpoch: number | null;
   durationMs: number | null;
@@ -513,14 +433,6 @@ const id = z.number().int().positive();
 const optionalText = z.string().min(1).nullable().optional();
 const itemStatus = z.enum(["not_set", "pending", "complete"]);
 const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
-const recordingStatus = z.enum([
-  "recording",
-  "finalized",
-  "interrupted",
-  "finalization_failed",
-  "canceled",
-]);
-const recoveryStatus = z.enum(["recoverable", "missing_file", "unusable"]);
 
 // projects — Create/UpdateProjectInput share one shape (title required)
 export const projectInputSchema = z.object({
@@ -554,63 +466,6 @@ export const updateItemSchema = z.object({
 // sessions — service normalize only honors name today
 export const createSessionSchema = z.object({ projectId: id, name: optionalText });
 export const updateSessionSchema = z.object({ name: optionalText });
-
-// recordings (masters)
-export const createMasterVideoSchema = z.object({
-  sessionId: id,
-  fileUrl: z.string().min(1),
-  thumbnailUrl: optionalText,
-  startEpoch: z.number().int().nonnegative(),
-  endEpoch: z.number().int().nonnegative().nullable().optional(),
-  recordingStatus: recordingStatus.optional(),
-  sourceKind: optionalText,
-  inputId: optionalText,
-  sourceIndex: z.number().int().positive().optional(),
-  isPrimary: z.boolean().optional(),
-  sourceName: optionalText,
-  startedAt: z.iso.datetime().nullable().optional(),
-});
-export const finalizeMasterVideoSchema = z.object({
-  stoppedAt: z.iso.datetime(),
-  durationMs: z.number().int().nonnegative(),
-  fileSize: z.number().int().nonnegative().nullable(),
-  endEpoch: z.number().int().nonnegative(),
-});
-export const failMasterVideoSchema = z.object({ error: z.string().min(1) });
-export const interruptMasterVideoSchema = z.object({
-  recoveryStatus: recoveryStatus,
-  fileSize: z.number().int().nonnegative().nullable(),
-  error: z.string().nullable().optional(),
-});
-
-// clips (inspection lifecycle)
-export const startInspectionClipSchema = z.object({
-  sessionItemId: id,
-  inspectionTypeCode: inspectionType,
-  projectId: id,
-  assetId: id,
-  componentId: id,
-  itemId: id,
-  sessionId: id,
-  masterVideoId: id,
-  startOffsetMs: z.number().int().nonnegative(),
-  remarks: optionalText,
-});
-export const startRecordingInspectionClipSchema = z.object({
-  sessionId: id,
-  itemId: id,
-  inspectionTypeCode: inspectionType,
-  masterVideoId: id.optional(),
-  startOffsetMs: z.number().int().nonnegative(),
-  remarks: optionalText,
-});
-// clipId rides the path, not the body
-export const stopInspectionClipBodySchema = z.object({
-  endOffsetMs: z.number().int().nonnegative(),
-  thumbnailUrl: optionalText,
-  remarks: optionalText,
-  payload: z.unknown().optional(),
-});
 
 // batch reads for the report gatherer
 export const resultIdsSchema = z.object({ resultIds: z.array(id) });

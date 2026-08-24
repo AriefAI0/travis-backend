@@ -69,7 +69,7 @@ export const listResultRecordsBySessionItemIds = async (
 
 /**
  * Find an active (in-progress) result for a session_item and inspection type code.
- * Used by inspection-clip.service to check if a clip is already running.
+ * Used to check whether a clip is already running for a result.
  */
 export const findActiveBySessionItemIdAndCode = async (
   sessionItemId: number,

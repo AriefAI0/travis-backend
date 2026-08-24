@@ -1,4 +1,4 @@
-import { pgTable, pgEnum, text, integer, boolean, doublePrecision, timestamp, index, unique, uniqueIndex, check,} from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, timestamp, index, unique, uniqueIndex, check,} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /* =================== CHANGABLE ENUMRATIONS =================== */
@@ -279,7 +279,6 @@ export const resultMgi = pgTable(
   {
     resultId: integer("result_id")
       .primaryKey()
-      .generatedByDefaultAsIdentity()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
     // plain 0/1 int end-to-end — boolean would break the DTO contract
@@ -330,7 +329,6 @@ export const resultMgiFinding = pgTable(
 export const resultCp = pgTable("result_cp", {
   resultId: integer("result_id")
     .primaryKey()
-    .generatedByDefaultAsIdentity()
     .references(() => result.resultId, { onDelete: "cascade" }),
   anodeType: text("anodeType"), // camelCase column name kept verbatim
   voltageMv: integer("voltage_mv"),
@@ -353,7 +351,6 @@ export const resultFmd = pgTable(
   {
     resultId: integer("result_id")
       .primaryKey()
-      .generatedByDefaultAsIdentity()
       .references(() => result.resultId, { onDelete: "cascade" }),
     depthEl: doublePrecision("depth_el"),
     initialAttempt: fmdAttempt("initialAttempt").notNull(),
@@ -374,7 +371,6 @@ export const resultScour = pgTable(
   {
     resultId: integer("result_id")
       .primaryKey()
-      .generatedByDefaultAsIdentity()
       .references(() => result.resultId, { onDelete: "cascade" }),
     exposedPile: scourExposedPile("exposed_pile").notNull(),
     exposedPileHeight: doublePrecision("exposed_pile_height"),
@@ -395,7 +391,6 @@ export const resultGvi = pgTable(
   {
     resultId: integer("result_id")
       .primaryKey()
-      .generatedByDefaultAsIdentity()
       .references(() => result.resultId, { onDelete: "cascade" }),
     gviCP: integer("gvi_cp"),
     gviUT: integer("gvi_ut"),
@@ -414,7 +409,6 @@ export const resultCvi = pgTable(
   {
     resultId: integer("result_id")
       .primaryKey()
-      .generatedByDefaultAsIdentity()
       .references(() => result.resultId, { onDelete: "cascade" }),
     datumReference: text("datum_reference"),
     memberType: cviMemberType("member_type").notNull(),
@@ -459,14 +453,12 @@ export const masterVideo = pgTable(
       .notNull()
       .references(() => session.sessionId, { onDelete: "cascade" }),
 
-    fileUrl: text("file_url").notNull(),
-    thumbnailUrl: text("thumbnail_url"),
-
-   
+    // nullable by design: the stem embeds the row's own PK, so ingest inserts
+    // and sets it in the same transaction (insert > returning > update)
     storageStem: text("storage_stem"),
 
-    startEpoch: integer("start_epoch").notNull(), // epoch SECONDS, stays an int
-    endEpoch: integer("end_epoch"),
+    startEpoch: bigint("start_epoch", { mode: "number" }).notNull(), // epoch SECONDS; bigint clears 2038
+    endEpoch: bigint("end_epoch", { mode: "number" }),
     recordingStatus: recordingStatus("recording_status").notNull().default("finalized"),
     sourceKind: text("source_kind"),
     inputId: text("input_id"),
@@ -476,13 +468,16 @@ export const masterVideo = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
     stoppedAt: timestamp("stopped_at", { withTimezone: true, mode: "date" }),
     durationMs: integer("duration_ms"),
-    fileSize: integer("file_size"),
+    fileSize: bigint("file_size", { mode: "number" }), // bigint: long takes pass 2 GB
     recoveryStatus: text("recovery_status"),
     finalizationError: text("finalization_error"),
     lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
-  }
+  },
+  (table) => ({
+    idxMasterVideoSessionId: index("idx_master_video_session_id").on(table.sessionId),
+  })
 );
 
 /* =========================================================
@@ -498,14 +493,20 @@ export const timelineThumbnail = pgTable(
       .references(() => masterVideo.masterVideoId, { onDelete: "cascade" }),
 
     timestampMs: integer("timestamp_ms").notNull(),
-    imagePath: text("image_path").notNull(),
-    storageStem: text("storage_stem"),
+    storageStem: text("storage_stem").notNull(),
     width: integer("width").notNull(),
     height: integer("height").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
 
     ...createdAt,
-  }
+  },
+  (table) => ({
+    // composite: filmstrip reads walk one master in time order
+    idxTimelineThumbnailMasterVideoTs: index("idx_timeline_thumbnail_master_video_ts").on(
+      table.masterVideoId,
+      table.timestampMs,
+    ),
+  })
 );
 
 /* =========================================================
@@ -527,19 +528,22 @@ export const videoClip = pgTable(
 
     startOffsetMs: integer("start_offset_ms").notNull(),
     endOffsetMs: integer("end_offset_ms"),
-    clipFileUrl: text("clip_file_url"),
-    thumbnailUrl: text("thumbnail_url"),
+    // nullable by design: same PK-embedded-stem insert flow as master_video
     storageStem: text("storage_stem"),
     recordingStatus: recordingStatus("recording_status").notNull().default("finalized"),
     recordingStartedAt: timestamp("recording_started_at", { withTimezone: true, mode: "date" }),
     recordingStoppedAt: timestamp("recording_stopped_at", { withTimezone: true, mode: "date" }),
-    fileSize: integer("file_size"),
+    fileSize: bigint("file_size", { mode: "number" }), // bigint: long takes pass 2 GB
     recoveryStatus: text("recovery_status"),
     finalizationError: text("finalization_error"),
     lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
-  }
+  },
+  (table) => ({
+    idxVideoClipResultId: index("idx_video_clip_result_id").on(table.resultId),
+    idxVideoClipMasterVideoId: index("idx_video_clip_master_video_id").on(table.masterVideoId),
+  })
 );
 
 /* =========================================================
@@ -554,9 +558,12 @@ export const resultImage = pgTable(
       .notNull()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
-    rawUrl: text("raw_url").notNull(),
-    annotatedUrl: text("annotated_url"),
-    storageStem: text("storage_stem"),
+    // required: the result row knows its stem at insert time (result stem
+    // derives from resultId, not from this row's own PK)
+    storageStem: text("storage_stem").notNull(),
     remarks: text("remarks"),
-  }
+  },
+  (table) => ({
+    idxResultImageResultId: index("idx_result_image_result_id").on(table.resultId),
+  })
 );

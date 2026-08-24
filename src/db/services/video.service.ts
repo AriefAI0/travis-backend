@@ -47,9 +47,8 @@ import { listResultImageSummariesByResultIds } from "./result-media.service";
 
 export type CreateMasterVideoInput = {
   sessionId: number;
-  fileUrl: string;
-  thumbnailUrl?: string | null;
-  // path prefix without bucket/extension; written by the ingest create path
+  // path prefix without bucket/extension; the ingest path inserts, reads the
+  // assigned PK, then sets the stem in the same transaction
   storageStem?: string | null;
   startEpoch: number;
   endEpoch?: number | null;
@@ -67,8 +66,6 @@ export type CreateVideoClipInput = {
   masterVideoId: number;
   startOffsetMs: number;
   endOffsetMs?: number | null;
-  clipFileUrl?: string | null;
-  thumbnailUrl?: string | null;
   storageStem?: string | null;
   recordingStatus?: RecordingPersistenceStatus;
 };
@@ -76,18 +73,11 @@ export type CreateVideoClipInput = {
 export type CreateMasterVideoTimelineThumbnailInput = {
   masterVideoId: number;
   timestampMs: number;
-  imagePath: string;
   width: number;
   height: number;
   sizeBytes: number;
-  // path prefix without bucket/extension; written by the ingest finalize bridge
-  storageStem?: string | null;
-};
-
-export type CompleteVideoClipInput = {
-  endOffsetMs: number;
-  clipFileUrl?: string | null;
-  thumbnailUrl?: string | null;
+  // required: keys derive from the stem alone (no URL column remains)
+  storageStem: string;
 };
 
 export type VideoClipPlayback = {
@@ -97,14 +87,12 @@ export type VideoClipPlayback = {
   sourceIndex: number;
   sourceName: string | null;
   isPrimary: boolean;
-  fileUrl: string;
+  storageStem: string | null;
   masterVideoStartEpoch: number;
   masterVideoEndEpoch: number | null;
   masterVideoDurationMs: number | null;
   startOffsetMs: number;
   endOffsetMs: number | null;
-  clipFileUrl: string | null;
-  thumbnailUrl: string | null;
   durationMs: number | null;
   startEpochMs: number;
   endEpochMs: number | null;
@@ -114,9 +102,7 @@ export type ProjectMasterVideo = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
-  fileUrl: string;
-  fileName: string;
-  thumbnailUrl: string | null;
+  storageStem: string | null;
   startEpoch: number;
   endEpoch: number | null;
   recordingStatus: RecordingPersistenceStatus;
@@ -138,8 +124,7 @@ type PlaybackEventRow = {
   startOffsetMs: number;
   endOffsetMs: number | null;
   remarks: string | null;
-  clipFileUrl: string | null;
-  thumbnailUrl: string | null;
+  storageStem: string | null;
   imageCount: number;
 };
 
@@ -244,21 +229,6 @@ const normalizeMasterVideoUpdate = (
 
   if ("sessionId" in data) {
     nextData.sessionId = data.sessionId;
-  }
-
-  if ("fileUrl" in data) {
-    if (data.fileUrl === undefined) {
-      throw new Error("Master video fileUrl is required");
-    }
-
-    nextData.fileUrl = normalizeRequiredText(data.fileUrl, "Master video fileUrl");
-  }
-
-  if ("thumbnailUrl" in data) {
-    nextData.thumbnailUrl = normalizeOptionalText(
-      data.thumbnailUrl,
-      "Master video thumbnailUrl",
-    );
   }
 
   if ("storageStem" in data) {
@@ -400,6 +370,10 @@ const validateMasterVideoTimelineThumbnail = (
   if (!Number.isInteger(data.sizeBytes) || data.sizeBytes < 0) {
     throw new Error("Thumbnail sizeBytes must be a non-negative integer");
   }
+
+  if (!data.storageStem.trim()) {
+    throw new Error("Thumbnail storage stem is required");
+  }
 };
 
 const normalizeSourceIndex = (sourceIndex: number | undefined): number => {
@@ -454,11 +428,6 @@ export const createMasterVideo = async (
   return createMasterVideoRecord(
     {
       sessionId: data.sessionId,
-      fileUrl: normalizeRequiredText(data.fileUrl, "Master video fileUrl"),
-      thumbnailUrl: normalizeOptionalText(
-        data.thumbnailUrl,
-        "Master video thumbnailUrl",
-      ),
       storageStem: normalizeOptionalText(
         data.storageStem,
         "Master video storage stem",
@@ -503,7 +472,6 @@ export const listMasterVideosByProjectId = async (
 
   return rows.map((row) => ({
     ...row,
-    fileName: row.fileUrl.split(/[\\/]/).pop() ?? row.fileUrl,
     recordingStatus: normalizeRecordingPersistenceStatus(
       row.recordingStatus,
       "Master video recording status",
@@ -533,8 +501,7 @@ export const getMasterVideoPlaybackData = async (
       masterVideoId: masterVideo.masterVideoId,
       sessionId: masterVideo.sessionId,
       sessionName: session.name,
-      fileUrl: masterVideo.fileUrl,
-      thumbnailUrl: masterVideo.thumbnailUrl,
+      storageStem: masterVideo.storageStem,
       startEpoch: masterVideo.startEpoch,
       endEpoch: masterVideo.endEpoch,
       durationMs: masterVideo.durationMs,
@@ -581,8 +548,7 @@ export const getMasterVideoPlaybackData = async (
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
       remarks: result.remarks,
-      clipFileUrl: videoClip.clipFileUrl,
-      thumbnailUrl: videoClip.thumbnailUrl,
+      storageStem: videoClip.storageStem,
       imageCount: count(resultImage.imageId),
     })
     .from(videoClip)
@@ -603,8 +569,7 @@ export const getMasterVideoPlaybackData = async (
       videoClip.startOffsetMs,
       videoClip.endOffsetMs,
       result.remarks,
-      videoClip.clipFileUrl,
-      videoClip.thumbnailUrl,
+      videoClip.storageStem,
     )
     .orderBy(asc(videoClip.startOffsetMs), asc(videoClip.clipId));
 
@@ -624,7 +589,6 @@ export const getMasterVideoPlaybackData = async (
 
   return {
     ...selectedMasterVideo,
-    fileName: selectedMasterVideo.fileUrl.split(/[\\/]/).pop() ?? selectedMasterVideo.fileUrl,
     recordingStatus: normalizedRecordingStatus,
     sourceVideos: sessionMasterVideos
       .map((sourceVideo) => ({
@@ -632,8 +596,7 @@ export const getMasterVideoPlaybackData = async (
         sourceIndex: sourceVideo.sourceIndex,
         isPrimary: sourceVideo.isPrimary,
         sourceName: sourceVideo.sourceName,
-        fileName: sourceVideo.fileUrl.split(/[\\/]/).pop() ?? sourceVideo.fileUrl,
-        fileUrl: sourceVideo.fileUrl,
+        storageStem: sourceVideo.storageStem,
         recordingStatus: normalizeRecordingPersistenceStatus(
           sourceVideo.recordingStatus,
           "Master video recording status",
@@ -648,7 +611,7 @@ export const getMasterVideoPlaybackData = async (
       thumbnailId: thumbnail.thumbnailId,
       masterVideoId: thumbnail.masterVideoId,
       timestampMs: thumbnail.timestampMs,
-      imagePath: thumbnail.imagePath,
+      storageStem: thumbnail.storageStem,
       width: thumbnail.width,
       height: thumbnail.height,
       sizeBytes: thumbnail.sizeBytes,
@@ -664,8 +627,7 @@ export const getMasterVideoPlaybackData = async (
       startOffsetMs: eventRow.startOffsetMs,
       endOffsetMs: eventRow.endOffsetMs,
       remarks: eventRow.remarks,
-      clipFileUrl: eventRow.clipFileUrl,
-      thumbnailUrl: eventRow.thumbnailUrl,
+      storageStem: eventRow.storageStem,
       images: imagesByResultId.get(eventRow.resultId) ?? [],
       imageCount: eventRow.imageCount,
     })),
@@ -704,14 +666,10 @@ export const replaceMasterVideoTimelineThumbnails = async (
       thumbnails.map((thumbnail) => ({
         masterVideoId,
         timestampMs: thumbnail.timestampMs,
-        imagePath: normalizeRequiredText(
-          thumbnail.imagePath,
-          "Thumbnail imagePath",
-        ),
         width: thumbnail.width,
         height: thumbnail.height,
         sizeBytes: thumbnail.sizeBytes,
-        storageStem: normalizeOptionalText(
+        storageStem: normalizeRequiredText(
           thumbnail.storageStem,
           "Timeline thumbnail storage stem",
         ),
@@ -742,7 +700,6 @@ export const listRecoverableMasterVideosByProjectId = async (
 
   return rows.map((row) => ({
     ...row,
-    fileName: row.fileUrl.split(/[\\/]/).pop() ?? row.fileUrl,
     recordingStatus: normalizeRecordingPersistenceStatus(
       row.recordingStatus,
       "Master video recording status",
@@ -794,14 +751,6 @@ export const createVideoClip = async (
       masterVideoId: data.masterVideoId,
       startOffsetMs: data.startOffsetMs,
       endOffsetMs: data.endOffsetMs ?? null,
-      clipFileUrl: normalizeOptionalText(
-        data.clipFileUrl,
-        "Video clip fileUrl",
-      ),
-      thumbnailUrl: normalizeOptionalText(
-        data.thumbnailUrl,
-        "Video clip thumbnailUrl",
-      ),
       storageStem: normalizeOptionalText(
         data.storageStem,
         "Video clip storage stem",
@@ -853,36 +802,6 @@ export const markMasterVideoFinalizationFailed = async (
     recordingStatus: RECORDING_PERSISTENCE_STATUS.finalizationFailed,
     finalizationError: normalizeRequiredText(error, "Finalization error"),
   }, database);
-
-export const markMasterVideoInterrupted = async (
-  masterVideoId: number,
-  data: {
-    recoveryStatus: RecordingRecoveryStatus;
-    fileSize: number | null;
-    error?: string | null;
-  },
-  database?: DbOrTx,
-) =>
-  updateMasterVideo(masterVideoId, {
-    recordingStatus: RECORDING_PERSISTENCE_STATUS.interrupted,
-    recoveryStatus: data.recoveryStatus,
-    fileSize: data.fileSize,
-    finalizationError: data.error ?? null,
-  }, database);
-
-export const startVideoClip = async (
-  data: Omit<CreateVideoClipInput, "endOffsetMs" | "clipFileUrl" | "thumbnailUrl">,
-  database?: DbOrTx,
-) =>
-  createVideoClip(
-    {
-      ...data,
-      endOffsetMs: null,
-      clipFileUrl: null,
-      thumbnailUrl: null,
-    },
-    database,
-  );
 
 export const listVideoClips = async (database?: DbOrTx) =>
   listVideoClipRecords(database);
@@ -1017,14 +936,6 @@ export const updateVideoClip = async (
     clipId,
     {
       ...data,
-      clipFileUrl:
-        "clipFileUrl" in data
-          ? normalizeOptionalText(data.clipFileUrl, "Video clip fileUrl")
-          : undefined,
-      thumbnailUrl:
-        "thumbnailUrl" in data
-          ? normalizeOptionalText(data.thumbnailUrl, "Video clip thumbnailUrl")
-          : undefined,
       recordingStatus:
         "recordingStatus" in data && data.recordingStatus !== undefined
           ? normalizeRecordingPersistenceStatus(
@@ -1051,61 +962,6 @@ export const updateVideoClip = async (
     database,
   );
 };
-
-export const completeVideoClip = async (
-  clipId: number,
-  data: CompleteVideoClipInput,
-  database?: DbOrTx,
-) => {
-  const existingVideoClip = await findVideoClipById(clipId, database);
-
-  if (!existingVideoClip) {
-    return null;
-  }
-
-  await validateVideoClipRange(
-    {
-      masterVideoId: existingVideoClip.masterVideoId,
-      startOffsetMs: existingVideoClip.startOffsetMs,
-      endOffsetMs: data.endOffsetMs,
-    },
-    database,
-  );
-
-  return updateVideoClipById(
-    clipId,
-    {
-      endOffsetMs: data.endOffsetMs,
-      clipFileUrl:
-        data.clipFileUrl === undefined
-          ? existingVideoClip.clipFileUrl
-          : normalizeOptionalText(data.clipFileUrl, "Video clip fileUrl"),
-      thumbnailUrl: normalizeOptionalText(
-        data.thumbnailUrl,
-        "Video clip thumbnailUrl",
-      ),
-      recordingStatus: RECORDING_PERSISTENCE_STATUS.finalized,
-      recordingStoppedAt: new Date(),
-      recoveryStatus: null,
-      finalizationError: null,
-      lastUpdatedAt: new Date(),
-    },
-    database,
-  );
-};
-
-export const markVideoClipRecordingStarted = async (
-  clipId: number,
-  clipFileUrl: string,
-  database?: DbOrTx,
-) =>
-  updateVideoClip(clipId, {
-    clipFileUrl,
-    recordingStatus: RECORDING_PERSISTENCE_STATUS.recording,
-    recordingStartedAt: new Date(),
-    finalizationError: null,
-    recoveryStatus: null,
-  }, database);
 
 export const markVideoClipFinalizationFailed = async (
   clipId: number,
@@ -1135,40 +991,6 @@ export const markVideoClipFinalized = async (
     recoveryStatus: null,
     finalizationError: null,
   }, database);
-
-export const markVideoClipInterrupted = async (
-  clipId: number,
-  data: {
-    recoveryStatus: RecordingRecoveryStatus;
-    fileSize: number | null;
-    error?: string | null;
-  },
-  database?: DbOrTx,
-) =>
-  updateVideoClip(clipId, {
-    recordingStatus: RECORDING_PERSISTENCE_STATUS.interrupted,
-    recoveryStatus: data.recoveryStatus,
-    fileSize: data.fileSize,
-    finalizationError: data.error ?? null,
-  }, database);
-
-export const markVideoClipCanceled = async (
-  clipId: number,
-  database?: DbOrTx,
-) =>
-  updateVideoClip(clipId, {
-    recordingStatus: RECORDING_PERSISTENCE_STATUS.canceled,
-    recordingStoppedAt: new Date(),
-  }, database);
-
-export const listUnfinishedVideoClips = async (database?: DbOrTx) =>
-  listVideoClipRecordsByStatuses(
-    [
-      RECORDING_PERSISTENCE_STATUS.recording,
-      RECORDING_PERSISTENCE_STATUS.finalizationFailed,
-    ],
-    database,
-  );
 
 // active inspections: open clips (endOffsetMs null); status is unreliable
 // because created clips default to 'finalized' until the recorder flips it

@@ -119,7 +119,7 @@ describe("enum constraints (pg port of CHECK suite)", () => {
       await testDb.insert(schema.masterVideo).values({
         masterVideoId: 9003 + index,
         sessionId: 9003,
-        fileUrl: `file://${status}.mp4`,
+        storageStem: `file://${status}.mp4`,
         startEpoch: 0,
         recordingStatus: status,
       });

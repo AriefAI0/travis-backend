@@ -99,7 +99,6 @@ async function bridgeToPostgres(
           stills.map((still) => ({
             masterVideoId: ref.pk,
             timestampMs: still.timestampMs,
-            imagePath: timelineStill(stem, still.timestampMs).key,
             width: dims.width,
             height: dims.height,
             sizeBytes: still.sizeBytes,

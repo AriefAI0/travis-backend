@@ -1,4 +1,3 @@
-import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { appFor } from "../../helpers/app";
 import {
@@ -10,6 +9,12 @@ import {
 import { json } from "../../helpers/json";
 import { recordingRoutes } from "../../../src/features/recordings/routes";
 import * as schema from "../../../src/db/schema";
+import {
+  createMasterVideo,
+  createVideoClip,
+  markMasterVideoFinalized,
+  updateVideoClip,
+} from "../../../src/db/services/video.service";
 
 const app = appFor(testDb, recordingRoutes);
 
@@ -59,6 +64,16 @@ const seedContext = async (p: {
     sessionId: p.session,
     itemId: p.item,
   });
+  await testDb.insert(schema.result).values({
+    resultId: p.sessionItem + 1, // unique per context
+    sessionItemId: p.sessionItem,
+    inspectionTypeCode: "GVI",
+    projectId: p.project,
+    assetId: p.asset,
+    componentId: p.component,
+    itemId: p.item,
+    sessionId: p.session,
+  });
 };
 
 const baseContext = {
@@ -70,26 +85,26 @@ const baseContext = {
   sessionItem: 1000,
 };
 
-// flow: register > unfinished > playback blocked > fail > finalize > playback
+// read surface only: recording lifecycle lives on the ingest transport.
+// flow: seed rows via services > assert visibility reads respond with stems
 describe("recordings routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
   beforeEach(truncateTestDatabase);
 
-  it("master lifecycle: create, fail, finalize, playback", async () => {
+  it("master visibility: unfinished lists recording, playback opens after finalize", async () => {
     await seedContext(baseContext);
 
-    const post = await req("/api/v1/recordings", "POST", {
-      sessionId: 101,
-      fileUrl: "projects/1/sessions/101/master.ts",
-      startEpoch: 1755684000,
-      recordingStatus: "recording",
-      startedAt: "2026-08-20T10:00:00.000Z",
-    });
-    expect(post.status).toBe(201);
-    const { data } = await json(post);
-    expect(data.recordingStatus).toBe("recording");
-    const masterVideoId = data.masterVideoId as number;
+    const master = await createMasterVideo(
+      {
+        sessionId: 101,
+        storageStem: "p1/s101/master_1",
+        startEpoch: 1_755_684_000,
+        recordingStatus: "recording",
+      },
+      testDb,
+    );
+    const masterVideoId = master!.masterVideoId;
 
     // open master shows in the recovery sweep
     const unfinished = await app.request("/api/v1/recordings/unfinished");
@@ -106,27 +121,23 @@ describe("recordings routes", () => {
       title: "Only finalized master videos can be opened for playback",
     });
 
-    // engine-side encode failure still keeps it in the sweep
-    const failed = await req(`/api/v1/recordings/${masterVideoId}/fail`, "POST", {
-      error: "ffmpeg exited 1",
-    });
-    expect(failed.status).toBe(200);
-    expect((await json(failed)).data.recordingStatus).toBe("finalization_failed");
-
-    const finalized = await req(`/api/v1/recordings/${masterVideoId}/finalize`, "POST", {
-      stoppedAt: "2026-08-20T10:05:00.000Z",
-      durationMs: 300000,
-      fileSize: null,
-      endEpoch: 1755684300,
-    });
-    expect(finalized.status).toBe(200);
-    expect((await json(finalized)).data.recordingStatus).toBe("finalized");
+    // the finalize bridge path flips the row; playback then serves the stem
+    await markMasterVideoFinalized(
+      masterVideoId,
+      {
+        stoppedAt: new Date(),
+        durationMs: 300_000,
+        fileSize: null,
+        endEpoch: 1_755_684_300,
+      },
+      testDb,
+    );
 
     const playback = await app.request(
       `/api/v1/recordings/${masterVideoId}/playback?projectId=1`,
     );
     expect(playback.status).toBe(200);
-    expect((await json(playback)).data.fileUrl).toBe("projects/1/sessions/101/master.ts");
+    expect((await json(playback)).data.storageStem).toBe("p1/s101/master_1");
 
     const sweep = await app.request("/api/v1/recordings/unfinished");
     expect((await json(sweep)).data).toHaveLength(0);
@@ -144,13 +155,15 @@ describe("recordings routes", () => {
     });
 
     for (const sessionId of [101, 202]) {
-      const res = await req("/api/v1/recordings", "POST", {
-        sessionId,
-        fileUrl: `projects/x/sessions/${sessionId}/master.ts`,
-        startEpoch: 1755684000,
-        recordingStatus: "recording",
-      });
-      expect(res.status).toBe(201);
+      await createMasterVideo(
+        {
+          sessionId,
+          storageStem: `p1/s${sessionId}/master_1`,
+          startEpoch: 1_755_684_000,
+          recordingStatus: "recording",
+        },
+        testDb,
+      );
     }
 
     const all = await app.request("/api/v1/recordings/unfinished");
@@ -162,70 +175,40 @@ describe("recordings routes", () => {
     expect(rows[0].sessionId).toBe(202);
   });
 
-  it("missing master is 404 for get, finalize, fail, interrupt", async () => {
-    const finalize = await req("/api/v1/recordings/99999/finalize", "POST", {
-      stoppedAt: "2026-08-20T10:05:00.000Z",
-      durationMs: 1,
-      fileSize: null,
-      endEpoch: 1755684300,
-    });
-    expect(finalize.status).toBe(404);
-    expect((await json(finalize)).code).toBe("not_found");
-
+  it("missing master is 404 for get and playback", async () => {
     const get = await app.request("/api/v1/recordings/99999");
     expect(get.status).toBe(404);
-    const fail = await req("/api/v1/recordings/99999/fail", "POST", { error: "x" });
-    expect(fail.status).toBe(404);
-    const interrupt = await req("/api/v1/recordings/99999/interrupt", "POST", {
-      recoveryStatus: "recoverable",
-      fileSize: null,
-    });
-    expect(interrupt.status).toBe(404);
+    const playback = await app.request("/api/v1/recordings/99999/playback?projectId=1");
+    expect(playback.status).toBe(404);
   });
 
-  it("clip lifecycle: start, duplicate 409, active, stop, batch read", async () => {
+  it("clip reads: active sweep and batch by-result-ids", async () => {
     await seedContext(baseContext);
 
     // clip range validation needs an existing master video
-    const master = await req("/api/v1/recordings", "POST", {
-      sessionId: 101,
-      fileUrl: "projects/1/sessions/101/master.ts",
-      startEpoch: 1755684000,
-      recordingStatus: "finalized",
-    });
-    const masterVideoId = (await json(master)).data.masterVideoId as number;
-
-    const start = await req("/api/v1/clips", "POST", {
-      sessionItemId: 1000,
-      inspectionTypeCode: "GVI",
-      projectId: 1,
-      assetId: 1,
-      componentId: 10,
-      itemId: 100,
-      sessionId: 101,
-      masterVideoId,
-      startOffsetMs: 0,
-    });
-    expect(start.status).toBe(201);
-    const { data } = await json(start);
-    expect(data.clip.endOffsetMs).toBeNull();
-    const resultId = data.result.resultId as number;
-    const clipId = data.clip.clipId as number;
-
-    // same session item + code while open is wrong_state
-    const duplicate = await req("/api/v1/clips", "POST", {
-      sessionItemId: 1000,
-      inspectionTypeCode: "GVI",
-      projectId: 1,
-      assetId: 1,
-      componentId: 10,
-      itemId: 100,
-      sessionId: 101,
-      masterVideoId,
-      startOffsetMs: 10,
-    });
-    expect(duplicate.status).toBe(409);
-    expect((await json(duplicate)).code).toBe("wrong_state");
+    const master = await createMasterVideo(
+      {
+        sessionId: 101,
+        storageStem: "p1/s101/master_1",
+        startEpoch: 1_755_684_000,
+        endEpoch: 1_755_684_300,
+        recordingStatus: "finalized",
+      },
+      testDb,
+    );
+    const resultId = baseContext.sessionItem + 1;
+    const clip = await createVideoClip(
+      {
+        resultId,
+        masterVideoId: master!.masterVideoId,
+        startOffsetMs: 0,
+        endOffsetMs: null, // open clip
+        storageStem: "p1/s101/clip_1",
+        recordingStatus: "recording",
+      },
+      testDb,
+    );
+    const clipId = clip!.clipId;
 
     // active sweeps see it, project- and session-scoped
     const activeProject = await app.request("/api/v1/clips/active?projectId=1");
@@ -235,63 +218,16 @@ describe("recordings routes", () => {
     const activeOther = await app.request("/api/v1/clips/active?projectId=2");
     expect((await json(activeOther)).data).toHaveLength(0);
 
-    // stop requires a clip file path; the engine sets it mid-recording
-    // (markVideoClipRecordingStarted wiring lands with phase-3 ingest work)
-    await testDb
-      .update(schema.videoClip)
-      .set({ clipFileUrl: "travis-media/evidence/clips/1.mp4" })
-      .where(eq(schema.videoClip.clipId, clipId));
-
-    // stop completes clip + result in one tx
-    const stop = await req(`/api/v1/clips/${clipId}/stop`, "POST", { endOffsetMs: 5000 });
-    expect(stop.status).toBe(200);
-    const stopped = (await json(stop)).data;
-    expect(stopped.clip.endOffsetMs).toBe(5000);
-
-    // stopped clip leaves the active sweep
-    const activeAfter = await app.request("/api/v1/clips/active?projectId=1");
-    expect((await json(activeAfter)).data).toHaveLength(0);
-
-    // batch read keyed by resultId (stringified in JSON)
+    // batch read keyed by resultId (stringified in JSON), stem carried
     const batch = await req("/api/v1/clips/by-result-ids", "POST", { resultIds: [resultId] });
     expect(batch.status).toBe(200);
     const byResult = (await json(batch)).data;
     expect(byResult[String(resultId)]).toHaveLength(1);
-  });
+    expect(byResult[String(resultId)][0].storageStem).toBe("p1/s101/clip_1");
 
-  it("from-recording starts a clip; cancel removes clip + result", async () => {
-    await seedContext(baseContext);
-
-    const master = await req("/api/v1/recordings", "POST", {
-      sessionId: 101,
-      fileUrl: "projects/1/sessions/101/master.ts",
-      startEpoch: 1755684000,
-      recordingStatus: "finalized",
-    });
-    const masterVideoId = (await json(master)).data.masterVideoId as number;
-
-    const start = await req("/api/v1/clips/from-recording", "POST", {
-      sessionId: 101,
-      itemId: 100,
-      inspectionTypeCode: "CP",
-      masterVideoId,
-      startOffsetMs: 250,
-    });
-    expect(start.status).toBe(201);
-    const clipId = (await json(start)).data.clip.clipId as number;
-
-    const cancel = await req(`/api/v1/clips/${clipId}/cancel`, "POST");
-    expect(cancel.status).toBe(200);
-    const cancelled = (await json(cancel)).data;
-    expect(cancelled.clip.clipId).toBe(clipId);
-
-    // already deleted -> not_found, not a second cancel
-    const again = await req(`/api/v1/clips/${clipId}/cancel`, "POST");
-    expect(again.status).toBe(404);
-    expect((await json(again)).code).toBe("not_found");
-
-    // stop on a missing clip is also not_found
-    const stop = await req("/api/v1/clips/99999/stop", "POST", { endOffsetMs: 1 });
-    expect(stop.status).toBe(404);
+    // closing the clip empties the active sweep
+    await updateVideoClip(clipId, { endOffsetMs: 5_000 }, testDb);
+    const activeAfter = await app.request("/api/v1/clips/active?projectId=1");
+    expect((await json(activeAfter)).data).toHaveLength(0);
   });
 });

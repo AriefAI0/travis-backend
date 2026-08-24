@@ -16,8 +16,7 @@ export const listResultImageSummariesByResultId = async (
 
   return selectedImages.map((imageRecord) => ({
     imageId: imageRecord.imageId,
-    rawUrl: imageRecord.rawUrl,
-    annotatedUrl: imageRecord.annotatedUrl,
+    storageStem: imageRecord.storageStem,
     remarks: imageRecord.remarks,
   }));
 };
@@ -42,8 +41,7 @@ export const listResultImageSummariesByResultIds = async (
     const list = imagesByResult.get(imageRecord.resultId) ?? [];
     list.push({
       imageId: imageRecord.imageId,
-      rawUrl: imageRecord.rawUrl,
-      annotatedUrl: imageRecord.annotatedUrl,
+      storageStem: imageRecord.storageStem,
       remarks: imageRecord.remarks,
     });
     imagesByResult.set(imageRecord.resultId, list);

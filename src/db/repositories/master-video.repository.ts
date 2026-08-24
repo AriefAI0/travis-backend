@@ -7,8 +7,7 @@ export type ProjectMasterVideoRow = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
-  fileUrl: string;
-  thumbnailUrl: string | null;
+  storageStem: string | null;
   startEpoch: number;
   endEpoch: number | null;
   recordingStatus: string;
@@ -65,8 +64,7 @@ export const listMasterVideoRecordsByProjectId = async (
       masterVideoId: masterVideo.masterVideoId,
       sessionId: masterVideo.sessionId,
       sessionName: session.name,
-      fileUrl: masterVideo.fileUrl,
-      thumbnailUrl: masterVideo.thumbnailUrl,
+      storageStem: masterVideo.storageStem,
       startEpoch: masterVideo.startEpoch,
       endEpoch: masterVideo.endEpoch,
       recordingStatus: masterVideo.recordingStatus,
@@ -110,8 +108,7 @@ export const listMasterVideoRecordsByProjectIdAndStatuses = async (
       masterVideoId: masterVideo.masterVideoId,
       sessionId: masterVideo.sessionId,
       sessionName: session.name,
-      fileUrl: masterVideo.fileUrl,
-      thumbnailUrl: masterVideo.thumbnailUrl,
+      storageStem: masterVideo.storageStem,
       startEpoch: masterVideo.startEpoch,
       endEpoch: masterVideo.endEpoch,
       recordingStatus: masterVideo.recordingStatus,

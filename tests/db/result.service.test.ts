@@ -718,14 +718,14 @@ describe("result.service", () => {
       const image = await createResultImage(
         {
           resultId: result!.resultId,
-          rawUrl: "https://example.com/image.jpg",
+          storageStem: "https://example.com/image.jpg",
         },
         testDb,
       );
 
       expect(image).not.toBeNull();
       expect(image!.resultId).toBe(result!.resultId);
-      expect(image!.rawUrl).toBe("https://example.com/image.jpg");
+      expect(image!.storageStem).toBe("https://example.com/image.jpg");
     });
   });
 
@@ -812,7 +812,7 @@ describe("result.service", () => {
       const createdImage = await createResultImage(
         {
           resultId: result!.resultId,
-          rawUrl: "https://example.com/image.jpg",
+          storageStem: "https://example.com/image.jpg",
         },
         testDb,
       );
@@ -906,7 +906,7 @@ describe("result.service", () => {
       await createResultImage(
         {
           resultId: result!.resultId,
-          rawUrl: "https://example.com/image1.jpg",
+          storageStem: "https://example.com/image1.jpg",
         },
         testDb,
       );
@@ -1072,7 +1072,7 @@ describe("result.service", () => {
       await createResultImage(
         {
           resultId: result!.resultId,
-          rawUrl: "https://example.com/image1.jpg",
+          storageStem: "https://example.com/image1.jpg",
         },
         testDb,
       );
@@ -1080,7 +1080,7 @@ describe("result.service", () => {
       await createResultImage(
         {
           resultId: result!.resultId,
-          rawUrl: "https://example.com/image2.jpg",
+          storageStem: "https://example.com/image2.jpg",
         },
         testDb,
       );
@@ -1168,7 +1168,7 @@ describe("result.service", () => {
       const image = await createResultImage(
         {
           resultId: result!.resultId,
-          rawUrl: "https://example.com/image.jpg",
+          storageStem: "https://example.com/image.jpg",
         },
         testDb,
       );
@@ -1262,7 +1262,7 @@ describe("result.service", () => {
       const image = await createResultImage(
         {
           resultId: result!.resultId,
-          rawUrl: "https://example.com/image.jpg",
+          storageStem: "https://example.com/image.jpg",
         },
         testDb,
       );
@@ -1490,7 +1490,7 @@ describe("result.service", () => {
       const masterVideo = await createMasterVideo(
         {
           sessionId: session.sessionId,
-          fileUrl: `file://video_${result!.resultId}.mkv`,
+          storageStem: `file://video_${result!.resultId}.mkv`,
           startEpoch: Math.floor(Date.now() / 1000),
         },
         testDb,
@@ -1502,7 +1502,7 @@ describe("result.service", () => {
           masterVideoId: masterVideo!.masterVideoId,
           startOffsetMs: 1000,
           endOffsetMs: 5000,
-          clipFileUrl: `file://clip_${result!.resultId}.mkv`,
+          storageStem: `file://clip_${result!.resultId}.mkv`,
         },
         testDb,
       );
@@ -3208,7 +3208,7 @@ describe("result.service", () => {
       );
 
       const masterVideo = await createMasterVideo(
-        { sessionId: session.sessionId, fileUrl: "file://m.mkv", startEpoch: 1000 },
+        { sessionId: session.sessionId, storageStem: "p1/s1/master_1", startEpoch: 1000 },
         testDb,
       );
       await createVideoClip(
@@ -3217,20 +3217,20 @@ describe("result.service", () => {
           masterVideoId: masterVideo!.masterVideoId,
           startOffsetMs: 1000,
           endOffsetMs: 5000,
-          clipFileUrl: "file://clip.mkv",
+          storageStem: "p1/s1/clip_1",
         },
         testDb,
       );
       await createResultImage(
-        { resultId: resultRecord!.resultId, rawUrl: "file://raw.png", annotatedUrl: "file://annotated.png" },
+        { resultId: resultRecord!.resultId, storageStem: "p1/s1/result_1" },
         testDb,
       );
 
       const evidence = await getResultEvidence(resultRecord!.resultId, testDb);
       expect(evidence.clips).toHaveLength(1);
-      expect(evidence.clips[0]!.clipFileUrl).toBe("file://clip.mkv");
+      expect(evidence.clips[0]!.storageStem).toBe("p1/s1/clip_1");
       expect(evidence.images).toHaveLength(1);
-      expect(evidence.images[0]!.annotatedUrl).toBe("file://annotated.png");
+      expect(evidence.images[0]!.storageStem).toBe("p1/s1/result_1");
     });
 
     it("getResultEvidence returns empty arrays for a result with no media", async () => {
