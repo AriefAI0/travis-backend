@@ -460,17 +460,8 @@ export const masterVideo = pgTable(
     startEpoch: bigint("start_epoch", { mode: "number" }).notNull(), // epoch SECONDS; bigint clears 2038
     endEpoch: bigint("end_epoch", { mode: "number" }),
     recordingStatus: recordingStatus("recording_status").notNull().default("finalized"),
-    sourceKind: text("source_kind"),
-    inputId: text("input_id"),
-    sourceIndex: integer("source_index").notNull().default(1),
-    isPrimary: boolean("is_primary").notNull().default(false),
-    sourceName: text("source_name"),
-    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
-    stoppedAt: timestamp("stopped_at", { withTimezone: true, mode: "date" }),
     durationMs: integer("duration_ms"),
     fileSize: bigint("file_size", { mode: "number" }), // bigint: long takes pass 2 GB
-    recoveryStatus: text("recovery_status"),
-    finalizationError: text("finalization_error"),
     lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -531,11 +522,7 @@ export const videoClip = pgTable(
     // nullable by design: same PK-embedded-stem insert flow as master_video
     storageStem: text("storage_stem"),
     recordingStatus: recordingStatus("recording_status").notNull().default("finalized"),
-    recordingStartedAt: timestamp("recording_started_at", { withTimezone: true, mode: "date" }),
-    recordingStoppedAt: timestamp("recording_stopped_at", { withTimezone: true, mode: "date" }),
     fileSize: bigint("file_size", { mode: "number" }), // bigint: long takes pass 2 GB
-    recoveryStatus: text("recovery_status"),
-    finalizationError: text("finalization_error"),
     lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
