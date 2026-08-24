@@ -80,6 +80,8 @@ export type CreateMasterVideoTimelineThumbnailInput = {
   width: number;
   height: number;
   sizeBytes: number;
+  // path prefix without bucket/extension; written by the ingest finalize bridge
+  storageStem?: string | null;
 };
 
 export type CompleteVideoClipInput = {
@@ -709,6 +711,10 @@ export const replaceMasterVideoTimelineThumbnails = async (
         width: thumbnail.width,
         height: thumbnail.height,
         sizeBytes: thumbnail.sizeBytes,
+        storageStem: normalizeOptionalText(
+          thumbnail.storageStem,
+          "Timeline thumbnail storage stem",
+        ),
       })),
       tx,
     );
@@ -1116,12 +1122,15 @@ export const markVideoClipFinalized = async (
   data: {
     // Null since TS segments became the clip master (no local file to stat).
     fileSize: number | null;
+    // ingest clips span 0..duration; absent leaves app-managed offsets alone
+    endOffsetMs?: number;
   },
   database?: DbOrTx,
 ) =>
   updateVideoClip(clipId, {
     recordingStatus: RECORDING_PERSISTENCE_STATUS.finalized,
     recordingStoppedAt: new Date(),
+    ...(data.endOffsetMs !== undefined ? { endOffsetMs: data.endOffsetMs } : {}),
     fileSize: data.fileSize,
     recoveryStatus: null,
     finalizationError: null,
