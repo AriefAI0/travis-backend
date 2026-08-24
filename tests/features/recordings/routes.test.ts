@@ -125,7 +125,6 @@ describe("recordings routes", () => {
     await markMasterVideoFinalized(
       masterVideoId,
       {
-        stoppedAt: new Date(),
         durationMs: 300_000,
         fileSize: null,
         endEpoch: 1_755_684_300,

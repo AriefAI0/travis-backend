@@ -273,10 +273,6 @@ describe("video.service", () => {
         startEpoch: 1_768_000_000,
         endEpoch: 1_768_000_500,
         recordingStatus: "finalized",
-        sourceIndex: 1,
-        isPrimary: false,
-        sourceName: null,
-        recoveryStatus: null,
         fileSize: null,
         durationMs: null,
       },
@@ -289,10 +285,6 @@ describe("video.service", () => {
         startEpoch: 1_768_003_600,
         endEpoch: null,
         recordingStatus: "finalized",
-        sourceIndex: 1,
-        isPrimary: false,
-        sourceName: null,
-        recoveryStatus: null,
         fileSize: null,
         durationMs: null,
       },
@@ -369,9 +361,6 @@ describe("video.service", () => {
       clipId: createdVideoClip!.clipId,
       resultId: 5001,
       masterVideoId: masterVideo!.masterVideoId,
-      sourceIndex: 1,
-      sourceName: null,
-      isPrimary: false,
       storageStem: "clips/clip-5001-gvi.mp4",
       masterVideoStartEpoch: 1_760_000_000,
       masterVideoEndEpoch: 1_760_003_600,
@@ -449,9 +438,6 @@ describe("video.service", () => {
       clipId: activeVideoClip!.clipId,
       resultId: 5001,
       masterVideoId: masterVideo!.masterVideoId,
-      sourceIndex: 1,
-      sourceName: null,
-      isPrimary: false,
       storageStem: null,
       masterVideoStartEpoch: 1_760_000_000,
       masterVideoEndEpoch: 1_760_003_600,
@@ -591,7 +577,7 @@ describe("video.service", () => {
 
     await markMasterVideoFinalized(
       masterVideo!.masterVideoId,
-      { stoppedAt: new Date(), durationMs: 3_600_000, fileSize: null, endEpoch: 1_760_003_600 },
+      { durationMs: 3_600_000, fileSize: null, endEpoch: 1_760_003_600 },
       testDb,
     );
 
@@ -611,7 +597,7 @@ describe("video.service", () => {
     const threePointFiveGB = 3_500_000_000; // int4 caps at 2_147_483_647
     await markMasterVideoFinalized(
       masterVideo!.masterVideoId,
-      { stoppedAt: new Date(), durationMs: 1_000, fileSize: threePointFiveGB, endEpoch: 1_760_000_001 },
+      { durationMs: 1_000, fileSize: threePointFiveGB, endEpoch: 1_760_000_001 },
       testDb,
     );
 
