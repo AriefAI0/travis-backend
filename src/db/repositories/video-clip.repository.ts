@@ -7,9 +7,6 @@ export type VideoClipPlaybackRow = {
   clipId: number;
   resultId: number;
   masterVideoId: number;
-  sourceIndex: number;
-  sourceName: string | null;
-  isPrimary: boolean;
   storageStem: string | null;
   masterVideoStartEpoch: number;
   masterVideoEndEpoch: number | null;
@@ -88,9 +85,6 @@ export const findVideoClipPlaybackRowById = async (
       clipId: videoClip.clipId,
       resultId: videoClip.resultId,
       masterVideoId: videoClip.masterVideoId,
-      sourceIndex: masterVideo.sourceIndex,
-      sourceName: masterVideo.sourceName,
-      isPrimary: masterVideo.isPrimary,
       storageStem: videoClip.storageStem,
       masterVideoStartEpoch: masterVideo.startEpoch,
       masterVideoEndEpoch: masterVideo.endEpoch,
@@ -104,32 +98,6 @@ export const findVideoClipPlaybackRowById = async (
     )
     .where(eq(videoClip.clipId, clipId))
     .limit(1))[0] ?? null;
-
-export const listVideoClipPlaybackRowsByResultId = async (
-  resultId: number,
-  database: DbOrTx = db,
-): Promise<VideoClipPlaybackRow[]> =>
-  database
-    .select({
-      clipId: videoClip.clipId,
-      resultId: videoClip.resultId,
-      masterVideoId: videoClip.masterVideoId,
-      sourceIndex: masterVideo.sourceIndex,
-      sourceName: masterVideo.sourceName,
-      isPrimary: masterVideo.isPrimary,
-      storageStem: videoClip.storageStem,
-      masterVideoStartEpoch: masterVideo.startEpoch,
-      masterVideoEndEpoch: masterVideo.endEpoch,
-      startOffsetMs: videoClip.startOffsetMs,
-      endOffsetMs: videoClip.endOffsetMs,
-    })
-    .from(videoClip)
-    .innerJoin(
-      masterVideo,
-      eq(masterVideo.masterVideoId, videoClip.masterVideoId),
-    )
-    .where(eq(videoClip.resultId, resultId))
-    .orderBy(asc(videoClip.startOffsetMs), asc(videoClip.clipId));
 
 /** Batched playback rows across many results (kills the sidebar N+1). */
 export const listVideoClipPlaybackRowsByResultIds = async (
@@ -145,9 +113,6 @@ export const listVideoClipPlaybackRowsByResultIds = async (
       clipId: videoClip.clipId,
       resultId: videoClip.resultId,
       masterVideoId: videoClip.masterVideoId,
-      sourceIndex: masterVideo.sourceIndex,
-      sourceName: masterVideo.sourceName,
-      isPrimary: masterVideo.isPrimary,
       storageStem: videoClip.storageStem,
       masterVideoStartEpoch: masterVideo.startEpoch,
       masterVideoEndEpoch: masterVideo.endEpoch,

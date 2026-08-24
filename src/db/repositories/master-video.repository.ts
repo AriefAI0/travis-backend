@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { masterVideo, session } from "../schema";
@@ -11,10 +11,6 @@ export type ProjectMasterVideoRow = {
   startEpoch: number;
   endEpoch: number | null;
   recordingStatus: string;
-  sourceIndex: number;
-  isPrimary: boolean;
-  sourceName: string | null;
-  recoveryStatus: string | null;
   fileSize: number | null;
   durationMs: number | null;
 };
@@ -68,10 +64,6 @@ export const listMasterVideoRecordsByProjectId = async (
       startEpoch: masterVideo.startEpoch,
       endEpoch: masterVideo.endEpoch,
       recordingStatus: masterVideo.recordingStatus,
-      sourceIndex: masterVideo.sourceIndex,
-      isPrimary: masterVideo.isPrimary,
-      sourceName: masterVideo.sourceName,
-      recoveryStatus: masterVideo.recoveryStatus,
       fileSize: masterVideo.fileSize,
       durationMs: masterVideo.durationMs,
     })
@@ -92,42 +84,6 @@ export const listMasterVideoRecordsByStatuses = async (
     where: inArray(masterVideo.recordingStatus, statuses),
     orderBy: asc(masterVideo.masterVideoId),
   });
-};
-
-export const listMasterVideoRecordsByProjectIdAndStatuses = async (
-  projectId: number,
-  statuses: ("recording" | "finalized" | "interrupted" | "finalization_failed" | "canceled")[],
-  database: DbOrTx = db,
-) => {
-  if (statuses.length === 0) {
-    return [];
-  }
-
-  return database
-    .select({
-      masterVideoId: masterVideo.masterVideoId,
-      sessionId: masterVideo.sessionId,
-      sessionName: session.name,
-      storageStem: masterVideo.storageStem,
-      startEpoch: masterVideo.startEpoch,
-      endEpoch: masterVideo.endEpoch,
-      recordingStatus: masterVideo.recordingStatus,
-      sourceIndex: masterVideo.sourceIndex,
-      isPrimary: masterVideo.isPrimary,
-      sourceName: masterVideo.sourceName,
-      recoveryStatus: masterVideo.recoveryStatus,
-      fileSize: masterVideo.fileSize,
-      durationMs: masterVideo.durationMs,
-    })
-    .from(masterVideo)
-    .innerJoin(session, eq(session.sessionId, masterVideo.sessionId))
-    .where(
-      and(
-        eq(session.projectId, projectId),
-        inArray(masterVideo.recordingStatus, statuses),
-      ),
-    )
-    .orderBy(desc(masterVideo.startEpoch), desc(masterVideo.masterVideoId));
 };
 
 export const updateMasterVideoById = async (
