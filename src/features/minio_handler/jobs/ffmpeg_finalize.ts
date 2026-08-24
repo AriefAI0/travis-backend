@@ -86,7 +86,6 @@ async function bridgeToPostgres(
       await videoService.markMasterVideoFinalized(
         ref.pk,
         {
-          stoppedAt: new Date(),
           durationMs,
           fileSize,
           endEpoch: row.startEpoch + Math.round(durationMs / 1000),

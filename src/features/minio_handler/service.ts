@@ -57,6 +57,8 @@ function requireUploadable(session: SessionRow) {
 export async function markRecordingFailedByStem(stem: string, reason: string) {
   const ref = stemPk(stem);
   if (!ref) return;
+  // finalization_error column is gone: the log keeps the reason
+  log.error("recording marked finalization_failed", { stem, reason });
   try {
     if (ref.kind === "master") {
       await videoService.markMasterVideoFinalizationFailed(ref.pk, reason);

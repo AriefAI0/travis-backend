@@ -6,7 +6,6 @@ import {
   deleteMasterVideoById,
   findMasterVideoById,
   listMasterVideoRecords,
-  listMasterVideoRecordsByProjectIdAndStatuses,
   listMasterVideoRecordsByProjectId,
   listMasterVideoRecordsBySessionId,
   listMasterVideoRecordsByStatuses,
@@ -23,7 +22,6 @@ import {
   findVideoClipById,
   findVideoClipPlaybackRowById,
   listActiveVideoClipRecords,
-  listVideoClipPlaybackRowsByResultId,
   listVideoClipPlaybackRowsByResultIds,
   listVideoClipRecords,
   listVideoClipRecordsByMasterVideoId,
@@ -53,12 +51,6 @@ export type CreateMasterVideoInput = {
   startEpoch: number;
   endEpoch?: number | null;
   recordingStatus?: RecordingPersistenceStatus;
-  sourceKind?: string | null;
-  inputId?: string | null;
-  sourceIndex?: number;
-  isPrimary?: boolean;
-  sourceName?: string | null;
-  startedAt?: Date | null;
 };
 
 export type CreateVideoClipInput = {
@@ -84,9 +76,6 @@ export type VideoClipPlayback = {
   clipId: number;
   resultId: number;
   masterVideoId: number;
-  sourceIndex: number;
-  sourceName: string | null;
-  isPrimary: boolean;
   storageStem: string | null;
   masterVideoStartEpoch: number;
   masterVideoEndEpoch: number | null;
@@ -106,10 +95,6 @@ export type ProjectMasterVideo = {
   startEpoch: number;
   endEpoch: number | null;
   recordingStatus: RecordingPersistenceStatus;
-  sourceIndex: number;
-  isPrimary: boolean;
-  sourceName: string | null;
-  recoveryStatus: RecordingRecoveryStatus | null;
   fileSize: number | null;
   durationMs: number | null;
 };
@@ -136,24 +121,11 @@ export const RECORDING_PERSISTENCE_STATUS = {
   canceled: "canceled",
 } as const;
 
-export const RECORDING_RECOVERY_STATUS = {
-  recoverable: "recoverable",
-  missingFile: "missing_file",
-  unusable: "unusable",
-} as const;
-
 export type RecordingPersistenceStatus =
   (typeof RECORDING_PERSISTENCE_STATUS)[keyof typeof RECORDING_PERSISTENCE_STATUS];
 
-export type RecordingRecoveryStatus =
-  (typeof RECORDING_RECOVERY_STATUS)[keyof typeof RECORDING_RECOVERY_STATUS];
-
 const recordingPersistenceStatuses = new Set<string>(
   Object.values(RECORDING_PERSISTENCE_STATUS),
-);
-
-const recordingRecoveryStatuses = new Set<string>(
-  Object.values(RECORDING_RECOVERY_STATUS),
 );
 
 const validateMasterVideoTimeRange = (
@@ -207,21 +179,6 @@ const normalizeRecordingPersistenceStatus = (
   return value as RecordingPersistenceStatus;
 };
 
-const normalizeRecordingRecoveryStatus = (
-  value: string | null | undefined,
-  fieldName: string,
-): RecordingRecoveryStatus | null => {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  if (!recordingRecoveryStatuses.has(value)) {
-    throw new Error(`${fieldName} is invalid`);
-  }
-
-  return value as RecordingRecoveryStatus;
-};
-
 const normalizeMasterVideoUpdate = (
   data: Partial<typeof masterVideo.$inferInsert>,
 ): Partial<typeof masterVideo.$inferInsert> => {
@@ -257,63 +214,12 @@ const normalizeMasterVideoUpdate = (
     );
   }
 
-  if ("sourceKind" in data) {
-    nextData.sourceKind = normalizeOptionalText(
-      data.sourceKind,
-      "Master video source kind",
-    );
-  }
-
-  if ("inputId" in data) {
-    nextData.inputId = normalizeOptionalText(
-      data.inputId,
-      "Master video input id",
-    );
-  }
-
-  if ("sourceIndex" in data) {
-    nextData.sourceIndex = data.sourceIndex;
-  }
-
-  if ("isPrimary" in data) {
-    nextData.isPrimary = data.isPrimary;
-  }
-
-  if ("sourceName" in data) {
-    nextData.sourceName = normalizeOptionalText(
-      data.sourceName,
-      "Master video source name",
-    );
-  }
-
-  if ("startedAt" in data) {
-    nextData.startedAt = data.startedAt;
-  }
-
-  if ("stoppedAt" in data) {
-    nextData.stoppedAt = data.stoppedAt;
-  }
-
   if ("durationMs" in data) {
     nextData.durationMs = data.durationMs;
   }
 
   if ("fileSize" in data) {
     nextData.fileSize = data.fileSize;
-  }
-
-  if ("recoveryStatus" in data) {
-    nextData.recoveryStatus = normalizeRecordingRecoveryStatus(
-      data.recoveryStatus,
-      "Master video recovery status",
-    );
-  }
-
-  if ("finalizationError" in data) {
-    nextData.finalizationError = normalizeOptionalText(
-      data.finalizationError,
-      "Master video finalization error",
-    );
   }
 
   nextData.lastUpdatedAt = new Date();
@@ -376,19 +282,6 @@ const validateMasterVideoTimelineThumbnail = (
   }
 };
 
-const normalizeSourceIndex = (sourceIndex: number | undefined): number => {
-  if (sourceIndex === undefined) {
-    return 1;
-  }
-
-  // zero allowed: one composited stream is written as source_index 0 (spec)
-  if (!Number.isInteger(sourceIndex) || sourceIndex < 0) {
-    throw new Error("Master video sourceIndex must be a non-negative integer");
-  }
-
-  return sourceIndex;
-};
-
 const validateVideoClipRange = async (
   data: Pick<
     typeof videoClip.$inferInsert,
@@ -435,12 +328,6 @@ export const createMasterVideo = async (
       startEpoch: data.startEpoch,
       endEpoch: data.endEpoch ?? null,
       recordingStatus: data.recordingStatus ?? RECORDING_PERSISTENCE_STATUS.finalized,
-      sourceKind: normalizeOptionalText(data.sourceKind, "Master video source kind"),
-      inputId: normalizeOptionalText(data.inputId, "Master video input id"),
-      sourceIndex: normalizeSourceIndex(data.sourceIndex),
-      isPrimary: data.isPrimary ?? false,
-      sourceName: normalizeOptionalText(data.sourceName, "Master video source name"),
-      startedAt: data.startedAt ?? null,
       lastUpdatedAt: new Date(),
     },
     database,
@@ -476,10 +363,6 @@ export const listMasterVideosByProjectId = async (
       row.recordingStatus,
       "Master video recording status",
     ),
-    recoveryStatus: normalizeRecordingRecoveryStatus(
-      row.recoveryStatus,
-      "Master video recovery status",
-    ),
   }));
 };
 
@@ -506,9 +389,6 @@ export const getMasterVideoPlaybackData = async (
       endEpoch: masterVideo.endEpoch,
       durationMs: masterVideo.durationMs,
       recordingStatus: masterVideo.recordingStatus,
-      sourceIndex: masterVideo.sourceIndex,
-      isPrimary: masterVideo.isPrimary,
-      sourceName: masterVideo.sourceName,
     })
     .from(masterVideo)
     .innerJoin(session, eq(session.sessionId, masterVideo.sessionId))
@@ -590,23 +470,21 @@ export const getMasterVideoPlaybackData = async (
   return {
     ...selectedMasterVideo,
     recordingStatus: normalizedRecordingStatus,
-    sourceVideos: sessionMasterVideos
+    sourceVideos: [...sessionMasterVideos]
+      // copy first: sort mutates in place
+      .sort((firstSource, secondSource) =>
+        firstSource.startEpoch === secondSource.startEpoch
+          ? firstSource.masterVideoId - secondSource.masterVideoId
+          : firstSource.startEpoch - secondSource.startEpoch
+      )
       .map((sourceVideo) => ({
         masterVideoId: sourceVideo.masterVideoId,
-        sourceIndex: sourceVideo.sourceIndex,
-        isPrimary: sourceVideo.isPrimary,
-        sourceName: sourceVideo.sourceName,
         storageStem: sourceVideo.storageStem,
         recordingStatus: normalizeRecordingPersistenceStatus(
           sourceVideo.recordingStatus,
           "Master video recording status",
         ),
-      }))
-      .sort((firstSource, secondSource) =>
-        firstSource.sourceIndex === secondSource.sourceIndex
-          ? firstSource.masterVideoId - secondSource.masterVideoId
-          : firstSource.sourceIndex - secondSource.sourceIndex
-      ),
+      })),
     thumbnails: timelineThumbnails.map((thumbnail) => ({
       thumbnailId: thumbnail.thumbnailId,
       masterVideoId: thumbnail.masterVideoId,
@@ -681,36 +559,6 @@ export const replaceMasterVideoTimelineThumbnails = async (
   return database ? run(database) : db.transaction(run);
 };
 
-export const listRecoverableMasterVideosByProjectId = async (
-  projectId: number,
-  database?: DbOrTx,
-): Promise<ProjectMasterVideo[]> => {
-  if (!Number.isInteger(projectId) || projectId < 1) {
-    throw new Error("Project id must be a positive integer");
-  }
-
-  const rows = await listMasterVideoRecordsByProjectIdAndStatuses(
-    projectId,
-    [
-      RECORDING_PERSISTENCE_STATUS.interrupted,
-      RECORDING_PERSISTENCE_STATUS.finalizationFailed,
-    ],
-    database,
-  );
-
-  return rows.map((row) => ({
-    ...row,
-    recordingStatus: normalizeRecordingPersistenceStatus(
-      row.recordingStatus,
-      "Master video recording status",
-    ),
-    recoveryStatus: normalizeRecordingRecoveryStatus(
-      row.recoveryStatus,
-      "Master video recovery status",
-    ),
-  }));
-};
-
 export const updateMasterVideo = async (
   masterVideoId: number,
   data: Partial<typeof masterVideo.$inferInsert>,
@@ -775,7 +623,6 @@ export const listUnfinishedMasterVideos = async (database?: DbOrTx) =>
 export const markMasterVideoFinalized = async (
   masterVideoId: number,
   data: {
-    stoppedAt: Date;
     durationMs: number;
     // Null since the local master file was removed (TS segments are the master).
     fileSize: number | null;
@@ -786,21 +633,18 @@ export const markMasterVideoFinalized = async (
   updateMasterVideo(masterVideoId, {
     endEpoch: data.endEpoch,
     recordingStatus: RECORDING_PERSISTENCE_STATUS.finalized,
-    stoppedAt: data.stoppedAt,
     durationMs: data.durationMs,
     fileSize: data.fileSize,
-    recoveryStatus: null,
-    finalizationError: null,
   }, database);
 
+// status carries the fact; the log carries the reason
 export const markMasterVideoFinalizationFailed = async (
   masterVideoId: number,
-  error: string,
+  _error: string,
   database?: DbOrTx,
 ) =>
   updateMasterVideo(masterVideoId, {
     recordingStatus: RECORDING_PERSISTENCE_STATUS.finalizationFailed,
-    finalizationError: normalizeRequiredText(error, "Finalization error"),
   }, database);
 
 export const listVideoClips = async (database?: DbOrTx) =>
@@ -833,14 +677,6 @@ const toVideoClipPlayback = (playbackRow: VideoClipPlaybackRow): VideoClipPlayba
         ? null
         : (playbackRow.masterVideoStartEpoch ?? 0) * 1000 + playbackRow.endOffsetMs,
   };
-};
-
-export const listVideoClipPlaybackByResultId = async (
-  resultId: number,
-  database?: DbOrTx,
-): Promise<VideoClipPlayback[]> => {
-  const playbackRows = await listVideoClipPlaybackRowsByResultId(resultId, database);
-  return playbackRows.map(toVideoClipPlayback);
 };
 
 /**
@@ -947,34 +783,20 @@ export const updateVideoClip = async (
               "Video clip recording status",
             )
           : undefined,
-      recoveryStatus:
-        "recoveryStatus" in data
-          ? normalizeRecordingRecoveryStatus(
-              data.recoveryStatus,
-              "Video clip recovery status",
-            )
-          : undefined,
-      finalizationError:
-        "finalizationError" in data
-          ? normalizeOptionalText(
-              data.finalizationError,
-              "Video clip finalization error",
-            )
-          : undefined,
       lastUpdatedAt: new Date(),
     },
     database,
   );
 };
 
+// status carries the fact; the log carries the reason
 export const markVideoClipFinalizationFailed = async (
   clipId: number,
-  error: string,
+  _error: string,
   database?: DbOrTx,
 ) =>
   updateVideoClip(clipId, {
     recordingStatus: RECORDING_PERSISTENCE_STATUS.finalizationFailed,
-    finalizationError: normalizeRequiredText(error, "Finalization error"),
   }, database);
 
 export const markVideoClipFinalized = async (
@@ -989,11 +811,8 @@ export const markVideoClipFinalized = async (
 ) =>
   updateVideoClip(clipId, {
     recordingStatus: RECORDING_PERSISTENCE_STATUS.finalized,
-    recordingStoppedAt: new Date(),
     ...(data.endOffsetMs !== undefined ? { endOffsetMs: data.endOffsetMs } : {}),
     fileSize: data.fileSize,
-    recoveryStatus: null,
-    finalizationError: null,
   }, database);
 
 // active inspections: open clips (endOffsetMs null); status is unreliable
