@@ -4,6 +4,7 @@ import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import { generateSegments } from "../../helpers/fixtures";
 import { json } from "../../helpers/json";
+import { seedRecordingHierarchy, type SeededHierarchy } from "../../helpers/seed";
 import { startServer, type TestServer } from "../../helpers/server";
 
 const SEG_COUNT = 45;
@@ -12,6 +13,7 @@ const SEG_DIR = "/tmp/travis-e2e-segs";
 
 let server: TestServer;
 let segBytes: Uint8Array[];
+let seed: SeededHierarchy;
 
 function sha256(bytes: Uint8Array) {
   const h = new Bun.CryptoHasher("sha256");
@@ -28,11 +30,13 @@ function sha256Concat(chunks: Uint8Array[]) {
 beforeAll(async () => {
   const segPaths = await generateSegments(SEG_DIR, SEG_COUNT);
   segBytes = await Promise.all(segPaths.map(async (p) => new Uint8Array(await Bun.file(p).arrayBuffer())));
+  seed = await seedRecordingHierarchy();
   server = await startServer({ PART_SIZE_BYTES: String(5 * 1024 * 1024), DATA_DIR });
 }, 120_000);
 
 afterAll(async () => {
   await server?.stop();
+  await seed.cleanup();
   rmSync(DATA_DIR, { recursive: true, force: true });
   rmSync(SEG_DIR, { recursive: true, force: true });
 });
@@ -43,12 +47,16 @@ test(
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 101 }),
+      body: JSON.stringify({ kind: "master", projectId: seed.projectId, sessionId: seed.sessionId }),
     });
     expect(createRes.status).toBe(201);
     const { data: created } = await json(createRes);
     const id = created.id;
     expect(created.status).toBe("recording");
+    // create contract inversion: server assigns the PK and returns the stem
+    expect(Number.isInteger(created.masterVideoId)).toBe(true);
+    const stem = `p${seed.projectId}/s${seed.sessionId}/master_${created.masterVideoId}`;
+    expect(created.storageStem).toBe(stem);
 
     let midStreamDurable = -1;
     for (let i = 0; i < SEG_COUNT; i++) {
@@ -83,7 +91,6 @@ test(
     expect(status.status).toBe("finalizing");
     expect(status.durableThrough).toBe(SEG_COUNT - 1);
 
-    const stem = `p1/s1/master_101`;
     const key = `${stem}.ts`;
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     const total = segBytes.reduce((n, b) => n + b.byteLength, 0);
@@ -107,16 +114,24 @@ test(
 );
 
 test(
-  "duplicate create for same identity → 409",
+  "each create gets a fresh server-assigned primary key",
   async () => {
-    const res = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
+    const first = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 101 }),
+      body: JSON.stringify({ kind: "master", projectId: seed.projectId, sessionId: seed.sessionId }),
     });
-    expect(res.status).toBe(409);
-    const body = await json(res);
-    expect(body.code).toBe("duplicate_session");
+    expect(first.status).toBe(201);
+    const second = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "master", projectId: seed.projectId, sessionId: seed.sessionId }),
+    });
+    expect(second.status).toBe(201);
+    const a = (await json(first)).data;
+    const b = (await json(second)).data;
+    expect(b.masterVideoId).not.toBe(a.masterVideoId);
+    expect(b.storageStem).not.toBe(a.storageStem);
   },
   30_000,
 );
@@ -128,10 +143,35 @@ test(
     expect(notFound.status).toBe(404);
     expect(notFound.headers.get("content-type")).toContain("application/problem+json");
 
+    // create against a session that does not exist → 404, no domain row
+    const noSession = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "master", projectId: seed.projectId, sessionId: 99_999_999 }),
+    });
+    expect(noSession.status).toBe(404);
+    expect(noSession.headers.get("content-type")).toContain("application/problem+json");
+
+    // project mismatch with the session row → 400; stems must not lie
+    const wrongProject = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "master", projectId: seed.projectId + 1, sessionId: seed.sessionId }),
+    });
+    expect(wrongProject.status).toBe(400);
+    const wrongProjectBody = await json(wrongProject);
+    expect(wrongProjectBody.code).toBe("bad_request");
+
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "clip", projectId: 1, sessionId: 1, itemId: 1, clipId: 201 }),
+      body: JSON.stringify({
+        kind: "clip",
+        projectId: seed.projectId,
+        sessionId: seed.sessionId,
+        itemId: seed.itemId,
+        resultId: seed.resultId,
+      }),
     });
     const id = (await json(createRes)).data.id;
 
@@ -164,7 +204,13 @@ test(
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "clip", projectId: 1, sessionId: 1, itemId: 1, clipId: 202 }),
+      body: JSON.stringify({
+        kind: "clip",
+        projectId: seed.projectId,
+        sessionId: seed.sessionId,
+        itemId: seed.itemId,
+        resultId: seed.resultId,
+      }),
     });
     const id = (await json(createRes)).data.id;
     const res = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/heartbeat`, { method: "POST" });
@@ -181,10 +227,12 @@ test(
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 103 }),
+      body: JSON.stringify({ kind: "master", projectId: seed.projectId, sessionId: seed.sessionId }),
     });
     expect(createRes.status).toBe(201);
-    const id = (await json(createRes)).data.id;
+    const created2 = (await json(createRes)).data;
+    const id = created2.id;
+    const stem103 = created2.storageStem;
 
     // holes hold; a buffered dup replaces its slot; a post-flush dup is discarded
     const order = [0, 2, 4, 5, 6, 2, 3, ...Array.from({ length: SEG_COUNT - 7 }, (_, i) => i + 7), 1, 0];
@@ -200,7 +248,7 @@ test(
     const stopRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/stop`, { method: "POST" });
     expect(stopRes.status).toBe(202);
 
-    const key = `p1/s1/master_103.ts`;
+    const key = `${stem103}.ts`;
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(segBytes.reduce((n, b) => n + b.byteLength, 0));
 

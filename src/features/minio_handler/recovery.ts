@@ -4,7 +4,7 @@ import { tracker, type PartRow, type SessionRow } from "../../lib/db/minio_track
 import { minio } from "../../lib/minio_storage/clients";
 import { s3parts, type RemotePart } from "../../lib/minio_storage/s3sdk";
 import { rawLeaf } from "./paths";
-import { finalizeRecording } from "./service";
+import { finalizeRecording, markRecordingFailedByStem } from "./service";
 
 export interface RecoveryPlan {
   durableThrough: number;
@@ -156,6 +156,7 @@ async function healVanishedUpload(session: SessionRow) {
       log.info("recovery found completed object", { session: session.id, bytes: stat.size });
     } catch {
       tracker.setFinalizedEmpty(session.id);
+      await markRecordingFailedByStem(session.object_key!, "upload vanished before any part");
       log.warn("recovery: upload vanished before any part, finalized empty", { session: session.id });
     }
     return;

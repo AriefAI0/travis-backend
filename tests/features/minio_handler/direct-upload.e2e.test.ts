@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import { json } from "../../helpers/json";
+import { seedRecordingHierarchy, type SeededHierarchy } from "../../helpers/seed";
 import { startServer, type TestServer } from "../../helpers/server";
 
 // Direct-upload transport contract: the test IS the app — reserve a part,
@@ -11,6 +12,7 @@ import { startServer, type TestServer } from "../../helpers/server";
 const MB = 1024 * 1024;
 const DATA_DIR = "C:/Users/arief/AppData/Local/Temp/travis-e2e-direct";
 let server: TestServer;
+let seed: SeededHierarchy;
 
 // random payload: etags must differ between parts (MinIO etags are content md5s)
 function payload(seed: number, size = 5 * MB): Uint8Array {
@@ -23,11 +25,11 @@ function payload(seed: number, size = 5 * MB): Uint8Array {
   return bytes;
 }
 
-async function createSession(kind: "master" | "clip", n: number) {
+async function createSession(kind: "master" | "clip") {
   const body =
     kind === "master"
-      ? { kind, projectId: 1, sessionId: 1, recordingId: 9000 + n }
-      : { kind, projectId: 1, sessionId: 1, itemId: 1, clipId: 9000 + n };
+      ? { kind, projectId: seed.projectId, sessionId: seed.sessionId }
+      : { kind, projectId: seed.projectId, sessionId: seed.sessionId, itemId: seed.itemId, resultId: seed.resultId };
   const res = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -70,6 +72,7 @@ async function awaitTerminal(id: string, timeoutMs = 60_000): Promise<string> {
 }
 
 beforeAll(async () => {
+  seed = await seedRecordingHierarchy();
   server = await startServer({
     MINIO_ENDPOINT: "http://localhost:9002",
     DATA_DIR,
@@ -81,13 +84,14 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await server?.stop();
+  await seed.cleanup();
   rmSync(DATA_DIR, { recursive: true, force: true });
 });
 
 test(
   "probe + reserve + PUT + complete + stop sews exact bytes into one master",
   async () => {
-    const created = await createSession("master", 1);
+    const created = await createSession("master");
     const id = created.id;
     expect(created.status).toBe("recording");
     expect(created.partSizeBytes).toBe(5 * MB);
@@ -130,7 +134,7 @@ test(
     expect((await json(stopRes)).data.status).toBe("finalizing");
 
     // exactly ONE master object holds every uploaded byte, in order
-    const key = `p1/s1/master_9001.ts`;
+    const key = `${created.storageStem}.ts`;
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     const total = parts.reduce((n, p) => n + p.bytes.byteLength, 0);
     expect(stat.size).toBe(total);
@@ -153,7 +157,7 @@ test(
 test(
   "error contract over the wire: out_of_order and small_part carry resync details",
   async () => {
-    const created = await createSession("master", 2);
+    const created = await createSession("master");
     const id = created.id;
 
     const bytes = payload(3);
@@ -183,7 +187,7 @@ test(
 test(
   "heartbeat silence goes stale; first reserve resumes",
   async () => {
-    const created = await createSession("clip", 3);
+    const created = await createSession("clip");
     const id = created.id;
 
     // SEGMENT_STALE_SECONDS=2: no heartbeat for ~4s flips the session stale

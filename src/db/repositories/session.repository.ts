@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { session } from "../schema";
@@ -10,6 +10,22 @@ export const createSessionRecord = async (
   const createdSessions = await database.insert(session).values(data).returning();
 
   return createdSessions[0] ?? null;
+};
+
+// highest assigned display number in a project; races on max+1 are caught by
+// the uniq (project_id, display_number) index and retried by the caller
+export const maxSessionDisplayNumberByProjectId = async (
+  projectId: number,
+  database: DbOrTx = db,
+) => {
+  const rows = await database
+    .select({ displayNumber: session.displayNumber })
+    .from(session)
+    .where(and(eq(session.projectId, projectId), isNotNull(session.displayNumber)))
+    .orderBy(desc(session.displayNumber))
+    .limit(1);
+
+  return rows[0]?.displayNumber ?? null;
 };
 
 export const listSessionRecords = async (database: DbOrTx = db) =>

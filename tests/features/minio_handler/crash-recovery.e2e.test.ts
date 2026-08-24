@@ -4,6 +4,7 @@ import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import { generateSegments } from "../../helpers/fixtures";
 import { json } from "../../helpers/json";
+import { seedRecordingHierarchy, type SeededHierarchy } from "../../helpers/seed";
 import { startServer, type TestServer } from "../../helpers/server";
 
 // Crash-recovery proofs (spec Testing #3 + #4): SIGKILL mid-recording then
@@ -17,6 +18,7 @@ const SEG_DIR = "/tmp/travis-e2e-segs-crash";
 
 let segBytes: Uint8Array[];
 const servers: TestServer[] = [];
+let seed: SeededHierarchy;
 
 function sha256(bytes: Uint8Array) {
   const h = new Bun.CryptoHasher("sha256");
@@ -40,14 +42,16 @@ async function postSeg(s: TestServer, id: string, idx: number) {
   return (await json(res)).data.durableThrough as number;
 }
 
-async function createSession(s: TestServer, recordingId: number) {
+// returns tracker id + server-assigned stem (raw key derives from it)
+async function createSession(s: TestServer) {
   const res = await fetch(`${s.baseUrl}/api/minio_handler/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId }),
+    body: JSON.stringify({ kind: "master", projectId: seed.projectId, sessionId: seed.sessionId }),
   });
   expect(res.status).toBe(201);
-  return (await json(res)).data.id as string;
+  const data = (await json(res)).data;
+  return { id: data.id as string, stem: data.storageStem as string };
 }
 
 async function pollStatus(s: TestServer, id: string, want: (d: any) => boolean, ms: number) {
@@ -63,10 +67,12 @@ async function pollStatus(s: TestServer, id: string, want: (d: any) => boolean, 
 beforeAll(async () => {
   const segPaths = await generateSegments(SEG_DIR, SEG_COUNT);
   segBytes = await Promise.all(segPaths.map(async (p) => new Uint8Array(await Bun.file(p).arrayBuffer())));
+  seed = await seedRecordingHierarchy();
 }, 120_000);
 
 afterAll(async () => {
   for (const s of servers) await s.stop().catch(() => {});
+  await seed.cleanup();
   rmSync(DATA_DIR_CRASH, { recursive: true, force: true });
   rmSync(DATA_DIR_STALE, { recursive: true, force: true });
   rmSync(SEG_DIR, { recursive: true, force: true });
@@ -77,7 +83,7 @@ test(
   async () => {
     const s1 = await startServer({ PART_SIZE_BYTES: PART, DATA_DIR: DATA_DIR_CRASH });
     servers.push(s1);
-    const id = await createSession(s1, 501);
+    const { id, stem } = await createSession(s1);
 
     // send until at least one part is durable, then stop sending
     let durable = -1;
@@ -101,7 +107,7 @@ test(
     expect(stopRes.status, stopBody).toBe(202);
     expect(JSON.parse(stopBody).data.status).toBe("finalizing");
 
-    const key = `p1/s1/master_501.ts`;
+    const key = `${stem}.ts`;
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(segBytes.reduce((n, b) => n + b.byteLength, 0));
 
@@ -126,7 +132,7 @@ test(
       RESUME_GRACE_MINUTES: "0.05",
     });
     servers.push(s);
-    const id = await createSession(s, 502);
+    const { id, stem } = await createSession(s);
 
     let durable = -1;
     for (let i = 0; i < SEG_COUNT && durable < 0; i++) {
@@ -140,7 +146,7 @@ test(
     expect(final.durableThrough).toBe(durable);
 
     // object = exactly the durable prefix (RAM-buffered tail was never durable)
-    const key = `p1/s1/master_502.ts`;
+    const key = `${stem}.ts`;
     const prefix = segBytes.slice(0, durable + 1);
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(prefix.reduce((n, b) => n + b.byteLength, 0));

@@ -81,3 +81,10 @@ export function snipImages(stem: string, imageId: number) {
     annotated: { bucket: env.BUCKET_IMAGES, key: `${stem}/img_${imageId}_annotated.jpg` },
   };
 }
+
+// stem tail {kind}_{pk} maps a stored stem back to its domain row; failure
+// paths use this until the tracker carries the link natively (phase 5)
+export function stemPk(stem: string): { kind: "master" | "clip"; pk: number } | null {
+  const m = /\/(master|clip)_(\d+)$/.exec(stem);
+  return m ? { kind: m[1] as "master" | "clip", pk: Number(m[2]) } : null;
+}

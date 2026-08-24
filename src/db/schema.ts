@@ -520,6 +520,7 @@ export const videoClip = pgTable(
       .notNull()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
+    // intentionally NO cascade — clips survive master deletion
     masterVideoId: integer("master_video_id")
       .notNull()
       .references(() => masterVideo.masterVideoId),

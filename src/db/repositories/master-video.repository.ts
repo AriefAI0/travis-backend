@@ -51,7 +51,9 @@ export const listMasterVideoRecordsBySessionId = async (
 ) =>
   database.query.masterVideo.findMany({
     where: eq(masterVideo.sessionId, sessionId),
-    orderBy: asc(masterVideo.startEpoch),
+    // pk tiebreak: startEpoch is second-granularity, same-second creates need
+    // a deterministic order for "latest" picks
+    orderBy: [asc(masterVideo.startEpoch), asc(masterVideo.masterVideoId)],
   });
 
 export const listMasterVideoRecordsByProjectId = async (

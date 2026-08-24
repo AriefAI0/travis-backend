@@ -49,6 +49,8 @@ export type CreateMasterVideoInput = {
   sessionId: number;
   fileUrl: string;
   thumbnailUrl?: string | null;
+  // path prefix without bucket/extension; written by the ingest create path
+  storageStem?: string | null;
   startEpoch: number;
   endEpoch?: number | null;
   recordingStatus?: RecordingPersistenceStatus;
@@ -67,6 +69,8 @@ export type CreateVideoClipInput = {
   endOffsetMs?: number | null;
   clipFileUrl?: string | null;
   thumbnailUrl?: string | null;
+  storageStem?: string | null;
+  recordingStatus?: RecordingPersistenceStatus;
 };
 
 export type CreateMasterVideoTimelineThumbnailInput = {
@@ -255,6 +259,13 @@ const normalizeMasterVideoUpdate = (
     );
   }
 
+  if ("storageStem" in data) {
+    nextData.storageStem = normalizeOptionalText(
+      data.storageStem,
+      "Master video storage stem",
+    );
+  }
+
   if ("startEpoch" in data) {
     nextData.startEpoch = data.startEpoch;
   }
@@ -394,8 +405,9 @@ const normalizeSourceIndex = (sourceIndex: number | undefined): number => {
     return 1;
   }
 
-  if (!Number.isInteger(sourceIndex) || sourceIndex < 1) {
-    throw new Error("Master video sourceIndex must be a positive integer");
+  // zero allowed: one composited stream is written as source_index 0 (spec)
+  if (!Number.isInteger(sourceIndex) || sourceIndex < 0) {
+    throw new Error("Master video sourceIndex must be a non-negative integer");
   }
 
   return sourceIndex;
@@ -444,6 +456,10 @@ export const createMasterVideo = async (
       thumbnailUrl: normalizeOptionalText(
         data.thumbnailUrl,
         "Master video thumbnailUrl",
+      ),
+      storageStem: normalizeOptionalText(
+        data.storageStem,
+        "Master video storage stem",
       ),
       startEpoch: data.startEpoch,
       endEpoch: data.endEpoch ?? null,
@@ -780,7 +796,12 @@ export const createVideoClip = async (
         data.thumbnailUrl,
         "Video clip thumbnailUrl",
       ),
-      recordingStatus: RECORDING_PERSISTENCE_STATUS.finalized,
+      storageStem: normalizeOptionalText(
+        data.storageStem,
+        "Video clip storage stem",
+      ),
+      recordingStatus:
+        data.recordingStatus ?? RECORDING_PERSISTENCE_STATUS.finalized,
       lastUpdatedAt: new Date(),
     },
     database,

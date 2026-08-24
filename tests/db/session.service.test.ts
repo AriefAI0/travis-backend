@@ -34,6 +34,20 @@ describe("session.service", () => {
     await truncateTestDatabase();
   });
 
+  it("assigns display numbers as per-project max + 1", async () => {
+    await testDb.insert(schema.project).values({ projectId: 1, title: "Project One" });
+    await testDb.insert(schema.project).values({ projectId: 2, title: "Project Two" });
+
+    const first = await createSession({ projectId: 1, name: "Run 1" }, testDb);
+    const second = await createSession({ projectId: 1, name: "Run 2" }, testDb);
+    const otherProject = await createSession({ projectId: 2, name: "Run A" }, testDb);
+
+    expect(first).toMatchObject({ projectId: 1, displayNumber: 1 });
+    expect(second).toMatchObject({ projectId: 1, displayNumber: 2 });
+    // counters run per project, never globally
+    expect(otherProject).toMatchObject({ projectId: 2, displayNumber: 1 });
+  });
+
   it("supports CRUD for session and session item", async () => {
     await testDb.insert(schema.project).values({
       projectId: 1,

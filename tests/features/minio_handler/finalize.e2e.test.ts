@@ -4,6 +4,7 @@ import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import { generateSegments } from "../../helpers/fixtures";
 import { json } from "../../helpers/json";
+import { seedRecordingHierarchy, type SeededHierarchy } from "../../helpers/seed";
 import { startServer, type TestServer } from "../../helpers/server";
 
 // Finalize proof (spec Testing #1 tail): stop queues the job, the runner's
@@ -16,6 +17,7 @@ const SEG_DIR = "/tmp/travis-e2e-segs-finalize";
 
 let segBytes: Uint8Array[];
 let server: TestServer;
+let seed: SeededHierarchy;
 
 async function pollStatus(id: string, want: (d: any) => boolean, ms: number) {
   const end = Date.now() + ms;
@@ -41,11 +43,13 @@ async function probe(path: string) {
 beforeAll(async () => {
   const segPaths = await generateSegments(SEG_DIR, SEG_COUNT);
   segBytes = await Promise.all(segPaths.map(async (p) => new Uint8Array(await Bun.file(p).arrayBuffer())));
+  seed = await seedRecordingHierarchy();
   server = await startServer({ PART_SIZE_BYTES: PART, DATA_DIR });
 }, 120_000);
 
 afterAll(async () => {
   await server?.stop().catch(() => {});
+  await seed.cleanup();
   rmSync(DATA_DIR, { recursive: true, force: true });
   rmSync(SEG_DIR, { recursive: true, force: true });
 });
@@ -56,10 +60,13 @@ test(
     const create = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 301 }),
+      body: JSON.stringify({ kind: "master", projectId: seed.projectId, sessionId: seed.sessionId }),
     });
     expect(create.status).toBe(201);
-    const id = (await json(create)).data.id as string;
+    const createdData = (await json(create)).data;
+    const id = createdData.id as string;
+    const stem = createdData.storageStem as string;
+    expect(stem).toBe(`p${seed.projectId}/s${seed.sessionId}/master_${createdData.masterVideoId}`);
 
     for (let i = 0; i < SEG_COUNT; i++) {
       const res = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/segments?index=${i}`, {
@@ -112,7 +119,6 @@ test(
     expect(thumb[1]).toBe(0xd8);
 
     // cleanup all five objects (raw master + four artifacts)
-    const stem = `p1/s1/master_301`;
     await minio.removeObject(env.BUCKET_RAW, `${stem}.ts`);
     await minio.removeObject(env.BUCKET_MEDIA, `${stem}/video.mkv`);
     await minio.removeObject(env.BUCKET_MEDIA, `${stem}/hls/index.m3u8`);

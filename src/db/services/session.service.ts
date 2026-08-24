@@ -7,6 +7,7 @@ import {
   listSessionRecords,
   listSessionRecordsByIds,
   listSessionRecordsByProjectId,
+  maxSessionDisplayNumberByProjectId,
   updateSessionById,
 } from "../repositories/session.repository";
 import {
@@ -53,17 +54,42 @@ const normalizeSessionUpdate = (
   return nextData;
 };
 
+// display number: one more than the project's current max (spec). Concurrent
+// inserts race on max+1; the uniq (project_id, display_number) index rejects
+// the loser, which retries with a fresh max. A caller-supplied transaction
+// gets a single attempt — a failed statement aborts that transaction.
 export const createSession = async (
   data: CreateSessionInput,
   database?: DbOrTx,
-) =>
-  createSessionRecord(
-    {
-      projectId: data.projectId,
-      name: normalizeOptionalText(data.name),
-    },
-    database,
-  );
+) => {
+  const insertOnce = async (dbOrTx?: DbOrTx) => {
+    const max =
+      await maxSessionDisplayNumberByProjectId(data.projectId, dbOrTx);
+
+    return createSessionRecord(
+      {
+        projectId: data.projectId,
+        name: normalizeOptionalText(data.name),
+        displayNumber: (max ?? 0) + 1,
+      },
+      dbOrTx,
+    );
+  };
+
+  if (database) {
+    return insertOnce(database);
+  }
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await insertOnce();
+    } catch (err) {
+      const lostRace =
+        attempt < 2 && String(err).includes("uniq_session_project_display");
+      if (!lostRace) throw err;
+    }
+  }
+};
 
 export const listSessions = async (database?: DbOrTx) =>
   listSessionRecords(database);

@@ -15,10 +15,10 @@ const completeBody = z.object({
   sizeBytes: z.number().int().positive(),
 });
 
-// master: one composited stream; clip: one evidence clip (no source level)
+// server assigns the recording PK; clip create names its evidence result
 const createBody = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("master"), projectId: id, sessionId: id, recordingId: id }),
-  z.object({ kind: z.literal("clip"), projectId: id, sessionId: id, itemId: id, clipId: id }),
+  z.object({ kind: z.literal("master"), projectId: id, sessionId: id }),
+  z.object({ kind: z.literal("clip"), projectId: id, sessionId: id, itemId: id, resultId: id }),
 ]);
 
 export const minioHandlerRoutes = new Hono();
@@ -29,7 +29,7 @@ minioHandlerRoutes.post("/api/minio_handler/sessions", async (c) => {
     throw new AppError(
       400,
       "bad_request",
-      "body must be { kind: 'master', projectId, sessionId, recordingId } or { kind: 'clip', projectId, sessionId, itemId, clipId }",
+      "body must be { kind: 'master', projectId, sessionId } or { kind: 'clip', projectId, sessionId, itemId, resultId }",
     );
   }
   const rec = await createSession(parsed.data);

@@ -1,13 +1,30 @@
 import { env } from "../../config/env";
+import { db } from "../../db/client";
+import * as sessionService from "../../db/services/session.service";
+import * as videoService from "../../db/services/video.service";
 import { AppError } from "../../lib/error";
 import { log } from "../../lib/logger";
 import { tracker, type SessionRow } from "../../lib/db/minio_tracker";
 import { PART_UPLOAD_TTL_SECONDS, presignPartUpload, s3parts } from "../../lib/minio_storage/s3sdk";
 import { mintGetUrl } from "../../lib/minio_storage/mint";
 import { Assembler } from "./assembler";
-import { clipStem, identityString, masterLeaves, masterStem, clipLeaves, rawLeaf, type Leaf, type RecordingIdentity } from "./paths";
+import {
+  clipStem,
+  identityString,
+  masterLeaves,
+  masterStem,
+  clipLeaves,
+  rawLeaf,
+  stemPk,
+  type Leaf,
+} from "./paths";
 
 const assemblers = new Map<string, Assembler>();
+
+// create request after the inversion: no client-supplied recording ids
+export type CreateRecordingSession =
+  | { kind: "master"; projectId: number; sessionId: number }
+  | { kind: "clip"; projectId: number; sessionId: number; itemId: number; resultId: number };
 
 function assemblerFor(session: ReturnType<typeof tracker.getSession>): Assembler {
   let a = assemblers.get(session!.id);
@@ -34,39 +51,133 @@ function requireUploadable(session: SessionRow) {
   }
 }
 
-export async function createSession(identity: RecordingIdentity) {
+// A dead tracker session must not leave its domain row stuck on 'recording':
+// unfinished lists and the clip parent-pick read that status. The stem carries
+// the domain PK, so failures map back without extra tracker columns.
+export async function markRecordingFailedByStem(stem: string, reason: string) {
+  const ref = stemPk(stem);
+  if (!ref) return;
+  try {
+    if (ref.kind === "master") {
+      await videoService.markMasterVideoFinalizationFailed(ref.pk, reason);
+    } else {
+      await videoService.markVideoClipFinalizationFailed(ref.pk, reason);
+    }
+  } catch (err) {
+    log.error("failed to mark domain row finalization_failed", { stem, err: String(err) });
+  }
+}
+
+// flow: domain row > server PK > stem > tracker row > MPU initiate
+// The stem is derived from the database-assigned primary key, so the client
+// never coordinates ids; the row carries its key prefix from birth.
+export async function createSession(identity: CreateRecordingSession) {
   if (tracker.countActive() >= env.MAX_ACTIVE_SESSIONS) {
     throw new AppError(429, "too_many_sessions", `max ${env.MAX_ACTIVE_SESSIONS} active sessions`);
   }
 
-  const id = crypto.randomUUID();
-  const appSessionId = identityString(identity);
-  // interim: stem from client ids; phase 3 passes the server-assigned PK
-  const stem =
-    identity.kind === "master"
-      ? masterStem(identity.projectId, identity.sessionId, identity.recordingId)
-      : clipStem(identity.projectId, identity.sessionId, identity.clipId);
-
-  try {
-    tracker.createSession({ id, appSessionId, kind: identity.kind, bucket: env.BUCKET_RAW, objectKey: stem });
-  } catch (err) {
-    if (String(err).includes("UNIQUE")) {
-      throw new AppError(409, "duplicate_session", `recording ${appSessionId} already exists`);
+  const created = await db.transaction(async (tx) => {
+    // project comes from the session row, never the body — a stem lying about
+    // its project prefix would live forever in a domain row
+    const sessionRow = await sessionService.getSessionById(identity.sessionId, tx);
+    if (!sessionRow) {
+      throw new AppError(404, "not_found", `session ${identity.sessionId} not found`);
     }
-    throw err;
-  }
+    if (sessionRow.projectId !== identity.projectId) {
+      throw new AppError(
+        400,
+        "bad_request",
+        `session ${identity.sessionId} belongs to project ${sessionRow.projectId}, not ${identity.projectId}`,
+      );
+    }
+    const projectId = sessionRow.projectId;
+
+    if (identity.kind === "master") {
+      // one composited stream per recording (spec): source_index 0, primary
+      const video = await videoService.createMasterVideo(
+        {
+          sessionId: identity.sessionId,
+          // NOT NULL placeholder; rewritten to the stem-derived key below in this tx
+          fileUrl: "pending",
+          startEpoch: Math.floor(Date.now() / 1000),
+          recordingStatus: videoService.RECORDING_PERSISTENCE_STATUS.recording,
+          sourceIndex: 0,
+          isPrimary: true,
+          startedAt: new Date(),
+        },
+        tx,
+      );
+      if (!video) throw new Error("master video insert returned no row");
+      const stem = masterStem(projectId, identity.sessionId, video.masterVideoId);
+      await videoService.updateMasterVideo(
+        video.masterVideoId,
+        { fileUrl: `${stem}.ts`, storageStem: stem },
+        tx,
+      );
+      const appSessionId = identityString({
+        kind: "master",
+        projectId,
+        sessionId: identity.sessionId,
+        recordingId: video.masterVideoId,
+      });
+      return { kind: "master" as const, pk: video.masterVideoId, stem, appSessionId };
+    }
+
+    // clip: parent master resolved server-side (session's recording master,
+    // falling back to its latest); clips cannot exist without one
+    const masters = await videoService.listMasterVideosBySessionId(identity.sessionId, tx);
+    if (masters.length === 0) {
+      throw new AppError(409, "no_master_video", `session ${identity.sessionId} has no master video to clip from`);
+    }
+    const parent =
+      masters.filter((m) => m.recordingStatus === "recording").at(-1) ?? masters.at(-1)!;
+    const clip = await videoService.createVideoClip(
+      {
+        resultId: identity.resultId,
+        masterVideoId: parent.masterVideoId,
+        startOffsetMs: 0,
+        endOffsetMs: null,
+        clipFileUrl: null,
+        thumbnailUrl: null,
+        recordingStatus: videoService.RECORDING_PERSISTENCE_STATUS.recording,
+      },
+      tx,
+    );
+    if (!clip) throw new Error("video clip insert returned no row");
+    const stem = clipStem(projectId, identity.sessionId, clip.clipId);
+    await videoService.updateVideoClip(
+      clip.clipId,
+      { clipFileUrl: `${stem}.ts`, storageStem: stem },
+      tx,
+    );
+    const appSessionId = identityString({
+      kind: "clip",
+      projectId,
+      sessionId: identity.sessionId,
+      itemId: identity.itemId,
+      clipId: clip.clipId,
+    });
+    return { kind: "clip" as const, pk: clip.clipId, stem, appSessionId };
+  });
+
+  const id = crypto.randomUUID();
+  tracker.createSession({ id, appSessionId: created.appSessionId, kind: identity.kind, bucket: env.BUCKET_RAW, objectKey: created.stem });
 
   let uploadId: string;
   try {
-    uploadId = await s3parts.initiate(env.BUCKET_RAW, rawLeaf(stem).key);
+    uploadId = await s3parts.initiate(env.BUCKET_RAW, rawLeaf(created.stem).key);
   } catch (err) {
-    // Row stays in 'created'; boot recovery re-initiates (spec D4).
+    // The client never received this id, so nothing can resume it: fail the
+    // domain row now instead of leaving a phantom 'recording' row behind.
     log.error("initiate failed", { session: id, err: String(err) });
+    await markRecordingFailedByStem(created.stem, "create failed: storage unreachable");
     throw new AppError(503, "storage_unavailable", "MinIO unreachable");
   }
   tracker.setRecording(id, uploadId);
-  log.info("session opened", { session: id, kind: identity.kind, identity: appSessionId });
-  return { id, status: "recording" as const, partSizeBytes: env.PART_SIZE_BYTES };
+  log.info("session opened", { session: id, kind: identity.kind, identity: created.appSessionId });
+  return created.kind === "master"
+    ? { id, masterVideoId: created.pk, storageStem: created.stem, status: "recording" as const, partSizeBytes: env.PART_SIZE_BYTES }
+    : { id, clipId: created.pk, storageStem: created.stem, status: "recording" as const, partSizeBytes: env.PART_SIZE_BYTES };
 }
 
 export async function appendSegment(id: string, idx: number, bytes: Uint8Array) {
@@ -208,13 +319,17 @@ export async function finalizeRecording(session: SessionRow, opts: { truncated?:
   const totalBytes = parts.reduce((n, p) => n + p.size_bytes, 0);
 
   // Zero durable bytes: no part may be uploaded, so the MPU is aborted and the
-  // recording finalizes empty (no artifacts).
+  // recording finalizes empty (no artifacts, domain row marked failed).
   if (parts.length === 0) {
     if (session.upload_id) {
       const raw = rawLeaf(session.object_key!);
       await s3parts.abort(raw.bucket, raw.key, session.upload_id);
     }
     tracker.setFinalizedEmpty(session.id, opts.truncated);
+    await markRecordingFailedByStem(
+      session.object_key!,
+      opts.truncated ? "truncated with zero durable bytes" : "stopped with zero durable bytes",
+    );
     log.warn("session finalized with zero durable bytes", { session: session.id, truncated: opts.truncated });
     return { id: session.id, status: "finalized" as const };
   }

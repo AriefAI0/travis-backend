@@ -4,6 +4,7 @@ import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import { generateSegments } from "../../helpers/fixtures";
 import { json } from "../../helpers/json";
+import { seedRecordingHierarchy, type SeededHierarchy } from "../../helpers/seed";
 import { startServer, type TestServer } from "../../helpers/server";
 import { tcpProxy, type TcpProxy } from "../../helpers/proxy";
 
@@ -21,6 +22,7 @@ const SEG_DIR = "/tmp/travis-e2e-segs-backpressure";
 let segBytes: Uint8Array[];
 let server: TestServer;
 let proxy: TcpProxy;
+let seed: SeededHierarchy;
 
 function sha256(bytes: Uint8Array) {
   const h = new Bun.CryptoHasher("sha256");
@@ -62,6 +64,7 @@ async function pollReady(want: boolean, ms: number) {
 beforeAll(async () => {
   const segPaths = await generateSegments(SEG_DIR, SEG_COUNT);
   segBytes = await Promise.all(segPaths.map(async (p) => new Uint8Array(await Bun.file(p).arrayBuffer())));
+  seed = await seedRecordingHierarchy();
 
   // proxy fronts the real MinIO; the server talks only to the proxy
   const target = new URL(env.MINIO_ENDPOINT);
@@ -77,6 +80,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await server?.stop().catch(() => {});
   proxy?.close();
+  await seed.cleanup();
   rmSync(DATA_DIR, { recursive: true, force: true });
   rmSync(SEG_DIR, { recursive: true, force: true });
 });
@@ -88,10 +92,12 @@ test(
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 401 }),
+      body: JSON.stringify({ kind: "master", projectId: seed.projectId, sessionId: seed.sessionId }),
     });
     expect(createRes.status).toBe(201);
-    const id = ((await createRes.json()) as { data: { id: string } }).data.id;
+    const createdData = (await createRes.json()) as { data: { id: string; storageStem: string } };
+    const id = createdData.data.id;
+    const stem = createdData.data.storageStem;
 
     for (let i = 0; i <= 5; i++) expect((await postSeg(id, i)).status).toBe(200);
 
@@ -103,7 +109,7 @@ test(
     const createWhileDown = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 402 }),
+      body: JSON.stringify({ kind: "master", projectId: seed.projectId, sessionId: seed.sessionId }),
     });
     expect(createWhileDown.status).toBe(503);
 
@@ -140,7 +146,7 @@ test(
     expect(stopRes.status, stopBody).toBe(202);
 
     // object is byte-identical to the uninterrupted equivalent
-    const key = `p1/s1/master_401.ts`;
+    const key = `${stem}.ts`;
     const stat = await minio.statObject(env.BUCKET_RAW, key);
     expect(stat.size).toBe(segBytes.reduce((n, b) => n + b.byteLength, 0));
     const objectBytes = new Uint8Array(
@@ -164,7 +170,6 @@ test(
     const manifest = await (await fetch(manifestUrl)).text();
     expect(manifest).toContain("media.ts");
 
-    const stem = `p1/s1/master_401`;
     await minio.removeObject(env.BUCKET_RAW, `${stem}.ts`);
     await minio.removeObject(env.BUCKET_MEDIA, `${stem}/video.mkv`);
     await minio.removeObject(env.BUCKET_MEDIA, `${stem}/hls/index.m3u8`);

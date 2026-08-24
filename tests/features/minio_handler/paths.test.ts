@@ -8,6 +8,7 @@ import {
   rawLeaf,
   snipImages,
   snipStem,
+  stemPk,
   timelineStill,
 } from "../../../src/features/minio_handler/paths";
 
@@ -88,5 +89,19 @@ describe("snipImages", () => {
       raw: { bucket: "travis-images", key: `${SNIP_STEM}/img_12_raw.jpg` },
       annotated: { bucket: "travis-images", key: `${SNIP_STEM}/img_12_annotated.jpg` },
     });
+  });
+});
+
+describe("stemPk", () => {
+  test("maps a master or clip stem back to its domain row", () => {
+    expect(stemPk(MASTER_STEM)).toEqual({ kind: "master", pk: 45 });
+    expect(stemPk(CLIP_STEM)).toEqual({ kind: "clip", pk: 45 });
+  });
+
+  test("rejects snip stems and malformed strings", () => {
+    expect(stemPk(SNIP_STEM)).toBeNull();
+    expect(stemPk("")).toBeNull();
+    expect(stemPk("master_45")).toBeNull(); // bare leaf, no parent path
+    expect(stemPk("p3/s12/master_abc")).toBeNull();
   });
 });
