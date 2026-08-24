@@ -128,8 +128,8 @@ describe("enum constraints (pg port of CHECK suite)", () => {
     // A value that is NOT in the live set is rejected.
     await expectEnumRejection(
       testDb.execute(
-        sql`INSERT INTO master_video (master_video_id, session_id, file_url, start_epoch, recording_status)
-            VALUES (9999, 9003, 'file://bogus.mp4', 0, 'recovering')`,
+        sql`INSERT INTO master_video (master_video_id, session_id, storage_stem, start_epoch, recording_status)
+            VALUES (9999, 9003, 'p9003/s9003/master_9999', 0, 'recovering')`,
       ),
     );
   });

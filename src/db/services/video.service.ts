@@ -936,6 +936,10 @@ export const updateVideoClip = async (
     clipId,
     {
       ...data,
+      storageStem:
+        "storageStem" in data
+          ? normalizeOptionalText(data.storageStem, "Video clip storage stem")
+          : undefined,
       recordingStatus:
         "recordingStatus" in data && data.recordingStatus !== undefined
           ? normalizeRecordingPersistenceStatus(

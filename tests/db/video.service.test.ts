@@ -23,6 +23,8 @@ import {
   listVideoClips,
   listVideoClipsByMasterVideoId,
   listVideoClipsByResultId,
+  markMasterVideoFinalized,
+  replaceMasterVideoTimelineThumbnails,
   updateMasterVideo,
   updateVideoClip,
 } from "../../src/db/services/video.service";
@@ -562,5 +564,59 @@ describe("video.service", () => {
         testDb,
       ),
     ).rejects.toThrow("Video clip endOffsetMs exceeds master video duration");
+  });
+
+  it("two timeline stills 300ms apart both persist and list in time order", async () => {
+    await seedVideoContext();
+
+    const masterVideo = await createMasterVideo(
+      {
+        sessionId: 101,
+        storageStem: "p1/s101/master_1",
+        startEpoch: 1_760_000_000,
+        endEpoch: 1_760_003_600,
+      },
+      testDb,
+    );
+
+    // ms granularity: same-second stills are distinct rows, never overwrites
+    await replaceMasterVideoTimelineThumbnails(
+      masterVideo!.masterVideoId,
+      [
+        { masterVideoId: masterVideo!.masterVideoId, timestampMs: 1_800, width: 1_280, height: 720, sizeBytes: 2_048, storageStem: "p1/s101/master_1" },
+        { masterVideoId: masterVideo!.masterVideoId, timestampMs: 1_500, width: 1_280, height: 720, sizeBytes: 2_048, storageStem: "p1/s101/master_1" },
+      ],
+      testDb,
+    );
+
+    await markMasterVideoFinalized(
+      masterVideo!.masterVideoId,
+      { stoppedAt: new Date(), durationMs: 3_600_000, fileSize: null, endEpoch: 1_760_003_600 },
+      testDb,
+    );
+
+    const playback = await getMasterVideoPlaybackData(1, masterVideo!.masterVideoId, testDb);
+    expect(playback!.thumbnails.map((t) => t.timestampMs)).toEqual([1_500, 1_800]);
+    expect(playback!.thumbnails.every((t) => t.storageStem === "p1/s101/master_1")).toBe(true);
+  });
+
+  it("file_size accepts a value above the 2 GB integer ceiling", async () => {
+    await seedVideoContext();
+
+    const masterVideo = await createMasterVideo(
+      { sessionId: 101, storageStem: "p1/s101/master_2", startEpoch: 1_760_000_000 },
+      testDb,
+    );
+
+    const threePointFiveGB = 3_500_000_000; // int4 caps at 2_147_483_647
+    await markMasterVideoFinalized(
+      masterVideo!.masterVideoId,
+      { stoppedAt: new Date(), durationMs: 1_000, fileSize: threePointFiveGB, endEpoch: 1_760_000_001 },
+      testDb,
+    );
+
+    expect(
+      (await getMasterVideoById(masterVideo!.masterVideoId, testDb))!.fileSize,
+    ).toBe(threePointFiveGB);
   });
 });
