@@ -15,8 +15,8 @@ import { clipLeaves, masterLeaves, stemPk, timelineStill } from "../paths";
 export async function finalizeJob(job: JobRow) {
   const session = tracker.getSession(job.session_id);
   if (!session || session.status === "finalized") return; // gone or already done: idempotent
-  if (!session.bucket || !session.object_key) throw new Error(`session ${job.session_id} has no object target`);
-  const stem = session.object_key;
+  if (!session.bucket || !session.storage_stem) throw new Error(`session ${job.session_id} has no object target`);
+  const stem = session.storage_stem;
 
   const dir = join(env.DATA_DIR, "tmp", session.id);
   await mkdir(dir, { recursive: true });
@@ -206,8 +206,8 @@ export function finalizeExhausted(job: JobRow) {
     tracker.setStatus(session.id, "finalization_failed");
     log.error("finalization permanently failed", { session: session.id });
   }
-  if (session?.object_key) {
-    void markRecordingFailedByStem(session.object_key, "finalize retries exhausted");
+  if (session?.storage_stem) {
+    void markRecordingFailedByStem(session.storage_stem, "finalize retries exhausted");
   }
 }
 

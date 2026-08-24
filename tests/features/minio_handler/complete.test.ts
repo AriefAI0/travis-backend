@@ -18,10 +18,12 @@ const newRecording = () => {
   ids.push(id);
   tracker.createSession({
     id,
-    appSessionId: `app-${id}`,
+    identityString: `app-${id}`,
+    projectId: 1,
+    sessionId: 1,
     kind: "master",
     bucket: "travis-raw",
-    objectKey: `complete-test/${id}`,
+    storageStem: `complete-test/${id}`,
   });
   tracker.setRecording(id, `upload-${id}`);
   return id;

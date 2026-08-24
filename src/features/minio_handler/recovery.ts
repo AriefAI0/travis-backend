@@ -107,7 +107,7 @@ async function recoverSession(session: SessionRow) {
 
   // crash between ledger insert and initiate: row exists, upload never opened
   if (!cur.upload_id) {
-    const raw = rawLeaf(cur.object_key!);
+    const raw = rawLeaf(cur.storage_stem!);
     const uploadId = await s3parts.initiate(raw.bucket, raw.key);
     tracker.setRecording(cur.id, uploadId);
     log.info("recovery re-initiated upload", { session: cur.id });
@@ -135,7 +135,7 @@ async function recoverSession(session: SessionRow) {
 
 async function listPartsOrNull(session: SessionRow): Promise<RemotePart[] | null> {
   try {
-    const raw = rawLeaf(session.object_key!);
+    const raw = rawLeaf(session.storage_stem!);
     return await s3parts.listParts(raw.bucket, raw.key, session.upload_id!);
   } catch (err) {
     if (String(err).includes("NoSuchUpload")) return null;
@@ -149,20 +149,20 @@ async function listPartsOrNull(session: SessionRow): Promise<RemotePart[] | null
 async function healVanishedUpload(session: SessionRow) {
   if (session.status === "stopping") {
     try {
-      const raw = rawLeaf(session.object_key!);
+      const raw = rawLeaf(session.storage_stem!);
       const stat = await minio.statObject(raw.bucket, raw.key);
       tracker.setCompleted(session.id, stat.size);
       tracker.enqueueJob(session.id, "finalize");
       log.info("recovery found completed object", { session: session.id, bytes: stat.size });
     } catch {
       tracker.setFinalizedEmpty(session.id);
-      await markRecordingFailedByStem(session.object_key!, "upload vanished before any part");
+      await markRecordingFailedByStem(session.storage_stem!, "upload vanished before any part");
       log.warn("recovery: upload vanished before any part, finalized empty", { session: session.id });
     }
     return;
   }
   tracker.demotePartsFrom(session.id, 1, -1);
-  const raw = rawLeaf(session.object_key!);
+  const raw = rawLeaf(session.storage_stem!);
   const uploadId = await s3parts.initiate(raw.bucket, raw.key);
   tracker.setRecording(session.id, uploadId);
   log.warn("recovery: upload vanished, re-initiated from zero", { session: session.id });

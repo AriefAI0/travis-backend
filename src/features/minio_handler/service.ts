@@ -114,13 +114,13 @@ export async function createSession(identity: CreateRecordingSession) {
         { fileUrl: `${stem}.ts`, storageStem: stem },
         tx,
       );
-      const appSessionId = identityString({
+      const identityStr = identityString({
         kind: "master",
         projectId,
         sessionId: identity.sessionId,
         recordingId: video.masterVideoId,
       });
-      return { kind: "master" as const, pk: video.masterVideoId, stem, appSessionId };
+      return { kind: "master" as const, pk: video.masterVideoId, stem, identityString: identityStr };
     }
 
     // clip: parent master resolved server-side (session's recording master,
@@ -150,18 +150,26 @@ export async function createSession(identity: CreateRecordingSession) {
       { clipFileUrl: `${stem}.ts`, storageStem: stem },
       tx,
     );
-    const appSessionId = identityString({
+    const identityStr = identityString({
       kind: "clip",
       projectId,
       sessionId: identity.sessionId,
       itemId: identity.itemId,
       clipId: clip.clipId,
     });
-    return { kind: "clip" as const, pk: clip.clipId, stem, appSessionId };
+    return { kind: "clip" as const, pk: clip.clipId, stem, identityString: identityStr };
   });
 
   const id = crypto.randomUUID();
-  tracker.createSession({ id, appSessionId: created.appSessionId, kind: identity.kind, bucket: env.BUCKET_RAW, objectKey: created.stem });
+  tracker.createSession({
+    id,
+    identityString: created.identityString,
+    kind: identity.kind,
+    bucket: env.BUCKET_RAW,
+    storageStem: created.stem,
+    projectId: identity.projectId,
+    sessionId: identity.sessionId,
+  });
 
   let uploadId: string;
   try {
@@ -174,7 +182,7 @@ export async function createSession(identity: CreateRecordingSession) {
     throw new AppError(503, "storage_unavailable", "MinIO unreachable");
   }
   tracker.setRecording(id, uploadId);
-  log.info("session opened", { session: id, kind: identity.kind, identity: created.appSessionId });
+  log.info("session opened", { session: id, kind: identity.kind, identity: created.identityString });
   return created.kind === "master"
     ? { id, masterVideoId: created.pk, storageStem: created.stem, status: "recording" as const, partSizeBytes: env.PART_SIZE_BYTES }
     : { id, clipId: created.pk, storageStem: created.stem, status: "recording" as const, partSizeBytes: env.PART_SIZE_BYTES };
@@ -205,11 +213,11 @@ export async function reservePart(id: string) {
   const session = requireSession(id);
   requireUploadable(session); // wrong_state past recording; stale flips to recording
   tracker.touch(id); // proof of life: a just-resumed session must not re-stale
-  if (!session.upload_id || !session.bucket || !session.object_key) {
+  if (!session.upload_id || !session.bucket || !session.storage_stem) {
     throw new AppError(409, "wrong_state", "recording upload not initialized");
   }
   const partNumber = tracker.getNextPartNumber(id)!;
-  const raw = rawLeaf(session.object_key);
+  const raw = rawLeaf(session.storage_stem);
   const url = await presignPartUpload(
     raw.bucket,
     raw.key,
@@ -300,7 +308,7 @@ export async function getArtifacts(id: string) {
       session.status === "finalized" ? "recording has no artifacts" : `recording is ${session.status}`,
     );
   }
-  const leaves = session.kind === "master" ? masterLeaves(session.object_key!) : clipLeaves(session.object_key!);
+  const leaves = session.kind === "master" ? masterLeaves(session.storage_stem!) : clipLeaves(session.storage_stem!);
   return {
     hls: {
       manifest: await mint(leaves.hlsManifest),
@@ -322,12 +330,12 @@ export async function finalizeRecording(session: SessionRow, opts: { truncated?:
   // recording finalizes empty (no artifacts, domain row marked failed).
   if (parts.length === 0) {
     if (session.upload_id) {
-      const raw = rawLeaf(session.object_key!);
+      const raw = rawLeaf(session.storage_stem!);
       await s3parts.abort(raw.bucket, raw.key, session.upload_id);
     }
     tracker.setFinalizedEmpty(session.id, opts.truncated);
     await markRecordingFailedByStem(
-      session.object_key!,
+      session.storage_stem!,
       opts.truncated ? "truncated with zero durable bytes" : "stopped with zero durable bytes",
     );
     log.warn("session finalized with zero durable bytes", { session: session.id, truncated: opts.truncated });
@@ -335,7 +343,7 @@ export async function finalizeRecording(session: SessionRow, opts: { truncated?:
   }
 
   try {
-    const raw = rawLeaf(session.object_key!);
+    const raw = rawLeaf(session.storage_stem!);
     await s3parts.complete(
       raw.bucket,
       raw.key,

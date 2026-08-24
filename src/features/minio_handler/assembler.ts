@@ -45,7 +45,7 @@ export class Assembler {
     this.partSize = deps.partSizeBytes ?? env.PART_SIZE_BYTES;
     this.cap = deps.bufferCapBytes ?? env.BUFFER_CAP_BYTES;
     // MPU target: raw leaf derived from the stored stem (paths.ts owns shapes)
-    this.mpu = rawLeaf(session.object_key!);
+    this.mpu = rawLeaf(session.storage_stem!);
     // Resume counter from the ledger — snake_case rows, matching tracker.part()'s shape.
     this.nextPartNumber = (this.store.parts(session.id).at(-1)?.part_number ?? 0) + 1;
   }

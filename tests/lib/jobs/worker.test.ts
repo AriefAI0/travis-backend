@@ -14,10 +14,12 @@ const newFinalizing = () => {
   ids.push(id);
   tracker.createSession({
     id,
-    appSessionId: `app-${id}`,
+    identityString: `app-${id}`,
+    projectId: 1,
+    sessionId: 1,
     kind: "master",
     bucket: "travis-raw",
-    objectKey: `worker-test/${id}`,
+    storageStem: `worker-test/${id}`,
   });
   tracker.setStatus(id, "finalizing");
   return id;

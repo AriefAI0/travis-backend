@@ -19,10 +19,12 @@ const newRecording = () => {
   ids.push(id);
   tracker.createSession({
     id,
-    appSessionId: `app-${id}`,
+    identityString: `app-${id}`,
+    projectId: 1,
+    sessionId: 1,
     kind: "master",
     bucket: "travis-raw",
-    objectKey: `reserve-test/${id}`,
+    storageStem: `reserve-test/${id}`,
   });
   tracker.setRecording(id, `upload-${id}`);
   return id;
@@ -79,10 +81,12 @@ test("reserve on an uninitialized upload returns 409 wrong_state", async () => {
   ids.push(id);
   tracker.createSession({
     id,
-    appSessionId: `app-${id}`,
+    identityString: `app-${id}`,
+    projectId: 1,
+    sessionId: 1,
     kind: "master",
     bucket: "travis-raw",
-    objectKey: `reserve-test/${id}`,
+    storageStem: `reserve-test/${id}`,
   });
   const res = await reserve(id);
   expect(res.status).toBe(409);

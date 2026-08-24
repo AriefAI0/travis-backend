@@ -44,7 +44,7 @@ function makeAssembler(store: AssemblerStore, ops: Pick<S3Parts, "uploadPart">, 
     id: crypto.randomUUID(),
     kind: "master" as const,
     bucket: "travis-raw",
-    object_key: "projects/9/sessions/9/recordings/9",
+    storage_stem: "projects/9/sessions/9/recordings/9",
     upload_id: "u",
     durable_through: -1,
   } as unknown as SessionRow;
@@ -135,7 +135,7 @@ test("a fresh assembler over an existing ledger resumes part numbering (restart)
     id: crypto.randomUUID(),
     kind: "master" as const,
     bucket: "travis-raw",
-    object_key: "projects/9/sessions/9/recordings/9",
+    storage_stem: "projects/9/sessions/9/recordings/9",
     upload_id: "u",
     durable_through: -1,
   } as unknown as SessionRow;

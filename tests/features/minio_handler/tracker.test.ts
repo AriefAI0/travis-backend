@@ -10,10 +10,12 @@ const newSession = () => {
   ids.push(id);
   tracker.createSession({
     id,
-    appSessionId: `app-${id}`,
+    identityString: `app-${id}`,
+    projectId: 1,
+    sessionId: 1,
     kind: "master",
     bucket: "travis-raw",
-    objectKey: `test/${id}/master.ts`,
+    storageStem: `test/${id}/master.ts`,
   });
   return id;
 };
@@ -34,6 +36,34 @@ test("schema: next_part_number exists, NOT NULL, defaults to 1", () => {
   expect(col).toBeDefined();
   expect(col!.notnull).toBe(1);
   expect(col!.dflt_value).toBe("1");
+});
+
+test("schema: renamed + new columns exist (identity_string, storage_stem, project_id, session_id)", () => {
+  // also proves the in-place migration ran: this shared dev file predates the rename
+  const cols = db.query("PRAGMA table_info(sessions)").all() as { name: string }[];
+  const names = cols.map((c) => c.name);
+  expect(names).toContain("identity_string");
+  expect(names).toContain("storage_stem");
+  expect(names).toContain("project_id");
+  expect(names).toContain("session_id");
+  expect(names).not.toContain("app_session_id");
+  expect(names).not.toContain("object_key");
+});
+
+test("setCompleted drops part and segment scratch in the same flip", () => {
+  const id = newSession();
+  tracker.upsertSegment(id, 0, 100);
+  tracker.reportPart(id, { partNumber: 1, etag: "e", sizeBytes: 100, firstIdx: 0, lastIdx: 0 });
+  expect(tracker.parts(id).length).toBe(1);
+  expect(tracker.segments(id).length).toBe(1);
+
+  tracker.setCompleted(id, 100);
+
+  expect(tracker.parts(id)).toEqual([]);
+  expect(tracker.segments(id)).toEqual([]);
+  const s = tracker.getSession(id)!;
+  expect(s.status).toBe("finalizing");
+  expect(s.size_bytes).toBe(100);
 });
 
 test("new session reserves part 1; repeated reads stay sticky", () => {

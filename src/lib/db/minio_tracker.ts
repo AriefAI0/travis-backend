@@ -15,12 +15,14 @@ db.run("PRAGMA synchronous = FULL");
 
 db.run(`CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
-  app_session_id TEXT NOT NULL,
+  identity_string TEXT NOT NULL,
   kind TEXT NOT NULL CHECK(kind IN ('master','clip')),
   status TEXT NOT NULL, -- created|recording|stale|stopping|truncating|finalizing|finalized|finalization_failed
   upload_id TEXT,
   bucket TEXT,
-  object_key TEXT,
+  storage_stem TEXT,
+  project_id INTEGER,
+  session_id INTEGER,
   durable_through INTEGER NOT NULL DEFAULT -1,
   highest_index_seen INTEGER NOT NULL DEFAULT -1,
   next_part_number INTEGER NOT NULL DEFAULT 1,
@@ -30,13 +32,34 @@ db.run(`CREATE TABLE IF NOT EXISTS sessions (
   truncated_at INTEGER,
   duration_ms INTEGER,
   size_bytes INTEGER,
-  UNIQUE(app_session_id, kind)
+  UNIQUE(identity_string, kind)
 )`);
-// In-place upgrade: dev DBs predating the reservation counter gain the column.
+// In-place upgrades: dev DBs keep their rows. RENAME COLUMN also rewrites the
+// UNIQUE constraint; fresh DBs already have the new names and swallow these.
+try {
+  db.run("ALTER TABLE sessions RENAME COLUMN app_session_id TO identity_string");
+} catch (e) {
+  if (!String(e).includes("no such column") && !String(e).includes("duplicate column name")) throw e;
+}
+try {
+  db.run("ALTER TABLE sessions RENAME COLUMN object_key TO storage_stem");
+} catch (e) {
+  if (!String(e).includes("no such column") && !String(e).includes("duplicate column name")) throw e;
+}
 try {
   db.run("ALTER TABLE sessions ADD COLUMN next_part_number INTEGER NOT NULL DEFAULT 1");
 } catch (e) {
-  if (!String(e).includes("duplicate column name")) throw e; // fresh DBs already have it
+  if (!String(e).includes("duplicate column name")) throw e;
+}
+try {
+  db.run("ALTER TABLE sessions ADD COLUMN project_id INTEGER");
+} catch (e) {
+  if (!String(e).includes("duplicate column name")) throw e;
+}
+try {
+  db.run("ALTER TABLE sessions ADD COLUMN session_id INTEGER");
+} catch (e) {
+  if (!String(e).includes("duplicate column name")) throw e;
 }
 db.run(`CREATE TABLE IF NOT EXISTS segments (
   session_id TEXT,
@@ -66,12 +89,14 @@ db.run(`CREATE TABLE IF NOT EXISTS jobs (
 
 export interface SessionRow {
   id: string;
-  app_session_id: string;
+  identity_string: string;
   kind: "master" | "clip";
   status: string;
   upload_id: string | null;
   bucket: string | null;
-  object_key: string | null;
+  storage_stem: string | null;
+  project_id: number | null;
+  session_id: number | null;
   durable_through: number;
   highest_index_seen: number;
   next_part_number: number;
@@ -103,12 +128,20 @@ export function trackerReady() {
 }
 
 export const tracker = {
-  createSession(input: { id: string; appSessionId: string; kind: "master" | "clip"; bucket: string; objectKey: string }) {
+  createSession(input: {
+    id: string;
+    identityString: string;
+    kind: "master" | "clip";
+    bucket: string;
+    storageStem: string;
+    projectId: number;
+    sessionId: number;
+  }) {
     const now = Date.now();
     db.run(
-      `INSERT INTO sessions (id, app_session_id, kind, status, bucket, object_key, created_at, last_seen_at)
-       VALUES (?, ?, ?, 'created', ?, ?, ?, ?)`,
-      [input.id, input.appSessionId, input.kind, input.bucket, input.objectKey, now, now],
+      `INSERT INTO sessions (id, identity_string, kind, status, bucket, storage_stem, project_id, session_id, created_at, last_seen_at)
+       VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)`,
+      [input.id, input.identityString, input.kind, input.bucket, input.storageStem, input.projectId, input.sessionId, now, now],
     );
   },
 
@@ -156,11 +189,17 @@ export const tracker = {
     db.run(`UPDATE sessions SET next_part_number = next_part_number + 1 WHERE id = ?`, [id]);
   },
 
+  // MPU scratch dies at complete: parts + segments go in the SAME transaction
+  // as the status flip, so the tracker holds only in-flight work (spec).
   setCompleted(id: string, sizeBytes: number, truncated = false) {
-    db.run(
-      `UPDATE sessions SET status = 'finalizing', stopped_at = ?, size_bytes = ?, truncated_at = ? WHERE id = ?`,
-      [Date.now(), sizeBytes, truncated ? Date.now() : null, id],
-    );
+    db.transaction(() => {
+      db.run(
+        `UPDATE sessions SET status = 'finalizing', stopped_at = ?, size_bytes = ?, truncated_at = ? WHERE id = ?`,
+        [Date.now(), sizeBytes, truncated ? Date.now() : null, id],
+      );
+      db.run(`DELETE FROM parts WHERE session_id = ?`, [id]);
+      db.run(`DELETE FROM segments WHERE session_id = ?`, [id]);
+    })();
   },
 
   setFinalizedEmpty(id: string, truncated = false) {
