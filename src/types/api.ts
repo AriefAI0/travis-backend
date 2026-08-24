@@ -212,9 +212,6 @@ export type CviDetail = {
 export type ItemResultSidebarClip = {
   clipId: number;
   resultId: number;
-  sourceIndex: number;
-  sourceName: string | null;
-  isPrimary: boolean;
   storageStem: string | null;
   startOffsetMs: number;
   endOffsetMs: number | null;
@@ -291,7 +288,6 @@ export type ProjectRecordingListItem = {
   startEpoch: number; // epoch seconds, as stored
   endEpoch: number | null;
   recordingStatus: string;
-  recoveryStatus: string | null;
   fileSize: number | null;
   durationMs: number | null;
 };
@@ -360,11 +356,9 @@ export type MasterVideoPlaybackEvent = {
   imageCount: number;
 };
 
-export type MasterVideoSource = {
+// session sibling of the opened master video (not a camera-angle source)
+export type MasterVideoSessionRecording = {
   masterVideoId: number;
-  sourceIndex: number;
-  isPrimary: boolean;
-  sourceName: string | null;
   storageStem: string | null;
   recordingStatus: string;
 };
@@ -378,10 +372,7 @@ export type MasterVideoPlaybackData = {
   endEpoch: number | null;
   durationMs: number | null;
   recordingStatus: string;
-  sourceIndex: number;
-  isPrimary: boolean;
-  sourceName: string | null;
-  sourceVideos: MasterVideoSource[];
+  sessionRecordings: MasterVideoSessionRecording[];
   thumbnails: MasterVideoTimelineThumbnail[];
   events: MasterVideoPlaybackEvent[];
 };

@@ -95,15 +95,11 @@ export async function createSession(identity: CreateRecordingSession) {
     const projectId = sessionRow.projectId;
 
     if (identity.kind === "master") {
-      // one composited stream per recording (spec): source_index 0, primary
       const video = await videoService.createMasterVideo(
         {
           sessionId: identity.sessionId,
           startEpoch: Math.floor(Date.now() / 1000),
           recordingStatus: videoService.RECORDING_PERSISTENCE_STATUS.recording,
-          sourceIndex: 0,
-          isPrimary: true,
-          startedAt: new Date(),
         },
         tx,
       );

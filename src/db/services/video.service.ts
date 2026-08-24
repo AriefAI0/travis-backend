@@ -470,7 +470,7 @@ export const getMasterVideoPlaybackData = async (
   return {
     ...selectedMasterVideo,
     recordingStatus: normalizedRecordingStatus,
-    sourceVideos: [...sessionMasterVideos]
+    sessionRecordings: [...sessionMasterVideos]
       // copy first: sort mutates in place
       .sort((firstSource, secondSource) =>
         firstSource.startEpoch === secondSource.startEpoch

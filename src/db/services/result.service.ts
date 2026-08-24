@@ -547,9 +547,6 @@ export const getItemResultSidebar = async (
             (clipPlayback) => ({
               clipId: clipPlayback.clipId,
               resultId: clipPlayback.resultId,
-              sourceIndex: clipPlayback.sourceIndex,
-              sourceName: clipPlayback.sourceName,
-              isPrimary: clipPlayback.isPrimary,
               storageStem: clipPlayback.storageStem,
               startOffsetMs: clipPlayback.startOffsetMs,
               endOffsetMs: clipPlayback.endOffsetMs,
@@ -692,9 +689,6 @@ export const getResultEvidence = async (
   const clips = (clipsByResultId.get(resultId) ?? []).map((clipPlayback) => ({
     clipId: clipPlayback.clipId,
     resultId: clipPlayback.resultId,
-    sourceIndex: clipPlayback.sourceIndex,
-    sourceName: clipPlayback.sourceName,
-    isPrimary: clipPlayback.isPrimary,
     storageStem: clipPlayback.storageStem,
     startOffsetMs: clipPlayback.startOffsetMs,
     endOffsetMs: clipPlayback.endOffsetMs,
