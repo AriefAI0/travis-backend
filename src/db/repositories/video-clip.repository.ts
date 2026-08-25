@@ -8,6 +8,7 @@ export type VideoClipPlaybackRow = {
   resultId: number;
   masterVideoId: number;
   storageStem: string | null;
+  recordingStatus: string;
   masterVideoStartEpoch: number;
   masterVideoEndEpoch: number | null;
   startOffsetMs: number;
@@ -86,6 +87,7 @@ export const findVideoClipPlaybackRowById = async (
       resultId: videoClip.resultId,
       masterVideoId: videoClip.masterVideoId,
       storageStem: videoClip.storageStem,
+      recordingStatus: videoClip.recordingStatus,
       masterVideoStartEpoch: masterVideo.startEpoch,
       masterVideoEndEpoch: masterVideo.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,
@@ -114,6 +116,7 @@ export const listVideoClipPlaybackRowsByResultIds = async (
       resultId: videoClip.resultId,
       masterVideoId: videoClip.masterVideoId,
       storageStem: videoClip.storageStem,
+      recordingStatus: videoClip.recordingStatus,
       masterVideoStartEpoch: masterVideo.startEpoch,
       masterVideoEndEpoch: masterVideo.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,

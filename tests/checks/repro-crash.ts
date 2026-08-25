@@ -1,7 +1,7 @@
 // One-off repro: SIGKILL mid-recording, restart, re-send, stop — dump tracker at each step.
 import { rmSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { rawLeaf } from "../../src/features/minio_handler/paths";
+import { rawLeaf } from "../../src/lib/minio_storage/paths";
 import { minio } from "../../src/lib/minio_storage/clients";
 import { seedRecordingHierarchy } from "../helpers/seed";
 import { startServer } from "../helpers/server";

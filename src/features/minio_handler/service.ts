@@ -18,14 +18,22 @@ import {
   rawLeaf,
   stemPk,
   type Leaf,
-} from "./paths";
+} from "../../lib/minio_storage/paths";
 
 const assemblers = new Map<string, Assembler>();
 
 // create request after the inversion: no client-supplied recording ids
 export type CreateRecordingSession =
   | { kind: "master"; projectId: number; sessionId: number }
-  | { kind: "clip"; projectId: number; sessionId: number; itemId: number; resultId: number };
+  | {
+      kind: "clip";
+      projectId: number;
+      sessionId: number;
+      itemId: number;
+      resultId: number;
+      // master-relative position at clip start; the app owns the timeline clock
+      startOffsetMs?: number;
+    };
 
 function assemblerFor(session: ReturnType<typeof tracker.getSession>): Assembler {
   let a = assemblers.get(session!.id);
@@ -139,7 +147,7 @@ export async function createSession(identity: CreateRecordingSession) {
       {
         resultId: identity.resultId,
         masterVideoId: parent.masterVideoId,
-        startOffsetMs: 0,
+        startOffsetMs: identity.startOffsetMs ?? 0,
         endOffsetMs: null,
         recordingStatus: videoService.RECORDING_PERSISTENCE_STATUS.recording,
       },

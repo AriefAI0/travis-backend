@@ -19,7 +19,17 @@ const completeBody = z.object({
 // strict: a stale client-assigned id (recordingId, clipId) is a 400, not a strip
 const createBody = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("master"), projectId: id, sessionId: id }).strict(),
-  z.object({ kind: z.literal("clip"), projectId: id, sessionId: id, itemId: id, resultId: id }).strict(),
+  z
+    .object({
+      kind: z.literal("clip"),
+      projectId: id,
+      sessionId: id,
+      itemId: id,
+      resultId: id,
+      // optional: old callers keep the 0 default, no server clock exists
+      startOffsetMs: z.number().int().nonnegative().optional(),
+    })
+    .strict(),
 ]);
 
 export const minioHandlerRoutes = new Hono();
@@ -33,7 +43,7 @@ minioHandlerRoutes.post("/api/minio_handler/sessions", async (c) => {
     throw new AppError(
       400,
       "bad_request",
-      `body must be { kind: 'master', projectId, sessionId } or { kind: 'clip', projectId, sessionId, itemId, resultId }. ${at}${issue?.message ?? "not valid json"}`,
+      `body must be { kind: 'master', projectId, sessionId } or { kind: 'clip', projectId, sessionId, itemId, resultId, startOffsetMs? }. ${at}${issue?.message ?? "not valid json"}`,
     );
   }
   const rec = await createSession(parsed.data);

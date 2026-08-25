@@ -2,7 +2,7 @@ import { env } from "../../config/env";
 import { AppError } from "../../lib/error";
 import { tracker, type SessionRow } from "../../lib/db/minio_tracker";
 import { s3parts, type S3Parts } from "../../lib/minio_storage/s3sdk";
-import { rawLeaf, type Leaf } from "./paths";
+import { rawLeaf, type Leaf } from "../../lib/minio_storage/paths";
 
 // Storage surface the assembler needs — injectable so unit tests run flush
 // logic against in-memory fakes (no MinIO, no sqlite rows).

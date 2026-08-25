@@ -6,11 +6,12 @@ import {
   masterLeaves,
   masterStem,
   rawLeaf,
+  imageExtension,
   snipImages,
   snipStem,
   stemPk,
   timelineStill,
-} from "../../../src/features/minio_handler/paths";
+} from "../../../src/lib/minio_storage/paths";
 
 const MASTER = { kind: "master", projectId: 3, sessionId: 12, recordingId: 45 } as const;
 const CLIP = { kind: "clip", projectId: 3, sessionId: 12, itemId: 7, clipId: 45 } as const;
@@ -90,10 +91,22 @@ describe("timelineStill", () => {
 
 describe("snipImages", () => {
   test("annotated lives beside raw in the images bucket", () => {
-    expect(snipImages(SNIP_STEM, 12)).toEqual({
-      raw: { bucket: "travis-images", key: `${SNIP_STEM}/img_12_raw.jpg` },
-      annotated: { bucket: "travis-images", key: `${SNIP_STEM}/img_12_annotated.jpg` },
+    expect(snipImages(SNIP_STEM, 12, "image/png")).toEqual({
+      raw: { bucket: "travis-images", key: `${SNIP_STEM}/img_12_raw.png` },
+      annotated: { bucket: "travis-images", key: `${SNIP_STEM}/img_12_annotated.png` },
     });
+  });
+
+  // the extension follows contentType, never the bytes and never a default
+  test("extension follows the content type", () => {
+    expect(snipImages(SNIP_STEM, 3, "image/jpeg").raw.key).toBe(`${SNIP_STEM}/img_3_raw.jpg`);
+    expect(snipImages(SNIP_STEM, 3, "image/webp").raw.key).toBe(`${SNIP_STEM}/img_3_raw.webp`);
+  });
+
+  // an unknown type never yields an extensionless key
+  test("unsupported content type falls back to png", () => {
+    expect(imageExtension("image/gif")).toBeNull();
+    expect(snipImages(SNIP_STEM, 4, "image/gif").raw.key).toBe(`${SNIP_STEM}/img_4_raw.png`);
   });
 });
 

@@ -1,7 +1,7 @@
 // Run one clean demo recording end to end and LEAVE the objects in MinIO for inspection.
 // bun run tests/checks/run-demo-recording.ts
 import { rmSync } from "node:fs";
-import { clipLeaves, masterLeaves } from "../../src/features/minio_handler/paths";
+import { clipLeaves, masterLeaves } from "../../src/lib/minio_storage/paths";
 import { generateSegments } from "../helpers/fixtures";
 import { json } from "../helpers/json";
 import { seedRecordingHierarchy } from "../helpers/seed";

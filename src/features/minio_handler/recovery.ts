@@ -3,7 +3,7 @@ import { log } from "../../lib/logger";
 import { tracker, type PartRow, type SessionRow } from "../../lib/db/minio_tracker";
 import { minio } from "../../lib/minio_storage/clients";
 import { s3parts, type RemotePart } from "../../lib/minio_storage/s3sdk";
-import { rawLeaf } from "./paths";
+import { rawLeaf } from "../../lib/minio_storage/paths";
 import { finalizeRecording, markRecordingFailedByStem } from "./service";
 
 export interface RecoveryPlan {

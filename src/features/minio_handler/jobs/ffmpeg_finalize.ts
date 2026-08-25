@@ -7,7 +7,7 @@ import { log } from "../../../lib/logger";
 import { tracker, type JobRow } from "../../../lib/db/minio_tracker";
 import { minio } from "../../../lib/minio_storage/clients";
 import { markRecordingFailedByStem } from "../service";
-import { clipLeaves, masterLeaves, stemPk, timelineStill } from "../paths";
+import { clipLeaves, masterLeaves, stemPk, timelineStill } from "../../../lib/minio_storage/paths";
 
 // flow: download master > remux mkv > probe duration > single-file hls >
 // thumbnail > timeline stills > upload all > bridge to Postgres > mark

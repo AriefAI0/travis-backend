@@ -3,7 +3,10 @@ import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
 import { AppError } from "../../lib/error";
-import { listResultImageSummariesByResultIds } from "./result-media.service";
+import {
+  listResultImageSummariesByResultIds,
+  mintClipVideoUrl,
+} from "./result-media.service";
 import { getItemById } from "./structure.service";
 import { listSessionItemsByItemId, listSessionsByIds } from "./session.service";
 import { listVideoClipPlaybackByResultIds } from "./video.service";
@@ -453,7 +456,8 @@ export const getItemResultSidebar = async (
     itemLabel: selectedItem.itemLabel,
     position: selectedItem.position,
     status: selectedItem.status,
-    sessions: sessionItems.map((sessionItemRecord) => {
+    sessions: await Promise.all(
+      sessionItems.map(async (sessionItemRecord) => {
       const sessionRecord = sessionById.get(sessionItemRecord.sessionId);
       const itemResults =
         resultsBySessionItemId.get(sessionItemRecord.sessionItemId) ?? [];
@@ -462,34 +466,45 @@ export const getItemResultSidebar = async (
         sessionId: sessionItemRecord.sessionId,
         sessionItemId: sessionItemRecord.sessionItemId,
         sessionName: sessionRecord?.name ?? null,
-        results: itemResults.map((resultRecord) => ({
-          resultId: resultRecord.resultId,
-          inspectionTypeCode: resultRecord.inspectionTypeCode,
-          inspectionTypeName: resultRecord.inspectionTypeCode, // Same value (code is canonical)
-          projectId: resultRecord.projectId,
-          assetId: resultRecord.assetId,
-          componentId: resultRecord.componentId,
-          itemId: resultRecord.itemId,
-          sessionId: resultRecord.sessionId,
-          remarks: resultRecord.remarks,
-          createdAt: toIsoString(resultRecord.createdAt),
-          updatedAt: toIsoString(resultRecord.updatedAt),
-          images: imagesByResultId.get(resultRecord.resultId) ?? [],
-          clips: (clipsByResultId.get(resultRecord.resultId) ?? []).map(
-            (clipPlayback) => ({
-              clipId: clipPlayback.clipId,
-              resultId: clipPlayback.resultId,
-              storageStem: clipPlayback.storageStem,
-              startOffsetMs: clipPlayback.startOffsetMs,
-              endOffsetMs: clipPlayback.endOffsetMs,
-              durationMs: clipPlayback.durationMs,
-              startEpochMs: clipPlayback.startEpochMs,
-              endEpochMs: clipPlayback.endEpochMs,
-            }),
-          ),
+        results: await Promise.all(itemResults.map(async (resultRecord) => {
+          // summaries arrive ordered by imageId asc, so [0] IS the poster
+          const entryImages = imagesByResultId.get(resultRecord.resultId) ?? [];
+
+          return {
+            resultId: resultRecord.resultId,
+            inspectionTypeCode: resultRecord.inspectionTypeCode,
+            inspectionTypeName: resultRecord.inspectionTypeCode, // Same value (code is canonical)
+            projectId: resultRecord.projectId,
+            assetId: resultRecord.assetId,
+            componentId: resultRecord.componentId,
+            itemId: resultRecord.itemId,
+            sessionId: resultRecord.sessionId,
+            remarks: resultRecord.remarks,
+            createdAt: toIsoString(resultRecord.createdAt),
+            updatedAt: toIsoString(resultRecord.updatedAt),
+            images: entryImages,
+            posterUrl: entryImages[0]?.url ?? null,
+            clips: await Promise.all(
+              (clipsByResultId.get(resultRecord.resultId) ?? []).map(
+                async (clipPlayback) => ({
+                  clipId: clipPlayback.clipId,
+                  resultId: clipPlayback.resultId,
+                  storageStem: clipPlayback.storageStem,
+                  recordingStatus: clipPlayback.recordingStatus,
+                  startOffsetMs: clipPlayback.startOffsetMs,
+                  endOffsetMs: clipPlayback.endOffsetMs,
+                  durationMs: clipPlayback.durationMs,
+                  startEpochMs: clipPlayback.startEpochMs,
+                  endEpochMs: clipPlayback.endEpochMs,
+                  videoUrl: await mintClipVideoUrl(clipPlayback),
+                }),
+              ),
+            ),
+          };
         })),
       };
-    }),
+      }),
+    ),
   };
 };
 
@@ -618,16 +633,20 @@ export const getResultEvidence = async (
     listResultImageSummariesByResultIds([resultId], database),
   ]);
 
-  const clips = (clipsByResultId.get(resultId) ?? []).map((clipPlayback) => ({
-    clipId: clipPlayback.clipId,
-    resultId: clipPlayback.resultId,
-    storageStem: clipPlayback.storageStem,
-    startOffsetMs: clipPlayback.startOffsetMs,
-    endOffsetMs: clipPlayback.endOffsetMs,
-    durationMs: clipPlayback.durationMs,
-    startEpochMs: clipPlayback.startEpochMs,
-    endEpochMs: clipPlayback.endEpochMs,
-  }));
+  const clips = await Promise.all(
+    (clipsByResultId.get(resultId) ?? []).map(async (clipPlayback) => ({
+      clipId: clipPlayback.clipId,
+      resultId: clipPlayback.resultId,
+      storageStem: clipPlayback.storageStem,
+      recordingStatus: clipPlayback.recordingStatus,
+      startOffsetMs: clipPlayback.startOffsetMs,
+      endOffsetMs: clipPlayback.endOffsetMs,
+      durationMs: clipPlayback.durationMs,
+      startEpochMs: clipPlayback.startEpochMs,
+      endEpochMs: clipPlayback.endEpochMs,
+      videoUrl: await mintClipVideoUrl(clipPlayback),
+    })),
+  );
 
   return {
     clips,

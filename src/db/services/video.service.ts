@@ -77,6 +77,7 @@ export type VideoClipPlayback = {
   resultId: number;
   masterVideoId: number;
   storageStem: string | null;
+  recordingStatus: string;
   masterVideoStartEpoch: number;
   masterVideoEndEpoch: number | null;
   masterVideoDurationMs: number | null;

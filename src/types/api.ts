@@ -213,6 +213,10 @@ export type ItemResultSidebarClip = {
   clipId: number;
   resultId: number;
   storageStem: string | null;
+  // mint gate: only a finalized clip has playable objects behind its stem
+  recordingStatus: string;
+  // presigned mkv GET; null while unfinalized or finalization_failed
+  videoUrl: string | null;
   startOffsetMs: number;
   endOffsetMs: number | null;
   durationMs: number | null;
@@ -223,7 +227,12 @@ export type ItemResultSidebarClip = {
 export type ItemResultSidebarImage = {
   imageId: number;
   storageStem: string;
+  contentType: string;
+  // true when the annotated twin exists; reads pick the leaf without a probe
+  hasAnnotated: boolean;
   remarks: string | null;
+  // presigned GET (annotated leaf when it exists); minted per read, expires
+  url: string;
 };
 
 export type ItemResultSidebarEntry = {
@@ -239,6 +248,8 @@ export type ItemResultSidebarEntry = {
   createdAt: string;
   updatedAt: string;
   images: ItemResultSidebarImage[];
+  // first snip (lowest imageId) minted as the card poster
+  posterUrl: string | null;
   clips: ItemResultSidebarClip[];
 };
 
@@ -460,6 +471,15 @@ export const updateSessionSchema = z.object({ name: optionalText });
 
 // batch reads for the report gatherer
 export const resultIdsSchema = z.object({ resultIds: z.array(id) });
+
+// evidence image write — contentType drives the stored extension.
+// strict: an unknown key is a 400, matching the ingest create contract.
+export const createResultImageSchema = z
+  .object({
+    contentType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+    remarks: optionalText,
+  })
+  .strict();
 
 // query params (string -> coerced)
 const queryId = z.coerce.number().int().positive();
