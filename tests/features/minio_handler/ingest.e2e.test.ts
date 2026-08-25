@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
+import pg from "pg";
 import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import { generateSegments } from "../../helpers/fixtures";
@@ -14,6 +15,7 @@ const SEG_DIR = "/tmp/travis-e2e-segs";
 let server: TestServer;
 let segBytes: Uint8Array[];
 let seed: SeededHierarchy;
+const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: 1 });
 
 function sha256(bytes: Uint8Array) {
   const h = new Bun.CryptoHasher("sha256");
@@ -35,6 +37,7 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
+  await pool.end();
   await server?.stop();
   await seed.cleanup();
   rmSync(DATA_DIR, { recursive: true, force: true });
@@ -216,6 +219,10 @@ test(
 test(
   "heartbeat works and reports durableThrough",
   async () => {
+    // the out-of-order test already placed a clip on this result; one clip per
+    // result (uq_video_clip_result_id), so clear it before minting ours
+    await pool.query("delete from video_clip where result_id = $1", [seed.resultId]);
+
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },

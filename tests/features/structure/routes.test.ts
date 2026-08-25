@@ -12,6 +12,39 @@ import { projectRoutes } from "../../../src/features/projects/routes";
 
 const app = appFor(testDb, structureRoutes, projectRoutes);
 
+// full chain: project > asset > component > item, ids returned
+const seedChain = async () => {
+  const projectRes = await app.request("/api/v1/projects", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "Alpha" }),
+  });
+  const projectId = (await json(projectRes)).data.projectId as number;
+
+  const assetRes = await app.request("/api/v1/assets", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId, name: "Platform A" }),
+  });
+  const assetId = (await json(assetRes)).data.assetId as number;
+
+  const componentRes = await app.request("/api/v1/components", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ assetId, name: "Jacket Leg" }),
+  });
+  const componentId = (await json(componentRes)).data.componentId as number;
+
+  const itemRes = await app.request("/api/v1/items", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ componentId, itemLabel: "JL-01" }),
+  });
+  const itemId = (await json(itemRes)).data.itemId as number;
+
+  return { projectId, assetId, componentId, itemId };
+};
+
 // flow: project > asset > component > item > tree
 describe("structure routes", () => {
   beforeAll(ensureTestDatabase);
@@ -136,5 +169,39 @@ describe("structure routes", () => {
     });
     expect(after.status).toBe(200);
     expect((await json(after)).data.status).toBe("pending");
+  });
+
+  it("single-entity reads answer with the full row", async () => {
+    const { assetId, componentId, itemId } = await seedChain();
+
+    const asset = await app.request(`/api/v1/assets/${assetId}`);
+    expect(asset.status).toBe(200);
+    expect((await json(asset)).data).toMatchObject({
+      assetId,
+      name: "Platform A",
+    });
+
+    const component = await app.request(`/api/v1/components/${componentId}`);
+    expect(component.status).toBe(200);
+    expect((await json(component)).data).toMatchObject({
+      componentId,
+      name: "Jacket Leg",
+    });
+
+    const item = await app.request(`/api/v1/items/${itemId}`);
+    expect(item.status).toBe(200);
+    expect((await json(item)).data).toMatchObject({
+      itemId,
+      itemLabel: "JL-01",
+      status: "not_set", // schema default when create sends no status
+    });
+  });
+
+  it("single-entity reads 404 on unknown ids", async () => {
+    await seedChain();
+
+    expect((await app.request("/api/v1/assets/999")).status).toBe(404);
+    expect((await app.request("/api/v1/components/999")).status).toBe(404);
+    expect((await app.request("/api/v1/items/999")).status).toBe(404);
   });
 });

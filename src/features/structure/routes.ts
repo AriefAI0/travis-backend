@@ -7,6 +7,9 @@ import {
   deleteAsset,
   deleteComponent,
   deleteItem,
+  getAssetById,
+  getComponentById,
+  getItemById,
   listProjectStructureTree,
   updateAsset,
   updateComponent,
@@ -39,6 +42,12 @@ export const structureRoutes = (database?: DbOrTx) => {
     return ok(c, await createAsset(input, database), 201);
   });
 
+  routes.get("/api/v1/assets/:id", async (c) => {
+    const asset = await getAssetById(parseId(c, "id"), database);
+    if (!asset) throw notFound("Asset");
+    return ok(c, asset);
+  });
+
   routes.patch("/api/v1/assets/:id", async (c) => {
     const input = await parseBody(c, updateAssetSchema);
     const asset = await updateAsset(parseId(c, "id"), input, database);
@@ -57,6 +66,12 @@ export const structureRoutes = (database?: DbOrTx) => {
     return ok(c, await createComponent(input, database), 201);
   });
 
+  routes.get("/api/v1/components/:id", async (c) => {
+    const component = await getComponentById(parseId(c, "id"), database);
+    if (!component) throw notFound("Component");
+    return ok(c, component);
+  });
+
   routes.patch("/api/v1/components/:id", async (c) => {
     const input = await parseBody(c, updateComponentSchema);
     const component = await updateComponent(parseId(c, "id"), input, database);
@@ -68,6 +83,12 @@ export const structureRoutes = (database?: DbOrTx) => {
     const component = await deleteComponent(parseId(c, "id"), database);
     if (!component) throw notFound("Component");
     return ok(c, component);
+  });
+
+  routes.get("/api/v1/items/:id", async (c) => {
+    const item = await getItemById(parseId(c, "id"), database);
+    if (!item) throw notFound("Item");
+    return ok(c, item);
   });
 
   routes.post("/api/v1/items", async (c) => {

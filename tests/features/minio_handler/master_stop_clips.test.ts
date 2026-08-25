@@ -79,6 +79,10 @@ test(
 test(
   "an already-closed clip is never re-marked by the master stop",
   async () => {
+    // test 1 already placed a clip on this result; one clip per result
+    // (uq_video_clip_result_id), so clear it before minting this test's own
+    await pool.query("delete from video_clip where result_id = $1", [seed.resultId]);
+
     const master = await createRecording({
       kind: "master",
       projectId: seed.projectId,

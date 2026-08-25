@@ -24,6 +24,13 @@ if (!bare) throw new Error("no clip-less open result on session 8 — seed one f
 line("RESULT", `${bare.resultId} (${bare.inspectionTypeCode}), clip: null`);
 
 type Ticket = { imageId: number; storageStem: string; url: string; variant: string };
+type EvidenceRead = { data: { images: { url: string }[] } };
+type SidebarEntry = {
+  resultId: number;
+  images: { url: string }[];
+  posterUrl: string | null;
+};
+type SidebarRead = { data: { sessions: { results: SidebarEntry[] }[] } };
 
 // 1) create the raw ticket on a result with NO clip
 const create = await fetch(`${BASE}/api/v1/results/${bare.resultId}/images`, {
@@ -41,10 +48,10 @@ const put = await fetch(ticket.url, { method: "PUT", body: RED_PNG });
 line("PUT-BYTES", `${put.status} (${RED_PNG.length} bytes)`);
 
 // 3) read it back through the minted GET from the evidence read
-const evidence = await (
+const evidence = (await (
   await fetch(`${BASE}/api/v1/results/${bare.resultId}/evidence`)
-).json();
-const getUrl = evidence.data.images[0].url;
+).json()) as EvidenceRead;
+const getUrl = evidence.data.images[0]!.url;
 const back = await fetch(getUrl);
 const bytes = Buffer.from(await back.arrayBuffer());
 line("READ-BACK", `${back.status} bytes-match=${bytes.equals(RED_PNG)}`);
@@ -57,13 +64,13 @@ const second = await fetch(`${BASE}/api/v1/results/${bare.resultId}/images`, {
 });
 const ticket2 = ((await second.json()) as { data: Ticket }).data;
 await fetch(ticket2.url, { method: "PUT", body: RED_PNG });
-const sidebar = await (
+const sidebar = (await (
   await fetch(`${BASE}/api/v1/items/${bare.itemId}/results`)
-).json();
-const entry = sidebar.data.sessions[0].results.find(
-  (r: { resultId: number }) => r.resultId === bare.resultId,
-);
-line("POSTER-FIRST", `images=${entry.images.length} poster-is-first=${entry.posterUrl === entry.images[0].url}`);
+).json()) as SidebarRead;
+const entry = sidebar.data.sessions[0]!.results.find(
+  (r) => r.resultId === bare.resultId,
+)!;
+line("POSTER-FIRST", `images=${entry.images.length} poster-is-first=${entry.posterUrl === entry.images[0]!.url}`);
 
 // 5) annotated twin on the FIRST image
 const anno = await fetch(`${BASE}/api/v1/images/${ticket.imageId}/annotated`, {
@@ -72,14 +79,14 @@ const anno = await fetch(`${BASE}/api/v1/images/${ticket.imageId}/annotated`, {
 const annoTicket = ((await anno.json()) as { data: Ticket }).data;
 const annoPut = await fetch(annoTicket.url, { method: "PUT", body: BLUE_PNG });
 line("ANNOTATED", `${anno.status} PUT=${annoPut.status}`);
-const sidebar2 = await (
+const sidebar2 = (await (
   await fetch(`${BASE}/api/v1/items/${bare.itemId}/results`)
-).json();
-const entry2 = sidebar2.data.sessions[0].results.find(
-  (r: { resultId: number }) => r.resultId === bare.resultId,
-);
-const flips = entry2.images[0].url.includes("_annotated.png");
-line("ANNOTATED-FLIP", `url-flipped=${flips} poster-follows=${entry2.posterUrl === entry2.images[0].url}`);
+).json()) as SidebarRead;
+const entry2 = sidebar2.data.sessions[0]!.results.find(
+  (r) => r.resultId === bare.resultId,
+)!;
+const flips = entry2.images[0]!.url.includes("_annotated.png");
+line("ANNOTATED-FLIP", `url-flipped=${flips} poster-follows=${entry2.posterUrl === entry2.images[0]!.url}`);
 
 // 6) delete the second image; repeat must 404
 const del = await fetch(`${BASE}/api/v1/images/${ticket2.imageId}`, { method: "DELETE" });
