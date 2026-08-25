@@ -55,7 +55,7 @@ async function pollReady(want: boolean, ms: number) {
   while (Date.now() < end) {
     const res = await fetch(`${server.baseUrl}/health/ready`);
     const body = await json(res);
-    if (body.data.ready === want) return body.data;
+    if (body.ready === want) return body;
     await new Promise((r) => setTimeout(r, 300));
   }
   throw new Error(`/health/ready did not report ready=${want} within ${ms}ms`);
