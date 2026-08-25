@@ -97,6 +97,16 @@ const seedVideoContext = async () => {
       itemId: 100,
       sessionId: 101,
     },
+    {
+      resultId: 5003,
+      sessionItemId: 1000,
+      inspectionTypeCode: "GVI",
+      projectId: 1,
+      assetId: 1,
+      componentId: 10,
+      itemId: 100,
+      sessionId: 101,
+    },
   ]);
 };
 
@@ -317,7 +327,7 @@ describe("video.service", () => {
 
     const secondVideoClip = await createVideoClip(
       {
-        resultId: 5001,
+        resultId: 5003,
         masterVideoId: masterVideo!.masterVideoId,
         startOffsetMs: 500_000,
         endOffsetMs: 510_000,
@@ -347,10 +357,25 @@ describe("video.service", () => {
     expect(await getVideoClipById(createdVideoClip!.clipId, testDb)).toMatchObject({
       resultId: 5001,
     });
+    // one clip per result (uq_video_clip_result_id): each list returns its clip
     expect(await listVideoClipsByResultId(5001, testDb)).toEqual([
       expect.objectContaining({ clipId: createdVideoClip!.clipId }),
+    ]);
+    expect(await listVideoClipsByResultId(5003, testDb)).toEqual([
       expect.objectContaining({ clipId: secondVideoClip!.clipId }),
     ]);
+    // a second clip on the same result is rejected by the unique index
+    await expect(
+      createVideoClip(
+        {
+          resultId: 5001,
+          masterVideoId: masterVideo!.masterVideoId,
+          startOffsetMs: 700_000,
+          endOffsetMs: 710_000,
+        },
+        testDb,
+      ),
+    ).rejects.toThrow();
     expect(
       await listVideoClipsByMasterVideoId(masterVideo!.masterVideoId, testDb),
     ).toHaveLength(3);

@@ -15,10 +15,11 @@ const completeBody = z.object({
   sizeBytes: z.number().int().positive(),
 });
 
-// server assigns the recording PK; clip create names its evidence result
+// server assigns the recording PK; clip create names its evidence result.
+// strict: a stale client-assigned id (recordingId, clipId) is a 400, not a strip
 const createBody = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("master"), projectId: id, sessionId: id }),
-  z.object({ kind: z.literal("clip"), projectId: id, sessionId: id, itemId: id, resultId: id }),
+  z.object({ kind: z.literal("master"), projectId: id, sessionId: id }).strict(),
+  z.object({ kind: z.literal("clip"), projectId: id, sessionId: id, itemId: id, resultId: id }).strict(),
 ]);
 
 export const minioHandlerRoutes = new Hono();
@@ -26,10 +27,13 @@ export const minioHandlerRoutes = new Hono();
 minioHandlerRoutes.post("/api/minio_handler/sessions", async (c) => {
   const parsed = createBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) {
+    // surface the first zod issue so a rejected field names itself
+    const issue = parsed.error.issues[0];
+    const at = issue?.path.length ? `${issue.path.join(".")}: ` : "";
     throw new AppError(
       400,
       "bad_request",
-      "body must be { kind: 'master', projectId, sessionId } or { kind: 'clip', projectId, sessionId, itemId, resultId }",
+      `body must be { kind: 'master', projectId, sessionId } or { kind: 'clip', projectId, sessionId, itemId, resultId }. ${at}${issue?.message ?? "not valid json"}`,
     );
   }
   const rec = await createSession(parsed.data);
