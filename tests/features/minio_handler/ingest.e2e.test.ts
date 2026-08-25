@@ -162,6 +162,21 @@ test(
     const wrongProjectBody = await json(wrongProject);
     expect(wrongProjectBody.code).toBe("bad_request");
 
+    // clip against a missing result row → 404; the stem needs its type
+    const noResult = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "clip",
+        projectId: seed.projectId,
+        sessionId: seed.sessionId,
+        itemId: seed.itemId,
+        resultId: 999_999_999,
+      }),
+    });
+    expect(noResult.status).toBe(404);
+    expect((await json(noResult)).code).toBe("not_found");
+
     const createRes = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },

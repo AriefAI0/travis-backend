@@ -528,7 +528,8 @@ export const videoClip = pgTable(
       .defaultNow(),
   },
   (table) => ({
-    idxVideoClipResultId: index("idx_video_clip_result_id").on(table.resultId),
+    // one clip per inspection instance — the app enforced this in code only
+    uqVideoClipResultId: uniqueIndex("uq_video_clip_result_id").on(table.resultId),
     idxVideoClipMasterVideoId: index("idx_video_clip_master_video_id").on(table.masterVideoId),
   })
 );

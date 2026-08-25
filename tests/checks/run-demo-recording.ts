@@ -1,7 +1,7 @@
 // Run one clean demo recording end to end and LEAVE the objects in MinIO for inspection.
 // bun run tests/checks/run-demo-recording.ts
 import { rmSync } from "node:fs";
-import { masterLeaves } from "../../src/features/minio_handler/paths";
+import { clipLeaves, masterLeaves } from "../../src/features/minio_handler/paths";
 import { generateSegments } from "../helpers/fixtures";
 import { json } from "../helpers/json";
 import { seedRecordingHierarchy } from "../helpers/seed";
@@ -49,6 +49,35 @@ for (let i = 0; i < SEG_COUNT; i++) {
   if (i % 10 === 0 || i === SEG_COUNT - 1) console.log(`  seg ${i + 1}/${SEG_COUNT} durableThrough=${data.durableThrough}`);
 }
 
+// mid-flow: an inspection clip against the seeded GVI result — its stem must
+// carry the type between master_{id} and clip_{id}
+const clipCreate = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    kind: "clip",
+    projectId: seed.projectId,
+    sessionId: seed.sessionId,
+    itemId: seed.itemId,
+    resultId: seed.resultId,
+  }),
+});
+if (clipCreate.status !== 201) throw new Error(`clip create failed: ${clipCreate.status} ${await clipCreate.text()}`);
+const clipTicket = (await json<{ data: { id: string; clipId: number; storageStem: string } }>(clipCreate)).data;
+console.log(`\nclip session: ${clipTicket.id} (recording), video_clip ${clipTicket.clipId}, stem ${clipTicket.storageStem}`);
+
+for (let i = 0; i < 8; i++) {
+  const res = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${clipTicket.id}/segments?index=${i}`, {
+    method: "POST",
+    headers: { "content-type": "video/mp2t" },
+    body: segBytes[i],
+  });
+  if (!res.ok) throw new Error(`clip segment ${i} failed: ${res.status} ${await res.text()}`);
+}
+
+const clipStop = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${clipTicket.id}/stop`, { method: "POST" });
+console.log(`clip stop: ${clipStop.status} ${(await clipStop.text()).slice(0, 120)}`);
+
 const stop = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/stop`, { method: "POST" });
 console.log(`stop: ${stop.status} ${(await stop.text()).slice(0, 120)}`);
 
@@ -68,17 +97,37 @@ while (Date.now() < end) {
 }
 if (status !== "finalized") throw new Error("did not finalize within 120s");
 
+// the clip finalizes through the same worker — wait for it too
+let clipStatus = "finalizing";
+const clipEnd = Date.now() + 120_000;
+while (Date.now() < clipEnd) {
+  const { data } = await json<{ data: { status: string } }>(
+    await fetch(`${server.baseUrl}/api/minio_handler/sessions/${clipTicket.id}`),
+  );
+  if (data.status !== clipStatus) {
+    clipStatus = data.status;
+    console.log(`clip status: ${clipStatus}`);
+  }
+  if (clipStatus === "finalized") break;
+  await new Promise((r) => setTimeout(r, 500));
+}
+if (clipStatus !== "finalized") throw new Error("clip did not finalize within 120s");
+
 const arts = (await json<{ data: any }>(
   await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/artifacts`),
 )).data;
 
 // every key derives from the stem the server assigned — no path literals here
 const leaves = masterLeaves(ticket.storageStem);
+const cLeaves = clipLeaves(clipTicket.storageStem);
 console.log(`\nfinalized in MinIO — duration ${(arts.durationMs / 1000).toFixed(1)}s, objects (left for you):`);
 console.log(`  ${leaves.raw.bucket}  ${leaves.raw.key}   raw sewn TS — plays clean in VLC`);
 console.log(`  ${leaves.mkv.bucket}  ${leaves.mkv.key}   finalized video — plays anywhere`);
 console.log(`  ${leaves.hlsManifest.bucket}  ${leaves.hlsManifest.key}   HLS manifest`);
 console.log(`  ${leaves.poster.bucket}  ${leaves.poster.key}   poster frame`);
+console.log(`  ${cLeaves.raw.bucket}  ${cLeaves.raw.key}   clip raw TS — type segment from the result row`);
+console.log(`  ${cLeaves.mkv.bucket}  ${cLeaves.mkv.key}   clip finalized video`);
+console.log(`  ${cLeaves.poster.bucket}  ${cLeaves.poster.key}   clip poster frame`);
 console.log(`\npresigned URLs (valid 7 days — MinIO console objects never expire):`);
 for (const [label, url] of [
   ["mkv", arts.mkv],

@@ -1,5 +1,6 @@
 import { env } from "../../config/env";
 import { db } from "../../db/client";
+import * as resultService from "../../db/services/result.service";
 import * as sessionService from "../../db/services/session.service";
 import * as videoService from "../../db/services/video.service";
 import { AppError } from "../../lib/error";
@@ -120,7 +121,13 @@ export async function createSession(identity: CreateRecordingSession) {
       return { kind: "master" as const, pk: video.masterVideoId, stem, identityString: identityStr };
     }
 
-    // clip: parent master resolved server-side (session's recording master,
+    // clip: the result row names the inspection type for the stem
+    const resultRow = await resultService.getResultById(identity.resultId, tx);
+    if (!resultRow) {
+      throw new AppError(404, "not_found", `result ${identity.resultId} not found`);
+    }
+
+    // parent master resolved server-side (session's recording master,
     // falling back to its latest); clips cannot exist without one
     const masters = await videoService.listMasterVideosBySessionId(identity.sessionId, tx);
     if (masters.length === 0) {
@@ -139,7 +146,13 @@ export async function createSession(identity: CreateRecordingSession) {
       tx,
     );
     if (!clip) throw new Error("video clip insert returned no row");
-    const stem = clipStem(projectId, identity.sessionId, clip.clipId);
+    const stem = clipStem(
+      projectId,
+      identity.sessionId,
+      parent.masterVideoId,
+      resultRow.inspectionTypeCode,
+      clip.clipId,
+    );
     await videoService.updateVideoClip(
       clip.clipId,
       { storageStem: stem },

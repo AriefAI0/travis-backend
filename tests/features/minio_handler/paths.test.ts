@@ -16,8 +16,8 @@ const MASTER = { kind: "master", projectId: 3, sessionId: 12, recordingId: 45 } 
 const CLIP = { kind: "clip", projectId: 3, sessionId: 12, itemId: 7, clipId: 45 } as const;
 
 const MASTER_STEM = "p3/s12/master_45";
-const CLIP_STEM = "p3/s12/clip_45";
-const SNIP_STEM = "p3/s12/result_88";
+const CLIP_STEM = "p3/s12/master_45/CVI/clip_46";
+const SNIP_STEM = "p3/s12/CVI/result_88";
 
 describe("identityString", () => {
   test("encodes each kind canonically", () => {
@@ -36,10 +36,15 @@ describe("identityString", () => {
 });
 
 describe("stems", () => {
-  test("two hierarchy levels only, kind-prefixed PK last", () => {
+  test("clip nests under master and type; snip carries the type alone", () => {
     expect(masterStem(3, 12, 45)).toBe(MASTER_STEM);
-    expect(clipStem(3, 12, 45)).toBe(CLIP_STEM);
-    expect(snipStem(3, 12, 88)).toBe(SNIP_STEM);
+    expect(clipStem(3, 12, 45, "CVI", 46)).toBe(CLIP_STEM);
+    expect(snipStem(3, 12, "CVI", 88)).toBe(SNIP_STEM);
+  });
+
+  test("the type segment is the enum value verbatim, never lowercased", () => {
+    expect(clipStem(3, 12, 45, "SCOUR", 46)).toBe("p3/s12/master_45/SCOUR/clip_46");
+    expect(snipStem(3, 12, "GVI", 88)).toBe("p3/s12/GVI/result_88");
   });
 });
 
@@ -95,7 +100,12 @@ describe("snipImages", () => {
 describe("stemPk", () => {
   test("maps a master or clip stem back to its domain row", () => {
     expect(stemPk(MASTER_STEM)).toEqual({ kind: "master", pk: 45 });
-    expect(stemPk(CLIP_STEM)).toEqual({ kind: "clip", pk: 45 });
+    expect(stemPk(CLIP_STEM)).toEqual({ kind: "clip", pk: 46 });
+  });
+
+  test("still maps the pre-type legacy stems — old rows keep their keys", () => {
+    expect(stemPk("p3/s12/clip_12")).toEqual({ kind: "clip", pk: 12 });
+    expect(stemPk("p3/s12/master_9")).toEqual({ kind: "master", pk: 9 });
   });
 
   test("rejects snip stems and malformed strings", () => {

@@ -2,6 +2,7 @@
 // every leaf). flow: identity > stem > leaf pairs; no key literal anywhere else.
 
 import { env } from "../../config/env";
+import type { InspectionTypeCode } from "../../types/api";
 
 export interface Leaf {
   bucket: string;
@@ -38,13 +39,25 @@ export function masterStem(projectId: number, sessionId: number, pk: number): st
   return `p${projectId}/s${sessionId}/master_${pk}`;
 }
 
-export function clipStem(projectId: number, sessionId: number, pk: number): string {
-  return `p${projectId}/s${sessionId}/clip_${pk}`;
+// clip nests under its master and its inspection type
+export function clipStem(
+  projectId: number,
+  sessionId: number,
+  masterVideoId: number,
+  typeCode: InspectionTypeCode,
+  clipId: number,
+): string {
+  return `p${projectId}/s${sessionId}/master_${masterVideoId}/${typeCode}/clip_${clipId}`;
 }
 
-// snip set stem — one result, many images
-export function snipStem(projectId: number, sessionId: number, resultId: number): string {
-  return `p${projectId}/s${sessionId}/result_${resultId}`;
+// snip set stem — carries the type, never nested under a clip
+export function snipStem(
+  projectId: number,
+  sessionId: number,
+  typeCode: InspectionTypeCode,
+  resultId: number,
+): string {
+  return `p${projectId}/s${sessionId}/${typeCode}/result_${resultId}`;
 }
 
 // MPU target: raw is one flat object per recording (rebuildable? no)
