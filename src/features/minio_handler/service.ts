@@ -330,7 +330,25 @@ export async function getArtifacts(id: string) {
 
 // Shared finalize tail for stop / stale-truncate / boot-recovered stops:
 // complete the MPU from ledger parts (abort when nothing durable), enqueue job.
+// a master ending closes its still-recording clips; rows and images survive
+async function closeRecordingClipsOf(session: SessionRow) {
+  if (session.kind !== "master") return;
+  const pk = session.storage_stem ? stemPk(session.storage_stem) : null;
+  if (!pk) return;
+  const clips = await videoService.listVideoClipsByMasterVideoId(pk.pk);
+  for (const clip of clips) {
+    if (clip.recordingStatus !== videoService.RECORDING_PERSISTENCE_STATUS.recording) continue;
+    await videoService.markVideoClipFinalizationFailed(
+      clip.clipId,
+      "master stopped while clip recording",
+    );
+    log.warn("clip closed by master stop", { clip: clip.clipId, master: pk.pk });
+  }
+}
+
 export async function finalizeRecording(session: SessionRow, opts: { truncated?: boolean } = {}) {
+  // clip close runs first so every finalize path (stop, stale, recovery) hits it
+  await closeRecordingClipsOf(session);
   const parts = tracker.parts(session.id);
   const totalBytes = parts.reduce((n, p) => n + p.size_bytes, 0);
 

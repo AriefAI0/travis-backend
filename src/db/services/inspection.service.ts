@@ -6,6 +6,7 @@ import { db, type DbOrTx } from "../client";
 import { AppError, notFound } from "../../lib/error";
 import {
   createSessionItem,
+  getSessionById,
   getSessionItemById,
   getSessionItemBySessionIdAndItemId,
 } from "./session.service";
@@ -13,6 +14,7 @@ import { getAssetById, getComponentById, getItemById } from "./structure.service
 import {
   RECORDING_PERSISTENCE_STATUS,
   listMasterVideosBySessionId,
+  listVideoClipsByResultId,
 } from "./video.service";
 import {
   createResult,
@@ -24,6 +26,7 @@ import {
   getResultMgiDetailByResultId,
   getGviDetailByResultId,
   getScourDetailByResultId,
+  listResultsBySessionId,
   listResultsBySessionItemId,
   updateResult,
   writeTypedDetail,
@@ -141,6 +144,47 @@ export const getActiveInspectionByPair = async (
   const existing = await getSessionItemBySessionIdAndItemId(sessionId, itemId, database);
   if (!existing) return null;
   return getActiveInspection(existing.sessionItemId, inspectionTypeCode, database);
+};
+
+export type OpenInspection = {
+  resultId: number;
+  sessionItemId: number;
+  itemId: number;
+  inspectionTypeCode: InspectionTypeCode;
+  remarks: string | null;
+  createdAt: Date;
+  clip: { clipId: number; recordingStatus: string; storageStem: string | null } | null;
+};
+
+// open results of a session with clip state — the app's stop-master dialog
+export const listOpenInspectionsBySessionId = async (
+  sessionId: number,
+  database?: DbOrTx,
+) => {
+  const sessionRecord = await getSessionById(sessionId, database);
+  if (!sessionRecord) throw notFound(`session ${sessionId}`);
+
+  const open: OpenInspection[] = [];
+  for (const result of await listResultsBySessionId(sessionId, database)) {
+    if (await hasTypedDetail(result.inspectionTypeCode, result.resultId, database)) continue;
+    const clip = (await listVideoClipsByResultId(result.resultId, database))[0] ?? null;
+    open.push({
+      resultId: result.resultId,
+      sessionItemId: result.sessionItemId,
+      itemId: result.itemId,
+      inspectionTypeCode: result.inspectionTypeCode,
+      remarks: result.remarks,
+      createdAt: result.createdAt,
+      clip: clip
+        ? {
+            clipId: clip.clipId,
+            recordingStatus: clip.recordingStatus,
+            storageStem: clip.storageStem,
+          }
+        : null,
+    });
+  }
+  return open;
 };
 
 // flow: master check > duplicate check > resolve ids > create result — one tx

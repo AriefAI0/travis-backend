@@ -3,6 +3,7 @@ import type { DbOrTx } from "../../db/client";
 import {
   cancelInspection,
   getActiveInspectionByPair,
+  listOpenInspectionsBySessionId,
   startInspection,
   stopInspection,
 } from "../../db/services/inspection.service";
@@ -32,6 +33,11 @@ export const inspectionRoutes = (database?: DbOrTx) => {
       ),
     );
   });
+
+  // session-scoped: open results + clip state for the app's stop-master dialog
+  routes.get("/api/v1/sessions/:sessionId/open-inspections", async (c) =>
+    ok(c, await listOpenInspectionsBySessionId(parseId(c, "sessionId"), database)),
+  );
 
   routes.post("/api/v1/inspections/start", async (c) => {
     const input = await parseBody(c, startInspectionSchema);

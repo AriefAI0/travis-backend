@@ -367,4 +367,56 @@ describe("inspections routes", () => {
     const body = await json(res);
     expect(body.code).toBe("not_found");
   });
+
+  it("open-inspections lists open results with clip state for the dialog", async () => {
+    await seedHierarchy();
+    const cviId = await startInspection("CVI");
+    const gviId = await startInspection("GVI");
+
+    // CVI gets a clip row (as MinIO create would), GVI stays bare
+    await testDb.insert(schema.videoClip).values({
+      resultId: cviId,
+      masterVideoId: 1,
+      startOffsetMs: 0,
+      storageStem: "p1/s101/master_1/CVI/clip_1",
+      recordingStatus: "recording",
+    });
+
+    const res = await app.request("/api/v1/sessions/101/open-inspections");
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.data).toHaveLength(2);
+    expect(body.data[0]).toMatchObject({
+      resultId: cviId,
+      itemId: 100,
+      inspectionTypeCode: "CVI",
+      clip: { clipId: expect.any(Number), recordingStatus: "recording" },
+    });
+    expect(body.data[1]).toMatchObject({ resultId: gviId, clip: null });
+
+    // stopping one inspection removes it from the open list
+    const stop = await stopInspection(cviId, validPayloads.CVI);
+    expect(stop.status).toBe(200);
+    const after = await json(
+      await app.request("/api/v1/sessions/101/open-inspections"),
+    );
+    expect(after.data).toHaveLength(1);
+    expect(after.data[0].resultId).toBe(gviId);
+  });
+
+  it("open-inspections on a missing session is 404", async () => {
+    const res = await app.request("/api/v1/sessions/999/open-inspections");
+    expect(res.status).toBe(404);
+    expect((await json(res)).code).toBe("not_found");
+  });
+
+  it("open-inspections is empty for a stopped-everything session", async () => {
+    await seedHierarchy();
+    const resultId = await startInspection("GVI");
+    expect((await stopInspection(resultId, validPayloads.GVI)).status).toBe(200);
+
+    const res = await app.request("/api/v1/sessions/101/open-inspections");
+    expect(res.status).toBe(200);
+    expect((await json(res)).data).toEqual([]);
+  });
 });

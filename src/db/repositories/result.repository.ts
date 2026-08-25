@@ -49,6 +49,16 @@ export const listResultRecordsBySessionItemId = async (
     orderBy: asc(result.resultId),
   });
 
+/** Active results of one whole session (open-inspection listing). */
+export const listResultRecordsBySessionId = async (
+  sessionId: number,
+  database: DbOrTx = db,
+) =>
+  database.query.result.findMany({
+    where: and(eq(result.sessionId, sessionId), isNull(result.archivedAt)),
+    orderBy: asc(result.resultId),
+  });
+
 /** Batched active-result fetch across many session_items (kills the sidebar N+1). */
 export const listResultRecordsBySessionItemIds = async (
   sessionItemIds: number[],

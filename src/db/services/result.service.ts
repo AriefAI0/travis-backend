@@ -13,6 +13,7 @@ import {
   findResultById,
   listResultRecords,
   listResultRecordsByProjectId,
+  listResultRecordsBySessionId,
   listResultRecordsBySessionItemId,
   listResultRecordsBySessionItemIds,
   updateResultById,
@@ -392,6 +393,11 @@ export const getResultById = async (resultId: number, database?: DbOrTx) =>
   findResultById(resultId, database);
 
 const toIsoString = (value: Date) => value.toISOString();
+
+export const listResultsBySessionId = async (
+  sessionId: number,
+  database?: DbOrTx,
+) => listResultRecordsBySessionId(sessionId, database);
 
 export const listResultsBySessionItemId = async (
   sessionItemId: number,
