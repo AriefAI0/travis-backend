@@ -549,6 +549,12 @@ export const resultImage = pgTable(
     // required: the result row knows its stem at insert time (result stem
     // derives from resultId, not from this row's own PK)
     storageStem: text("storage_stem").notNull(),
+
+    // upload format — leaf extension derives from this, never hardcoded
+    contentType: text("content_type").notNull().default("image/png"),
+
+    // true once the annotated twin is written; reads skip a storage probe
+    hasAnnotated: boolean("has_annotated").notNull().default(false),
     remarks: text("remarks"),
   },
   (table) => ({
