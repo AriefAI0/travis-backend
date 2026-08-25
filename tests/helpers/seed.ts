@@ -11,6 +11,8 @@ export interface SeededHierarchy {
   itemId: number;
   resultId: number;
   cleanup: () => Promise<void>;
+  // close the pool but keep the rows — for scripts that leave state to inspect
+  disconnect: () => Promise<void>;
 }
 
 export async function seedRecordingHierarchy(): Promise<SeededHierarchy> {
@@ -72,6 +74,9 @@ export async function seedRecordingHierarchy(): Promise<SeededHierarchy> {
           [projectId],
         );
         await pool.query("delete from project where project_id = $1", [projectId]);
+        await pool.end();
+      },
+      disconnect: async () => {
         await pool.end();
       },
     };

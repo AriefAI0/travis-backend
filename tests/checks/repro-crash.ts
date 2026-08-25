@@ -1,8 +1,9 @@
 // One-off repro: SIGKILL mid-recording, restart, re-send, stop — dump tracker at each step.
 import { rmSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { env } from "../../src/config/env";
+import { rawLeaf } from "../../src/features/minio_handler/paths";
 import { minio } from "../../src/lib/minio_storage/clients";
+import { seedRecordingHierarchy } from "../helpers/seed";
 import { startServer } from "../helpers/server";
 import { json } from "../helpers/json";
 
@@ -19,13 +20,19 @@ function dump(label: string) {
   db.close();
 }
 
+// create needs a real session row: the server reads the project off it
+const seed = await seedRecordingHierarchy();
+console.log("seeded: project", seed.projectId, "session", seed.sessionId);
+
 const s1 = await startServer({ PART_SIZE_BYTES: PART, DATA_DIR });
 const create = await fetch(`${s1.baseUrl}/api/minio_handler/sessions`, {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ kind: "master", projectId: 1, sessionId: 1, recordingId: 601 }),
+  body: JSON.stringify({ kind: "master", projectId: seed.projectId, sessionId: seed.sessionId }),
 });
-const id = (await json<{ data: { id: string } }>(create)).data.id;
+if (create.status !== 201) throw new Error(`create failed: ${create.status} ${await create.text()}`);
+const ticket = (await json<{ data: { id: string; storageStem: string } }>(create)).data;
+const id = ticket.id;
 
 let durable = -1;
 for (let i = 0; durable < 0; i++) {
@@ -55,7 +62,10 @@ console.log("stop:", stop.status, await stop.text());
 dump("after-stop");
 
 // remove the zeros master object — its finalize job would fail on non-media bytes anyway
-await minio.removeObject(env.BUCKET_RAW, `projects/1/sessions/1/recordings/601/master.ts`);
+const raw = rawLeaf(ticket.storageStem);
+await minio.removeObject(raw.bucket, raw.key);
 
 await s2.stop();
+// this repro is throwaway state: drop the seeded rows
+await seed.cleanup();
 rmSync(DATA_DIR, { recursive: true, force: true });
