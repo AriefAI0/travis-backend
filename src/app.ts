@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { healthRoutesFor } from "./features/health/routes";
 import { minioHandlerRoutes } from "./features/minio_handler/routes";
+import { inspectionRoutes } from "./features/inspections/routes";
 import { projectRoutes } from "./features/projects/routes";
 import { recordingRoutes } from "./features/recordings/routes";
 import { resultRoutes } from "./features/results/routes";
@@ -26,6 +27,7 @@ app.route("/", minioHandlerRoutes);
 app.route("/", projectRoutes());
 app.route("/", structureRoutes());
 app.route("/", sessionRoutes());
+app.route("/", inspectionRoutes());
 app.route("/", recordingRoutes());
 app.route("/", resultRoutes());
 

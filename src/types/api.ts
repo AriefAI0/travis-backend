@@ -471,3 +471,125 @@ export const activeClipsQuerySchema = z.object({
   projectId: queryId.optional(),
   sessionId: queryId.optional(),
 });
+
+/* ==========================================================
+   inspections — typed detail payload union + lifecycle requests
+   Payload shapes sourced from the app's
+   task-tools/tools/<type>/*Types.ts; the CTI tables in
+   src/db/schema.ts are the authority on nullability.
+========================================================= */
+
+export const mgiPayloadSchema = z.object({
+  kind: z.literal("mgi"),
+  version: z.literal(1),
+  findings: z.array(
+    z.object({
+      id: z.string(),
+      growthType: z.enum(["soft", "hard"]),
+      species: z.string().min(1),
+      speciesOtherText: z.string().nullish(),
+      // slider-sourced: fractional values round at the integer column
+      coveragePercent: z.number().min(0).max(100),
+      thicknessMm: z.number(),
+      remarks: z.string().nullish(),
+    }),
+  ),
+  criteria: z.object({ preset: z.enum(["project_default", "client_cnc", "manual"]) }),
+  noMgObserved: z.boolean(),
+});
+
+export const cpPayloadSchema = z.object({
+  kind: z.literal("cp"),
+  version: z.literal(1),
+  anodeType: z.string().min(1),
+  voltageMv: z.number(),
+  depletion: z.string(),
+  anodeWidth: z.number().nullish(),
+  anodeHeight: z.number().nullish(),
+  anodeLength: z.number().nullish(),
+  widestPit: z.number().nullish(),
+  deepestPit: z.number().nullish(),
+});
+
+const fmdAttemptValue = z.enum(["dry", "flooded", "na"]);
+
+export const fmdPayloadSchema = z.object({
+  kind: z.literal("fmd"),
+  version: z.literal(1),
+  depthEl: z.number().nullable(),
+  initialAttempt: fmdAttemptValue,
+  additionalAttempt1: fmdAttemptValue,
+  additionalAttempt2: fmdAttemptValue,
+  additionalAttempt3: fmdAttemptValue,
+});
+
+export const scourPayloadSchema = z.object({
+  kind: z.literal("scour"),
+  version: z.literal(1),
+  exposedPile: z.enum(["exposed", "not_exposed"]),
+  exposedPileHeight: z.number().nullable(),
+  heightLeg1: z.number().nullable(),
+  heightMidpoint: z.number().nullable(),
+  heightLeg2: z.number().nullable(),
+});
+
+export const gviPayloadSchema = z.object({
+  kind: z.literal("gvi"),
+  version: z.literal(1),
+  gviCP: z.number().nullish(),
+  gviUT: z.number().nullish(),
+  condition: z.enum(["ok", "not_ok"]),
+});
+
+export const cviPayloadSchema = z.object({
+  kind: z.literal("cvi"),
+  version: z.literal(1),
+  datumReference: z.string().min(1),
+  memberType: z.enum(["chord", "brace"]),
+  positions: z.array(
+    z.object({
+      // the app's CLOCK_POSITIONS const
+      clockPosition: z.enum(["12", "3", "6", "9"]),
+      utMm: z.number().nullable(),
+      findings: z.string(),
+    }),
+  ),
+  cpPotentialMv: z.number().nullable(),
+});
+
+// one payload field, one union — never one API per inspection type
+export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
+  mgiPayloadSchema,
+  cpPayloadSchema,
+  fmdPayloadSchema,
+  scourPayloadSchema,
+  gviPayloadSchema,
+  cviPayloadSchema,
+]);
+
+export type InspectionPayload = z.infer<typeof inspectionPayloadSchema>;
+export type MgiPayloadInput = z.infer<typeof mgiPayloadSchema>;
+export type CpPayloadInput = z.infer<typeof cpPayloadSchema>;
+export type FmdPayloadInput = z.infer<typeof fmdPayloadSchema>;
+export type ScourPayloadInput = z.infer<typeof scourPayloadSchema>;
+export type GviPayloadInput = z.infer<typeof gviPayloadSchema>;
+export type CviPayloadInput = z.infer<typeof cviPayloadSchema>;
+
+// inspection lifecycle requests
+export const startInspectionSchema = z.object({
+  sessionId: id,
+  itemId: id,
+  inspectionTypeCode: inspectionType,
+  remarks: optionalText,
+});
+
+export const stopInspectionSchema = z.object({
+  remarks: optionalText,
+  payload: inspectionPayloadSchema,
+});
+
+export const activeInspectionQuerySchema = z.object({
+  sessionId: queryId,
+  itemId: queryId,
+  inspectionTypeCode: inspectionType,
+});

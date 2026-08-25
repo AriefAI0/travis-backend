@@ -210,7 +210,7 @@ describe("inspection.service", () => {
       testDb,
     ))!;
 
-    // invalid enum preset: the detail insert fails inside the transaction
+    // invalid preset: the payload parse rejects inside the transaction
     await expect(
       testDb.transaction((tx) =>
         stopInspection(

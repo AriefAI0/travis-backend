@@ -4,7 +4,7 @@ import { resultFmd } from "../schema";
 
 export type CreateResultFmdInput = {
   resultId: number;
-  depthEl: number;
+  depthEl: number | null;
   initialAttempt: "dry" | "flooded" | "na"
   additionalAttempt1: "dry" | "flooded" | "na"
   additionalAttempt2: "dry" | "flooded" | "na"

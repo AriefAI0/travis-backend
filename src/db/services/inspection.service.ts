@@ -131,6 +131,18 @@ export const getActiveInspection = async (
   return null;
 };
 
+// read-only pair lookup: never creates the session_item, null when absent
+export const getActiveInspectionByPair = async (
+  sessionId: number,
+  itemId: number,
+  inspectionTypeCode: InspectionTypeCode,
+  database?: DbOrTx,
+) => {
+  const existing = await getSessionItemBySessionIdAndItemId(sessionId, itemId, database);
+  if (!existing) return null;
+  return getActiveInspection(existing.sessionItemId, inspectionTypeCode, database);
+};
+
 // flow: master check > duplicate check > resolve ids > create result — one tx
 // all-or-nothing: any throw rolls back the session_item and result rows too
 export const startInspection = async (input: StartInspectionInput, database?: DbOrTx) => {

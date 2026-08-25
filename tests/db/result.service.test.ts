@@ -1929,6 +1929,8 @@ describe("result.service", () => {
       const cpPayload = {
         kind: "cp" as const,
         version: 1 as const,
+        anodeType: "alu",
+        depletion: "none",
         voltageMv: -850,
       };
 
@@ -2023,6 +2025,8 @@ describe("result.service", () => {
       const cpPayload = {
         kind: "cp" as const,
         version: 1 as const,
+        anodeType: "alu",
+        depletion: "none",
         voltageMv: -920,
       };
 
@@ -2115,6 +2119,8 @@ describe("result.service", () => {
       const cpPayload = {
         kind: "cp" as const,
         version: 1 as const,
+        anodeType: "alu",
+        depletion: "none",
         voltageMv: -780,
       };
 
@@ -2802,7 +2808,7 @@ describe("result.service", () => {
         datumReference: "Datum A",
         memberType: "brace" as const,
         positions: [
-          { clockPosition: "12 o'clock", utMm: 10.5, findings: "Clean" },
+          { clockPosition: "12", utMm: 10.5, findings: "Clean" },
         ],
         cpPotentialMv: -850,
       };
@@ -3107,7 +3113,7 @@ describe("result.service", () => {
         mgi!.resultId,
         testDb,
       );
-      await writeTypedDetail("CP", { kind: "cp", version: 1, voltageMv: -850 }, cp!.resultId, testDb);
+      await writeTypedDetail("CP", { kind: "cp", version: 1, anodeType: "alu", depletion: "none", voltageMv: -850 }, cp!.resultId, testDb);
       await writeTypedDetail("FMD", { kind: "fmd", version: 1, depthEl: 1, initialAttempt: "flooded", additionalAttempt1: "na", additionalAttempt2: "na", additionalAttempt3: "na" }, fmd!.resultId, testDb);
 
       // createdAt is second-resolution; pin each to a distinct instant so newest-first

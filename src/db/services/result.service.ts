@@ -1,6 +1,8 @@
-import type { CpDetail, CviDetail, FmdDetail, ScourDetail, GviDetail, InspectionTypeCode, ItemResultSidebarData, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail } from "../../types/api";
+import type { CpDetail, CviDetail, FmdDetail, ScourDetail, GviDetail, InspectionTypeCode, ItemResultSidebarData, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput } from "../../types/api";
+import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
+import { AppError } from "../../lib/error";
 import { listResultImageSummariesByResultIds } from "./result-media.service";
 import { getItemById } from "./structure.service";
 import { listSessionItemsByItemId, listSessionsByIds } from "./session.service";
@@ -153,8 +155,9 @@ import {
 } from "../repositories/result-mgi.repository";
 
 /**
- * Dispatcher for typed detail tables (result_mgi, result_cp, result_fmd, result_gvi, result_cvi).
- * Phase 3 implements MGI branch; Phase 4 implements CP branch; Phase 5 implements FMD branch; Phase 6 implements GVI/CVI branches.
+ * Dispatcher for typed detail tables (result_mgi, result_cp, result_fmd,
+ * result_scour, result_gvi, result_cvi). Parses the payload union, rejects a
+ * kind that disagrees with the result's inspection type, then writes through.
  */
 export const writeTypedDetail = async (
   inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR",
@@ -162,75 +165,57 @@ export const writeTypedDetail = async (
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  if (inspectionTypeCode === "MGI") {
-    // MGI branch implemented in Phase 3
-    return writeMgiDetail(payload, resultId, database);
+  const parsed = inspectionPayloadSchema.safeParse(payload);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue ? issue.path.join(".") : "";
+    throw new AppError(
+      400,
+      "payload_invalid",
+      `payload: ${path ? `${path}: ` : ""}${issue?.message ?? "does not match any inspection payload shape"}`,
+    );
   }
 
-  if (inspectionTypeCode === "CP") {
-    // CP branch implemented in Phase 4
-    return writeCpDetail(payload, resultId, database);
+  const data = parsed.data;
+  if (data.kind.toUpperCase() !== inspectionTypeCode) {
+    throw new AppError(
+      400,
+      "payload_type_mismatch",
+      `result ${resultId} expects a ${inspectionTypeCode} payload, got kind "${data.kind}"`,
+    );
   }
 
-  if (inspectionTypeCode === "FMD") {
-    // FMD branch implemented in Phase 5
-    return writeFmdDetail(payload, resultId, database);
+  switch (data.kind) {
+    case "mgi":
+      return writeMgiDetail(data, resultId, database);
+    case "cp":
+      return writeCpDetail(data, resultId, database);
+    case "fmd":
+      return writeFmdDetail(data, resultId, database);
+    case "scour":
+      return writeScourDetail(data, resultId, database);
+    case "gvi":
+      return writeGviDetail(data, resultId, database);
+    case "cvi":
+      return writeCviDetail(data, resultId, database);
   }
-
-  if (inspectionTypeCode === "SCOUR") {
-    // SCOUR branch implemented in Phase 5
-    return writeScourDetail(payload, resultId, database);
-  }
-
-  if (inspectionTypeCode === "GVI") {
-    // GVI branch implemented in Phase 6
-    return writeGviDetail(payload, resultId, database);
-  }
-
-  if (inspectionTypeCode === "CVI") {
-    // CVI branch implemented in Phase 6
-    return writeCviDetail(payload, resultId, database);
-  }
-
-  return Promise.resolve();
 };
 
 /**
  * MGI detail writer (Phase 3)
  */
 const writeMgiDetail = async (
-  payload: unknown,
+  payload: MgiPayloadInput,
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  // Parse MGI payload
-  const mgiPayload = payload as {
-    kind: "mgi";
-    version: 1;
-    findings: Array<{
-      id: string;
-      growthType: "soft" | "hard";
-      species: string;
-      speciesOtherText?: string;
-      coveragePercent?: number;
-      thicknessMm?: number;
-      remarks?: string;
-    }>;
-    criteria: {
-      preset: "project_default" | "client_cnc" | "manual";
-    };
-    noMgObserved: boolean;
-  };
-
-  const criteria = mgiPayload.criteria;
-
   // flow: insert result_mgi > insert findings, one tx
   const run = async (tx: DbOrTx): Promise<void> => {
     const resultMgi = await createResultMgi(
       {
         resultId,
-        noMgObserved: mgiPayload.noMgObserved ? 1 : 0,
-        criteriaPreset: criteria.preset,
+        noMgObserved: payload.noMgObserved ? 1 : 0,
+        criteriaPreset: payload.criteria.preset,
       },
       tx,
     );
@@ -240,15 +225,15 @@ const writeMgiDetail = async (
     }
 
     // Insert findings
-    for (const [i, finding] of mgiPayload.findings.entries()) {
+    for (const [i, finding] of payload.findings.entries()) {
       await createResultMgiFinding(
         {
           resultMgiId: resultMgi.resultId,
           growthType: finding.growthType,
           species: finding.species,
           speciesOtherText: finding.speciesOtherText ?? null,
-          coveragePercent: finding.coveragePercent ?? null,
-          thicknessMm: finding.thicknessMm ?? null,
+          coveragePercent: finding.coveragePercent,
+          thicknessMm: finding.thicknessMm,
           remarks: finding.remarks ?? null,
           sortOrder: i,
         },
@@ -264,35 +249,21 @@ const writeMgiDetail = async (
  * CP detail writer (Phase 4)
  */
 const writeCpDetail = async (
-  payload: unknown,
+  payload: CpPayloadInput,
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  // Parse CP payload
-  const cpPayload = payload as {
-    kind: "cp";
-    version: 1;
-    anodeType: string;
-    voltageMv: number;
-    depletion?: string;
-    anodeWidth?: number;
-    anodeHeight?: number;
-    anodeLength?: number;
-    widestPit?: number;
-    deepestPit?: number;
-  };
-
   await createResultCp(
     {
       resultId,
-      anodeType: cpPayload.anodeType,
-      voltageMv: cpPayload.voltageMv,
-      depletion: cpPayload.depletion,
-      anodeWidth: cpPayload.anodeWidth,
-      anodeHeight: cpPayload.anodeHeight,
-      anodeLength: cpPayload.anodeLength,
-      widestPit: cpPayload.widestPit,
-      deepestPit: cpPayload.deepestPit
+      anodeType: payload.anodeType,
+      voltageMv: payload.voltageMv,
+      depletion: payload.depletion,
+      anodeWidth: payload.anodeWidth ?? null,
+      anodeHeight: payload.anodeHeight ?? null,
+      anodeLength: payload.anodeLength ?? null,
+      widestPit: payload.widestPit ?? null,
+      deepestPit: payload.deepestPit ?? null,
     },
     database,
   );
@@ -302,28 +273,18 @@ const writeCpDetail = async (
  * FMD detail writer (Phase 5)
  */
 const writeFmdDetail = async (
-  payload: unknown,
+  payload: FmdPayloadInput,
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  const FmdPayload = payload as {
-    kind: "fmd";
-    version: 1;
-    depthEl: number;
-    initialAttempt: "dry" | "flooded" | "na"
-    additionalAttempt1: "dry" | "flooded" | "na"
-    additionalAttempt2: "dry" | "flooded" | "na"
-    additionalAttempt3: "dry" | "flooded" | "na"
-  };
-
   await createResultFmd(
     {
       resultId,
-      depthEl: FmdPayload.depthEl,
-      initialAttempt: FmdPayload.initialAttempt,
-      additionalAttempt1: FmdPayload.additionalAttempt1,
-      additionalAttempt2: FmdPayload.additionalAttempt2,
-      additionalAttempt3: FmdPayload.additionalAttempt3,
+      depthEl: payload.depthEl,
+      initialAttempt: payload.initialAttempt,
+      additionalAttempt1: payload.additionalAttempt1,
+      additionalAttempt2: payload.additionalAttempt2,
+      additionalAttempt3: payload.additionalAttempt3,
     },
     database,
   );
@@ -333,28 +294,18 @@ const writeFmdDetail = async (
  * Scour detail writer (Phase 5)
  */
 const writeScourDetail = async (
-  payload: unknown,
+  payload: ScourPayloadInput,
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  const ScourPayload = payload as {
-    kind: "scour";
-    version: 1;
-    exposedPile: "exposed" | "not_exposed";
-    exposedPileHeight: number | null;
-    heightLeg1: number | null;
-    heightMidpoint: number | null;
-    heightLeg2: number | null;
-  };
-
   await createResultScour(
     {
       resultId,
-      exposedPile: ScourPayload.exposedPile,
-      exposedPileHeight: ScourPayload.exposedPileHeight,
-      heightLeg1: ScourPayload.heightLeg1,
-      heightMidpoint: ScourPayload.heightMidpoint,
-      heightLeg2: ScourPayload.heightLeg2,
+      exposedPile: payload.exposedPile,
+      exposedPileHeight: payload.exposedPileHeight,
+      heightLeg1: payload.heightLeg1,
+      heightMidpoint: payload.heightMidpoint,
+      heightLeg2: payload.heightLeg2,
     },
     database,
   );
@@ -364,25 +315,16 @@ const writeScourDetail = async (
  * GVI detail writer (Phase 6)
  */
 const writeGviDetail = async (
-  payload: unknown,
+  payload: GviPayloadInput,
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  // Parse GVI payload
-  const gviPayload = payload as {
-    kind: "gvi";
-    version: 1;
-    gviCP: number | null;
-    gviUT: number | null;
-    condition: "ok" | "not_ok";
-  };
-
   await createResultGvi(
     {
       resultId,
-      gviCP: gviPayload.gviCP,
-      gviUT: gviPayload.gviUT,
-      condition: gviPayload.condition,
+      gviCP: payload.gviCP ?? null,
+      gviUT: payload.gviUT ?? null,
+      condition: payload.condition,
     },
     database,
   );
@@ -392,39 +334,23 @@ const writeGviDetail = async (
  * CVI detail writer (Phase 6)
  */
 const writeCviDetail = async (
-  payload: unknown,
+  payload: CviPayloadInput,
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  // Parse CVI payload
-  const cviPayload = payload as {
-    kind: "cvi";
-    version: 1;
-    
-    datumReference: string;
-    memberType: "chord" | "brace";
-
-    positions: Array<{
-      clockPosition: string;
-      utMm: number | null;
-      findings: string | null;
-    }>;
-    cpPotentialMv: number | null;
-  };
-
   // flow: insert result_cvi > insert positions, one tx
   const run = async (tx: DbOrTx): Promise<void> => {
     await createResultCvi(
       {
         resultId,
-        datumReference: cviPayload.datumReference,
-        memberType: cviPayload.memberType,
-        cpPotentialMv: cviPayload.cpPotentialMv,
+        datumReference: payload.datumReference,
+        memberType: payload.memberType,
+        cpPotentialMv: payload.cpPotentialMv,
       },
       tx,
     );
 
-    for (const [index, position] of cviPayload.positions.entries()) {
+    for (const [index, position] of payload.positions.entries()) {
       await createResultCviPosition(
         {
           resultId,
