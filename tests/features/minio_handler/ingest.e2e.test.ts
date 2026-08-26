@@ -199,10 +199,12 @@ test(
     const emptyBody = await fetch(`${server.baseUrl}/api/minio_handler/sessions/${id}/segments?index=3`, { method: "POST" });
     expect(emptyBody.status).toBe(400);
 
+    // no-sessionId master is a VALID create now (server owns the session);
+    // the bad-request sample must be genuinely malformed instead
     const badBody = await fetch(`${server.baseUrl}/api/minio_handler/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "master", projectId: 1 }),
+      body: JSON.stringify({ kind: "master", projectId: -1 }),
     });
     expect(badBody.status).toBe(400);
 

@@ -18,7 +18,8 @@ const completeBody = z.object({
 // server assigns the recording PK; clip create names its evidence result.
 // strict: a stale client-assigned id (recordingId, clipId) is a 400, not a strip
 const createBody = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("master"), projectId: id, sessionId: id }).strict(),
+  // sessionId optional: absent means the server creates the session at arm
+  z.object({ kind: z.literal("master"), projectId: id, sessionId: id.optional() }).strict(),
   z
     .object({
       kind: z.literal("clip"),
@@ -43,7 +44,7 @@ minioHandlerRoutes.post("/api/minio_handler/sessions", async (c) => {
     throw new AppError(
       400,
       "bad_request",
-      `body must be { kind: 'master', projectId, sessionId } or { kind: 'clip', projectId, sessionId, itemId, resultId, startOffsetMs? }. ${at}${issue?.message ?? "not valid json"}`,
+      `body must be { kind: 'master', projectId, sessionId? } or { kind: 'clip', projectId, sessionId, itemId, resultId, startOffsetMs? }. ${at}${issue?.message ?? "not valid json"}`,
     );
   }
   const rec = await createSession(parsed.data);

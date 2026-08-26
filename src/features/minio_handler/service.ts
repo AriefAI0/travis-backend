@@ -1,6 +1,7 @@
 import { env } from "../../config/env";
 import { db } from "../../db/client";
 import * as resultService from "../../db/services/result.service";
+import * as projectService from "../../db/services/project.service";
 import * as sessionService from "../../db/services/session.service";
 import * as videoService from "../../db/services/video.service";
 import { AppError } from "../../lib/error";
@@ -22,9 +23,10 @@ import {
 
 const assemblers = new Map<string, Assembler>();
 
-// create request after the inversion: no client-supplied recording ids
+// create request after the inversion: no client-supplied recording ids.
+// Master may omit sessionId — the server then owns the session identity.
 export type CreateRecordingSession =
-  | { kind: "master"; projectId: number; sessionId: number }
+  | { kind: "master"; projectId: number; sessionId?: number }
   | {
       kind: "clip";
       projectId: number;
@@ -88,32 +90,46 @@ export async function createSession(identity: CreateRecordingSession) {
   }
 
   const created = await db.transaction(async (tx) => {
-    // project comes from the session row, never the body — a stem lying about
-    // its project prefix would live forever in a domain row
-    const sessionRow = await sessionService.getSessionById(identity.sessionId, tx);
-    if (!sessionRow) {
-      throw new AppError(404, "not_found", `session ${identity.sessionId} not found`);
-    }
-    if (sessionRow.projectId !== identity.projectId) {
-      throw new AppError(
-        400,
-        "bad_request",
-        `session ${identity.sessionId} belongs to project ${sessionRow.projectId}, not ${identity.projectId}`,
-      );
+    // session resolution: an explicit sessionId attaches to that row (project
+    // prefix from the row, never the body — a stem lying about its project
+    // would live forever in a domain row). An omitted sessionId means the
+    // server owns the identity: arm creates the session, numbered max+1.
+    let sessionRow: NonNullable<Awaited<ReturnType<typeof sessionService.getSessionById>>>;
+    if (identity.sessionId === undefined) {
+      const projectRow = await projectService.getProjectById(identity.projectId, tx);
+      if (!projectRow) {
+        throw new AppError(404, "not_found", `project ${identity.projectId} not found`);
+      }
+      const sessionCreated = await sessionService.createSession({ projectId: identity.projectId }, tx);
+      if (!sessionCreated) throw new Error("session insert returned no row");
+      sessionRow = sessionCreated;
+    } else {
+      const attached = await sessionService.getSessionById(identity.sessionId, tx);
+      if (!attached) {
+        throw new AppError(404, "not_found", `session ${identity.sessionId} not found`);
+      }
+      if (attached.projectId !== identity.projectId) {
+        throw new AppError(
+          400,
+          "bad_request",
+          `session ${identity.sessionId} belongs to project ${attached.projectId}, not ${identity.projectId}`,
+        );
+      }
+      sessionRow = attached;
     }
     const projectId = sessionRow.projectId;
 
     if (identity.kind === "master") {
       const video = await videoService.createMasterVideo(
         {
-          sessionId: identity.sessionId,
+          sessionId: sessionRow.sessionId,
           startEpoch: Math.floor(Date.now() / 1000),
           recordingStatus: videoService.RECORDING_PERSISTENCE_STATUS.recording,
         },
         tx,
       );
       if (!video) throw new Error("master video insert returned no row");
-      const stem = masterStem(projectId, identity.sessionId, video.masterVideoId);
+      const stem = masterStem(projectId, sessionRow.sessionId, video.masterVideoId);
       // stem embeds the assigned PK: insert > returning > set stem, one tx
       await videoService.updateMasterVideo(
         video.masterVideoId,
@@ -123,10 +139,19 @@ export async function createSession(identity: CreateRecordingSession) {
       const identityStr = identityString({
         kind: "master",
         projectId,
-        sessionId: identity.sessionId,
+        sessionId: sessionRow.sessionId,
         recordingId: video.masterVideoId,
       });
-      return { kind: "master" as const, pk: video.masterVideoId, stem, identityString: identityStr };
+      // sessionId + displayNumber ride out for the ticket: the app renders
+      // "Session N" from displayNumber without a second read
+      return {
+        kind: "master" as const,
+        pk: video.masterVideoId,
+        stem,
+        identityString: identityStr,
+        sessionId: sessionRow.sessionId,
+        displayNumber: sessionRow.displayNumber,
+      };
     }
 
     // clip: the result row names the inspection type for the stem
@@ -173,7 +198,7 @@ export async function createSession(identity: CreateRecordingSession) {
       itemId: identity.itemId,
       clipId: clip.clipId,
     });
-    return { kind: "clip" as const, pk: clip.clipId, stem, identityString: identityStr };
+    return { kind: "clip" as const, pk: clip.clipId, stem, identityString: identityStr, sessionId: sessionRow.sessionId };
   });
 
   const id = crypto.randomUUID();
@@ -184,7 +209,7 @@ export async function createSession(identity: CreateRecordingSession) {
     bucket: env.BUCKET_RAW,
     storageStem: created.stem,
     projectId: identity.projectId,
-    sessionId: identity.sessionId,
+    sessionId: created.sessionId,
   });
 
   let uploadId: string;
@@ -200,7 +225,7 @@ export async function createSession(identity: CreateRecordingSession) {
   tracker.setRecording(id, uploadId);
   log.info("session opened", { session: id, kind: identity.kind, identity: created.identityString });
   return created.kind === "master"
-    ? { id, masterVideoId: created.pk, storageStem: created.stem, status: "recording" as const, partSizeBytes: env.PART_SIZE_BYTES }
+    ? { id, masterVideoId: created.pk, storageStem: created.stem, status: "recording" as const, partSizeBytes: env.PART_SIZE_BYTES, sessionId: created.sessionId, displayNumber: created.displayNumber }
     : { id, clipId: created.pk, storageStem: created.stem, status: "recording" as const, partSizeBytes: env.PART_SIZE_BYTES };
 }
 
