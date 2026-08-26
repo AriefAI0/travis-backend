@@ -285,6 +285,8 @@ describe("video.service", () => {
         recordingStatus: "finalized",
         fileSize: null,
         durationMs: null,
+        // finalized, so the still mints; exact url is a signed, TTL-bearing string
+        thumbnailUrl: expect.any(String),
       },
       {
         masterVideoId: firstProjectNewRecording!.masterVideoId,
@@ -297,8 +299,47 @@ describe("video.service", () => {
         recordingStatus: "finalized",
         fileSize: null,
         durationMs: null,
+        // finalized, so the still mints; exact url is a signed, TTL-bearing string
+        thumbnailUrl: expect.any(String),
       },
     ]);
+  });
+
+  it("master thumbnailUrl gates on finalized and on a present stem", async () => {
+    await seedVideoContext();
+
+    // still recording: ffmpeg_finalize has not run, so no poster object exists
+    const live = await createMasterVideo(
+      { sessionId: 101, storageStem: "p1/s101/master_50", startEpoch: 1_768_000_000 },
+      testDb,
+    );
+    await updateMasterVideo(
+      live!.masterVideoId,
+      { recordingStatus: "recording" },
+      testDb,
+    );
+
+    // finalized but stem-less: nothing was written, so nothing mints
+    const stemless = await createMasterVideo(
+      { sessionId: 102, storageStem: null, startEpoch: 1_768_000_100 },
+      testDb,
+    );
+
+    const rows = await listMasterVideosByProjectId(1, testDb);
+    const byId = new Map(rows.map((row) => [row.masterVideoId, row]));
+    expect(byId.get(live!.masterVideoId)!.thumbnailUrl).toBeNull();
+    expect(byId.get(stemless!.masterVideoId)!.thumbnailUrl).toBeNull();
+
+    // finalized with a stem: mints the poster sibling in the thumbs bucket
+    await updateMasterVideo(
+      live!.masterVideoId,
+      { recordingStatus: "finalized" },
+      testDb,
+    );
+    const after = await listMasterVideosByProjectId(1, testDb);
+    const minted = after.find((row) => row.masterVideoId === live!.masterVideoId)!;
+    expect(minted.thumbnailUrl).toContain("travis-thumbs");
+    expect(minted.thumbnailUrl).toContain("p1/s101/master_50/poster.jpg");
   });
 
   it("supports CRUD for video clips and exposes playback metadata", async () => {

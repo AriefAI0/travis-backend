@@ -215,6 +215,8 @@ describe("evidence image routes", () => {
     const openClip = open.data.sessions[0].results[0].clips[0];
     expect(openClip.recordingStatus).toBe("recording");
     expect(openClip.videoUrl).toBeNull();
+    // the still is written by the same finalize run, so it gates identically
+    expect(openClip.thumbnailUrl).toBeNull();
 
     // finalized: url mints against the mkv leaf of the stem
     await testDb
@@ -224,6 +226,57 @@ describe("evidence image routes", () => {
     const closed = await json(await app.request("/api/v1/items/100/results"));
     const closedClip = closed.data.sessions[0].results[0].clips[0];
     expect(closedClip.videoUrl).toContain("p1/s101/master_1/GVI/clip_7/video.mkv");
+    // sibling of the mkv, thumbs bucket, same stem
+    expect(closedClip.thumbnailUrl).toContain("travis-thumbs");
+    expect(closedClip.thumbnailUrl).toContain("p1/s101/master_1/GVI/clip_7/poster.jpg");
+  });
+
+  it("clip thumbnailUrl is null when a finalized clip has no stem", async () => {
+    await seedResultContext();
+    await testDb.insert(schema.masterVideo).values({
+      masterVideoId: 1,
+      sessionId: 101,
+      startEpoch: 1000,
+      recordingStatus: "finalized",
+    });
+    // finalized but stem-less: nothing was ever written, so nothing mints
+    await testDb.insert(schema.videoClip).values({
+      clipId: 8,
+      resultId: 5001,
+      masterVideoId: 1,
+      startOffsetMs: 0,
+      endOffsetMs: 5_000,
+      recordingStatus: "finalized",
+      storageStem: null,
+    });
+
+    const res = await json(await app.request("/api/v1/results/5001/evidence"));
+    expect(res.data.clips[0].videoUrl).toBeNull();
+    expect(res.data.clips[0].thumbnailUrl).toBeNull();
+  });
+
+  it("evidence clips carry thumbnailUrl on the same gate as the sidebar", async () => {
+    await seedResultContext();
+    await testDb.insert(schema.masterVideo).values({
+      masterVideoId: 1,
+      sessionId: 101,
+      startEpoch: 1000,
+      recordingStatus: "finalized",
+    });
+    await testDb.insert(schema.videoClip).values({
+      clipId: 9,
+      resultId: 5001,
+      masterVideoId: 1,
+      startOffsetMs: 0,
+      endOffsetMs: 5_000,
+      recordingStatus: "finalized",
+      storageStem: "p1/s101/master_1/GVI/clip_9",
+    });
+
+    const res = await json(await app.request("/api/v1/results/5001/evidence"));
+    expect(res.data.clips[0].thumbnailUrl).toContain(
+      "p1/s101/master_1/GVI/clip_9/poster.jpg",
+    );
   });
 
   it("evidence read mirrors the sidebar media fields", async () => {

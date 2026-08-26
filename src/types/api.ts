@@ -217,6 +217,8 @@ export type ItemResultSidebarClip = {
   recordingStatus: string;
   // presigned mkv GET; null while unfinalized or finalization_failed
   videoUrl: string | null;
+  // presigned card still; same gate as videoUrl, written by the same finalize
+  thumbnailUrl: string | null;
   startOffsetMs: number;
   endOffsetMs: number | null;
   durationMs: number | null;
@@ -301,6 +303,8 @@ export type ProjectRecordingListItem = {
   recordingStatus: string;
   fileSize: number | null;
   durationMs: number | null;
+  // presigned card still; null until the master finalizes
+  thumbnailUrl: string | null;
 };
 
 export type ProjectResultSummaryRow = {

@@ -1,5 +1,6 @@
 import { db, type DbOrTx } from "../client";
 import type { MasterVideoPlaybackData } from "../../types/api";
+import { mintRecordingThumbnailUrl } from "./result-media.service";
 import { and, asc, count, eq } from "drizzle-orm";
 import {
   createMasterVideoRecord,
@@ -98,6 +99,8 @@ export type ProjectMasterVideo = {
   recordingStatus: RecordingPersistenceStatus;
   fileSize: number | null;
   durationMs: number | null;
+  // presigned card still; null until the master finalizes
+  thumbnailUrl: string | null;
 };
 
 type PlaybackEventRow = {
@@ -358,13 +361,17 @@ export const listMasterVideosByProjectId = async (
 
   const rows = await listMasterVideoRecordsByProjectId(projectId, database);
 
-  return rows.map((row) => ({
-    ...row,
-    recordingStatus: normalizeRecordingPersistenceStatus(
-      row.recordingStatus,
-      "Master video recording status",
-    ),
-  }));
+  // mint per row: the still is the card face, so the list read carries it
+  return Promise.all(
+    rows.map(async (row) => ({
+      ...row,
+      recordingStatus: normalizeRecordingPersistenceStatus(
+        row.recordingStatus,
+        "Master video recording status",
+      ),
+      thumbnailUrl: await mintRecordingThumbnailUrl(row),
+    })),
+  );
 };
 
 export const getMasterVideoPlaybackData = async (

@@ -33,6 +33,21 @@ export const mintClipVideoUrl = (clip: {
   return mintGetUrl(bucket, key);
 };
 
+// card still for a master or a clip — ffmpeg_finalize writes it beside the mkv.
+// Same gate as the video: the poster is produced by the same finalize run, so
+// an unfinalized stem has neither. Named thumbnailUrl, not posterUrl:
+// posterUrl on a result entry means its first snip image, a different thing.
+export const mintRecordingThumbnailUrl = (recording: {
+  recordingStatus: string;
+  storageStem: string | null;
+}) => {
+  if (recording.recordingStatus !== "finalized" || !recording.storageStem) {
+    return null;
+  }
+  const { bucket, key } = clipLeaves(recording.storageStem).poster;
+  return mintGetUrl(bucket, key);
+};
+
 const toSummary = async (
   imageRecord: Awaited<ReturnType<typeof listResultImageRecordsByResultId>>[number],
 ): Promise<ItemResultSidebarImage> => ({

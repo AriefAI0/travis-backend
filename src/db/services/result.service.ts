@@ -6,6 +6,7 @@ import { AppError } from "../../lib/error";
 import {
   listResultImageSummariesByResultIds,
   mintClipVideoUrl,
+  mintRecordingThumbnailUrl,
 } from "./result-media.service";
 import { getItemById } from "./structure.service";
 import { listSessionItemsByItemId, listSessionsByIds } from "./session.service";
@@ -497,6 +498,7 @@ export const getItemResultSidebar = async (
                   startEpochMs: clipPlayback.startEpochMs,
                   endEpochMs: clipPlayback.endEpochMs,
                   videoUrl: await mintClipVideoUrl(clipPlayback),
+                  thumbnailUrl: await mintRecordingThumbnailUrl(clipPlayback),
                 }),
               ),
             ),
@@ -645,6 +647,7 @@ export const getResultEvidence = async (
       startEpochMs: clipPlayback.startEpochMs,
       endEpochMs: clipPlayback.endEpochMs,
       videoUrl: await mintClipVideoUrl(clipPlayback),
+      thumbnailUrl: await mintRecordingThumbnailUrl(clipPlayback),
     })),
   );
 
