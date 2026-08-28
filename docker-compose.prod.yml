@@ -1,9 +1,27 @@
-# Portainer Repository-method deploy target: app service ONLY.
+# Portainer Repository-method deploy target: one-shot schema push + app.
 # Postgres and MinIO run as their own containers — create the shared
 # network first: docker network create travis
 services:
+  # one-shot: pushes src/db/schema.ts to the database, then exits.
+  # drizzle.config.ts imports src/config/env, so all four vars must parse.
+  migrate:
+    build:
+      context: .
+      target: migrate
+    image: travis-backend:migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    networks:
+      - travis
+    restart: "no"
+
   app:
-    build: .
+    build:
+      context: .
+      target: runtime
     image: travis-backend:dev
     container_name: travis-backend
     ports:
@@ -19,6 +37,10 @@ services:
     networks:
       - travis
     restart: always
+    # flow: schema push finishes > app boots with tables in place
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"fetch('http://127.0.0.1:'+(process.env.PORT||8788)+'/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 10s

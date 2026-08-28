@@ -5,8 +5,19 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
+# migrate: full deps (drizzle-kit included) — one-shot schema push target
+FROM oven/bun:1.3-debian AS migrate
+USER root
+WORKDIR /app
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+COPY drizzle.config.ts ./
+COPY src ./src
+# --force: auto-accept statements so the push never blocks on a prompt
+CMD ["bunx", "drizzle-kit", "push", "--force"]
+
 # runtime: bun + ffmpeg (ffprobe ships with the ffmpeg package)
-FROM oven/bun:1.3-debian
+FROM oven/bun:1.3-debian AS runtime
 USER root
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg \
