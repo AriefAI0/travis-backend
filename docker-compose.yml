@@ -1,22 +1,46 @@
-# Phase-1 stack: app + minio ONLY — no postgres/redis (spec D13).
-# Buckets are bootstrapped by the app itself (ensureBuckets at startup),
-# so no mc/init container is needed.
+# Portainer Repository-method deploy target: one-shot schema push + app.
+# Postgres and MinIO run as their own containers — create the shared
+# network first: docker network create travis
 services:
-  app:
-    build: .
-    ports:
-      - "${PORT:-8788}:${PORT:-8788}"
-    # .env drives everything; only the endpoint is overridden for the
-    # compose network (MinIO is a sibling container, not the host's :9002)
-    env_file: .env
+  # one-shot: pushes src/db/schema.ts to the database, then exits.
+  # drizzle.config.ts imports src/config/env, so all four vars must parse.
+  migrate:
+    build:
+      context: .
+      target: migrate
+    image: travis-backend:migrate
     environment:
-      MINIO_ENDPOINT: http://minio:9000
+      DATABASE_URL: ${DATABASE_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    networks:
+      - travis
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runtime
+    image: travis-backend:dev
+    container_name: travis-backend
+    ports:
+      - "8788:8788"
+    # only the four required vars — the rest default in src/config/env.ts
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
     volumes:
-      - app-data:/app/data # sqlite tracker + finalize tmp
+      - app-data:/app/data # sqlite tracker + finalize tmp survive redeploys
+    networks:
+      - travis
+    restart: always
+    # flow: schema push finishes > app boots with tables in place
     depends_on:
-      minio:
-        condition: service_healthy
-    restart: unless-stopped
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"fetch('http://127.0.0.1:'+(process.env.PORT||8788)+'/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 10s
@@ -24,25 +48,9 @@ services:
       retries: 3
       start_period: 15s
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000" # S3 API — app talks to this via the compose network
-      - "9001:9001" # web console
-    # same creds the app uses — interpolate from .env so there is one source
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
-    volumes:
-      - minio-data:/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
 volumes:
   app-data:
-  minio-data:
+
+networks:
+  travis:
+    external: true
