@@ -1,0 +1,8 @@
+node_modules
+data
+.env
+.planning
+.agents
+.git
+tests
+*.md
