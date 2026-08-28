@@ -8,6 +8,7 @@ services:
     build:
       context: .
       target: migrate
+      network: host # buildkit sandbox must reach apt like the host does
     image: travis-backend:migrate
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -22,6 +23,7 @@ services:
     build:
       context: .
       target: runtime
+      network: host # buildkit sandbox must reach apt like the host does
     image: travis-backend:dev
     container_name: travis-backend
     ports:
