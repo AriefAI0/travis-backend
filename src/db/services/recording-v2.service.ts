@@ -20,6 +20,7 @@ import {
   lookupRecordingUpload,
   reserveRecordingSegment,
 } from "./recording-upload.service";
+import { scheduleRecordingFinalize } from "./recording-finalize.service";
 import type { recordingSegment, recordingUpload } from "../schema";
 
 // spec-locked: upload tickets expire after five minutes
@@ -336,6 +337,11 @@ export const completeSegment = async (
     segmentIndex,
     database
   );
+  // inactive captures line up their next finalize job on every new receipt
+  const state = await lookupRecordingUpload(recordingId, database ?? db);
+  if (state && state.captureState !== "recording") {
+    await scheduleRecordingFinalize(recordingId, state.segmentRevision, undefined, database ?? db);
+  }
   return { action: "stored" as const, receipt: toReceipt(stored), revisionBumped };
 };
 
@@ -440,6 +446,8 @@ export const stopRecording = async (
     { captureState: "stopped", finalSegmentIndex },
     database ?? db
   );
+  // a declared range schedules finalization immediately
+  await scheduleRecordingFinalize(recordingId, upload.segmentRevision, undefined, database ?? db);
   return { captureState: updated!.captureState, finalSegmentIndex: updated!.finalSegmentIndex };
 };
 
@@ -466,6 +474,8 @@ export const recoveryCompleteRecording = async (
     { finalSegmentIndex: merged },
     database ?? db
   );
+  // recovery-complete runs immediately, bypassing the five-second debounce
+  await scheduleRecordingFinalize(recordingId, upload.segmentRevision, new Date(), database ?? db);
   return { captureState: updated!.captureState, finalSegmentIndex: updated!.finalSegmentIndex };
 };
 
