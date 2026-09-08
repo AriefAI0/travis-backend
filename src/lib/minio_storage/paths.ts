@@ -114,3 +114,33 @@ export function stemPk(stem: string): { kind: "master" | "clip"; pk: number } | 
   const m = /\/(master|clip)_(\d+)$/.exec(stem);
   return m ? { kind: m[1] as "master" | "clip", pk: Number(m[2]) } : null;
 }
+
+/* =========================================================
+   V2 RECORDING (protocol 2) — uuid-addressed objects
+========================================================= */
+
+// zero-padded ten-digit segment index — lexicographic order = numeric order
+export function v2SegmentIndexName(index: number): string {
+  return `${String(index).padStart(10, "0")}.ts`;
+}
+
+// immutable per-recording object prefix (raw bucket)
+export function v2RecordingPrefix(recordingId: string): string {
+  return `recordings/${recordingId}`;
+}
+
+// one sealed segment object — the v2 raw leaf
+export function v2SegmentLeaf(recordingId: string, index: number): Leaf {
+  return {
+    bucket: env.BUCKET_RAW,
+    key: `${v2RecordingPrefix(recordingId)}/segments/${v2SegmentIndexName(index)}`,
+  };
+}
+
+// derived playback artifacts for one published revision (media bucket)
+export function v2PlaybackPrefix(recordingId: string, revision: number): Leaf {
+  return {
+    bucket: env.BUCKET_MEDIA,
+    key: `${v2RecordingPrefix(recordingId)}/playback/${revision}`,
+  };
+}

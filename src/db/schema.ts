@@ -1,4 +1,4 @@
-import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, timestamp, index, unique, uniqueIndex, check,} from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, timestamp, uuid, primaryKey, index, unique, uniqueIndex, check,} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /* =================== CHANGABLE ENUMRATIONS =================== */
@@ -559,5 +559,179 @@ export const resultImage = pgTable(
   },
   (table) => ({
     idxResultImageResultId: index("idx_result_image_result_id").on(table.resultId),
+  })
+);
+
+/* =========================================================
+   RECORDING UPLOAD V2 (protocol 2)
+   Durable upload ledger — replaces the SQLite tracker for
+   v2. Legacy routes keep their SQLite tracker until cutover.
+   Upload rows outlive domain rows: FKs are NO ACTION on
+   purpose, so domain deletion can never cascade here.
+========================================================= */
+export const recordingUploadKind = pgEnum("recording_upload_kind", ["master", "clip"]);
+
+export const recordingCaptureState = pgEnum("recording_capture_state", [
+  "recording",
+  "stopped",
+  "interrupted",
+]);
+
+export const recordingSegmentReceiptState = pgEnum("recording_segment_receipt_state", [
+  "reserved",
+  "stored",
+]);
+
+export const recordingJobState = pgEnum("recording_job_state", [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+]);
+
+/* ---------------------------------------------------------
+   One row per recording attempt, keyed by the app's UUID.
+--------------------------------------------------------- */
+export const recordingUpload = pgTable(
+  "recording_upload",
+  {
+    recordingId: uuid("recording_id").primaryKey(),
+    protocolVersion: integer("protocol_version").notNull(),
+    backendInstanceId: uuid("backend_instance_id").notNull(),
+    // hash of the immutable admission body — same UUID + other hash = 409
+    admissionHash: text("admission_hash").notNull(),
+    kind: recordingUploadKind("kind").notNull(),
+    masterVideoId: integer("master_video_id").references(() => masterVideo.masterVideoId),
+    clipId: integer("clip_id").references(() => videoClip.clipId),
+    // immutable MinIO key prefix, e.g. recordings/<recordingId>/segments
+    objectPrefix: text("object_prefix").notNull(),
+    captureState: recordingCaptureState("capture_state").notNull().default("recording"),
+    finalSegmentIndex: integer("final_segment_index"),
+    lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true, mode: "date" }),
+    // bumped only when a new stored receipt commits
+    segmentRevision: integer("segment_revision").notNull().default(0),
+    publishedRevision: integer("published_revision"),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    // exactly one domain FK per kind
+    recordingUploadKindTargetCheck: check(
+      "recording_upload_kind_target_check",
+      sql`(${table.kind} = 'master' AND ${table.masterVideoId} IS NOT NULL AND ${table.clipId} IS NULL)
+       OR (${table.kind} = 'clip' AND ${table.clipId} IS NOT NULL)`,
+    ),
+    idxRecordingUploadBackendInstanceId: index("idx_recording_upload_backend_instance_id").on(
+      table.backendInstanceId
+    ),
+    idxRecordingUploadCaptureState: index("idx_recording_upload_capture_state").on(
+      table.captureState
+    ),
+  })
+);
+
+/* ---------------------------------------------------------
+   Segment reservation/receipt ledger — composite PK with
+   recording. expected* are checked again at completion.
+--------------------------------------------------------- */
+export const recordingSegment = pgTable(
+  "recording_segment",
+  {
+    recordingId: uuid("recording_id")
+      .notNull()
+      .references(() => recordingUpload.recordingId),
+    segmentIndex: integer("segment_index").notNull(),
+    expectedChecksum: text("expected_checksum").notNull(), // sha-256 hex
+    expectedSizeBytes: bigint("expected_size_bytes", { mode: "number" }).notNull(),
+    objectKey: text("object_key").notNull(),
+    receiptState: recordingSegmentReceiptState("receipt_state").notNull().default("reserved"),
+    storedAt: timestamp("stored_at", { withTimezone: true, mode: "date" }),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    recordingSegmentPk: primaryKey({ columns: [table.recordingId, table.segmentIndex] }),
+    idxRecordingSegmentState: index("idx_recording_segment_state").on(table.receiptState),
+  })
+);
+
+/* ---------------------------------------------------------
+   Revision-aware finalization work. Unique on recording/
+   revision; claims use leases (worker wiring lands later).
+--------------------------------------------------------- */
+export const recordingFinalizeJob = pgTable(
+  "recording_finalize_job",
+  {
+    jobId: uuid("job_id").primaryKey().defaultRandom(),
+    recordingId: uuid("recording_id")
+      .notNull()
+      .references(() => recordingUpload.recordingId),
+    targetRevision: integer("target_revision").notNull(),
+    state: recordingJobState("state").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    leaseOwnerId: text("lease_owner_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true, mode: "date" }),
+    lastError: text("last_error"),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    uqRecordingFinalizeJobRecordingRevision: unique(
+      "uq_recording_finalize_job_recording_revision"
+    ).on(table.recordingId, table.targetRevision),
+    idxRecordingFinalizeJobClaim: index("idx_recording_finalize_job_claim").on(
+      table.state,
+      table.nextAttemptAt
+    ),
+  })
+);
+
+/* ---------------------------------------------------------
+   Deployment identity singleton (row id locked to 1) —
+   stable backendInstanceId + recovery-authority flag.
+--------------------------------------------------------- */
+export const backendIdentity = pgTable(
+  "backend_identity",
+  {
+    singletonId: integer("singleton_id").primaryKey(),
+    instanceId: uuid("instance_id").notNull().defaultRandom(),
+    recoveryAuthorityEnabled: boolean("recovery_authority_enabled").notNull().default(false),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    backendIdentitySingletonCheck: check(
+      "backend_identity_singleton_check",
+      sql`${table.singletonId} = 1`
+    ),
+  })
+);
+
+/* ---------------------------------------------------------
+   Audit trail for audited unknown-recording discards. No
+   FK on recordingId — the discarded UUID may have no row.
+--------------------------------------------------------- */
+export const recordingDiscardAudit = pgTable(
+  "recording_discard_audit",
+  {
+    discardId: uuid("discard_id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id").notNull(),
+    recordingId: uuid("recording_id").notNull(),
+    backendInstanceId: uuid("backend_instance_id").notNull(),
+    reason: text("reason").notNull(),
+
+    ...createdAt,
+  },
+  (table) => ({
+    uqRecordingDiscardAuditRequestRecording: unique(
+      "uq_recording_discard_audit_request_recording"
+    ).on(table.requestId, table.recordingId),
   })
 );
