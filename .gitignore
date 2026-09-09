@@ -46,7 +46,7 @@ skills-lock.json
 .agents/
 .superpowers/
 CLAUDE.md
-
+.handoff/
 
 native/gst-controller/build/
 native/gst-controller/resources/

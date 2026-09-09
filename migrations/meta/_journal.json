@@ -43,6 +43,13 @@
       "when": 1787687723417,
       "tag": "0005_equal_impossible_man",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788889624286,
+      "tag": "0006_shallow_cyclops",
+      "breakpoints": true
     }
   ]
 }

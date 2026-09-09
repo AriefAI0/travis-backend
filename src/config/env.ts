@@ -21,6 +21,8 @@ const schema = z.object({
   SEGMENT_STALE_SECONDS: z.coerce.number().int().positive().default(30),
   RESUME_GRACE_MINUTES: z.coerce.number().positive().default(10),
   PRESIGN_GET_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
+  RECORDING_V2_ENABLED: z.stringbool().default(false),
+  RECORDING_V2_TOKEN: z.string().min(1).optional(),
   DATA_DIR: z.string().min(1).default("./data"),
   FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
   FFMPEG_CONCURRENCY: z.coerce.number().int().positive().default(1),
