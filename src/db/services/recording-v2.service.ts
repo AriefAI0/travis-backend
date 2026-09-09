@@ -4,9 +4,15 @@ import type { Client } from "minio";
 import { db, type DbOrTx } from "../client";
 import { env } from "../../config/env";
 import { AppError } from "../../lib/error";
-import { v2SegmentLeaf } from "../../lib/minio_storage/paths";
-import { createMasterVideoRecord } from "../repositories/master-video.repository";
-import { createVideoClipRecord } from "../repositories/video-clip.repository";
+import { v2PlaybackPrefix, v2SegmentLeaf } from "../../lib/minio_storage/paths";
+import {
+  createMasterVideoRecord,
+  findMasterVideoById,
+} from "../repositories/master-video.repository";
+import {
+  createVideoClipRecord,
+  findVideoClipById,
+} from "../repositories/video-clip.repository";
 import { createSession } from "./session.service";
 import {
   findRecordingSegment,
@@ -21,7 +27,11 @@ import {
   lookupRecordingUpload,
   reserveRecordingSegment,
 } from "./recording-upload.service";
+import { bootstrapBackendIdentity } from "./recording-upload.service";
 import { scheduleRecordingFinalize } from "./recording-finalize.service";
+import { minio } from "../../lib/minio_storage/clients";
+import { mintGetUrl } from "../../lib/minio_storage/mint";
+import { insertRecordingDiscardAudit } from "../repositories/recording-discard-audit.repository";
 import type { recordingSegment, recordingUpload } from "../schema";
 
 // spec-locked: upload tickets expire after five minutes
@@ -369,17 +379,104 @@ export type ReconcileSegmentAction = {
   action: "stored" | "upload" | "conflict";
 };
 
-// classify one batch of local segment descriptors against the receipt ledger
-// flow: load recording > identity check > classify descriptors
+export type ReconcileResult =
+  | {
+      recording: "resume";
+      captureState: string;
+      segmentRevision: number;
+      publishedRevision: number | null;
+      segments: ReconcileSegmentAction[];
+    }
+  | {
+      // spec 11: audited directive for an unknown recording directory
+      recording: "discard_unknown";
+      requestId: string;
+      reason: "unknown_recording";
+    };
+
+// spec 11 checks for an unknown UUID. ANY failure is an operational error --
+// an ordinary 404/timeout/auth/db error never authorizes deletion.
+const resolveUnknownRecordingDiscard = async (
+  recordingId: string,
+  callerBackendInstanceId: string | null,
+  requestId: string | undefined,
+  storage: Client,
+  database: DbOrTx
+): Promise<ReconcileResult> => {
+  const identity = await bootstrapBackendIdentity(database);
+  if (!identity.recoveryAuthorityEnabled) {
+    // restore safety lock: authority off means never discard
+    throw new AppError(
+      503,
+      "recovery_authority_disabled",
+      "Recovery authority is disabled; the unknown spool is retained"
+    );
+  }
+  // cross-backend guard: a manifest recorded elsewhere never gets discarded here
+  if (callerBackendInstanceId !== null && callerBackendInstanceId !== identity.instanceId) {
+    throw new AppError(
+      409,
+      "identity_conflict",
+      `Unknown spool ${recordingId} belongs to another backend instance`
+    );
+  }
+  if (requestId === undefined) {
+    throw new AppError(
+      400,
+      "validation_error",
+      "reconcile requires requestId for unknown-recording resolution"
+    );
+  }
+  // MinIO check: objects under the exact prefix mean footage exists somewhere
+  const prefix = `recordings/${recordingId}/`;
+  const existing = storage.listObjectsV2(env.BUCKET_RAW, prefix);
+  for await (const _item of existing) {
+    throw new AppError(
+      409,
+      "retry_later",
+      `Objects exist under ${prefix}; the spool is retained for reconciliation`
+    );
+  }
+  // audit commits BEFORE the directive returns (spec 11)
+  await insertRecordingDiscardAudit(
+    {
+      requestId,
+      recordingId,
+      backendInstanceId: identity.instanceId,
+      reason: "unknown_recording",
+    },
+    database
+  );
+  return {
+    recording: "discard_unknown",
+    requestId,
+    reason: "unknown_recording",
+  };
+};
+
+// classify one batch of local segment descriptors against the receipt ledger,
+// or resolve an unknown spool through the audited discard path (spec 11)
+// flow: known > identity check > classify; unknown > authority + ids + minio > audit > discard
 export const reconcileRecording = async (
   recordingId: string,
   callerBackendInstanceId: string,
   descriptors: ReconcileDescriptor[],
-  database?: DbOrTx
-) => {
+  requestId: string | undefined,
+  database?: DbOrTx,
+  storage?: Client
+): Promise<ReconcileResult> => {
   const upload = await lookupRecordingUpload(recordingId, database ?? db);
   if (!upload) {
-    throw new AppError(404, "not_found", `Recording not found: ${recordingId}`);
+    if (!storage) {
+      throw new AppError(404, "not_found", `Recording not found: ${recordingId}`);
+    }
+    return resolveUnknownRecordingDiscard(
+      recordingId,
+      callerBackendInstanceId,
+      requestId,
+      storage,
+      database ?? db
+    );
   }
   if (upload.backendInstanceId !== callerBackendInstanceId) {
     throw new AppError(
@@ -390,17 +487,42 @@ export const reconcileRecording = async (
   }
   const segments = await listRecordingSegments(recordingId, database ?? db);
   const byIndex = new Map(segments.map((s) => [s.segmentIndex, s]));
-  const segmentActions: ReconcileSegmentAction[] = descriptors.map((d) => {
+  const segmentActions: ReconcileSegmentAction[] = [];
+  for (const d of descriptors) {
     const row = byIndex.get(d.index);
-    if (!row) return { index: d.index, action: "upload" };
+    if (!row) {
+      segmentActions.push({ index: d.index, action: "upload" });
+      continue;
+    }
     const sameContent =
       row.expectedChecksum === d.checksum && row.expectedSizeBytes === d.sizeBytes;
-    if (!sameContent) return { index: d.index, action: "conflict" };
-    return {
-      index: d.index,
-      action: row.receiptState === "stored" ? "stored" : "upload",
-    };
-  });
+    if (!sameContent) {
+      segmentActions.push({ index: d.index, action: "conflict" });
+      continue;
+    }
+    if (row.receiptState === "stored") {
+      segmentActions.push({ index: d.index, action: "stored" });
+      continue;
+    }
+    // spec 14: a reserved segment whose object already exists correctly
+    // commits its receipt without uploading again (size check; content was
+    // checksum-enforced at PUT time)
+    if (storage !== undefined) {
+      try {
+        const stat = await storage.statObject(env.BUCKET_RAW, row.objectKey);
+        if (stat.size === row.expectedSizeBytes) {
+          await commitRecordingSegmentReceipt(recordingId, d.index, database ?? db);
+          segmentActions.push({ index: d.index, action: "stored" });
+          continue;
+        }
+        segmentActions.push({ index: d.index, action: "conflict" });
+        continue;
+      } catch {
+        // absent object: re-upload (another ticket for the same segment)
+      }
+    }
+    segmentActions.push({ index: d.index, action: "upload" });
+  }
   return {
     recording: "resume" as const,
     captureState: upload.captureState,
@@ -526,3 +648,144 @@ export const getRecordingStatus = async (recordingId: string, database?: DbOrTx)
     storedCount: storedIndexes.size,
   };
 };
+
+/* ---------------------------------------------------------
+   Playback read (protocol 2 revision artifacts)
+
+   The finalize worker publishes immutable revisions under
+   recordings/<uuid>/playback/<revision>/ and stamps
+   recording_upload.published_revision. This read mints
+   presigned GET URLs against EXACTLY that revision.
+
+   No published revision = playback is not ready. The capture
+   state surfaces instead; no artifact URLs, never a guess.
+--------------------------------------------------------- */
+export type RecordingPlaybackV2 = {
+  recordingId: string;
+  kind: "master" | "clip";
+  captureState: string;
+  publishedRevision: number | null;
+  playable: boolean;
+  videoUrl: string | null;
+  hlsUrl: string | null;
+  posterUrl: string | null;
+  /** masters only; clips publish no filmstrip */
+  timeline: Array<{ timestampMs: number; url: string }>;
+  durationMs: number | null;
+  startEpoch: number | null;
+  endEpoch: number | null;
+  /** clips only; masters carry null */
+  startOffsetMs: number | null;
+  endOffsetMs: number | null;
+};
+
+export const getRecordingPlaybackV2 = async (
+  recordingId: string,
+  database?: DbOrTx,
+): Promise<RecordingPlaybackV2> => {
+  const upload = await lookupRecordingUpload(recordingId, database ?? db);
+  if (!upload) {
+    throw new AppError(404, "not_found", `Recording not found: ${recordingId}`);
+  }
+
+  // timeline stems live under the v2 prefix; id <0 means "unpublished"
+  const revision = upload.publishedRevision;
+  if (revision === null || revision < 0) {
+    return {
+      recordingId: upload.recordingId,
+      kind: upload.kind,
+      captureState: upload.captureState,
+      publishedRevision: null,
+      playable: false,
+      videoUrl: null,
+      hlsUrl: null,
+      posterUrl: null,
+      timeline: [],
+      durationMs: null,
+      startEpoch: null,
+      endEpoch: null,
+      startOffsetMs: null,
+      endOffsetMs: null,
+    };
+  }
+
+  const prefix = v2PlaybackPrefix(upload.recordingId, revision);
+  const mint = async (leaf: string) => mintGetUrl(prefix.bucket, `${prefix.key}/${leaf}`);
+
+  const [videoUrl, hlsUrl, posterUrl] = await Promise.all([
+    mint("video.mkv"),
+    mint("hls/index.m3u8"),
+    mint("poster.jpg"),
+  ]);
+
+  // domain stamps: duration + timing come from the linked row
+  let durationMs: number | null = null;
+  let startEpoch: number | null = null;
+  let endEpoch: number | null = null;
+  let startOffsetMs: number | null = null;
+  let endOffsetMs: number | null = null;
+
+  if (upload.kind === "master" && upload.masterVideoId !== null) {
+    const master = await findMasterVideoById(upload.masterVideoId, database ?? db);
+    durationMs = master?.durationMs ?? null;
+    startEpoch = master?.startEpoch ?? null;
+    endEpoch = master?.endEpoch ?? null;
+  } else if (upload.kind === "clip" && upload.clipId !== null) {
+    const clip = await findVideoClipById(upload.clipId, database ?? db);
+    startOffsetMs = clip?.startOffsetMs ?? null;
+    endOffsetMs = clip?.endOffsetMs ?? null;
+  }
+
+  const timeline =
+    upload.kind === "master"
+      ? await listV2RevisionTimeline(upload.recordingId, revision)
+      : [];
+
+  return {
+    recordingId: upload.recordingId,
+    kind: upload.kind,
+    captureState: upload.captureState,
+    publishedRevision: revision,
+    playable: true,
+    videoUrl,
+    hlsUrl,
+    posterUrl,
+    timeline,
+    durationMs,
+    startEpoch,
+    endEpoch,
+    startOffsetMs,
+    endOffsetMs,
+  };
+};
+
+// filmstrip stems derive from the revision prefix; the finalize worker wrote
+// <prefix>/timeline/<9-digit-ms>.jpg — list + mint each
+const listV2RevisionTimeline = async (
+  recordingId: string,
+  revision: number,
+): Promise<Array<{ timestampMs: number; url: string }>> => {
+  const prefix = v2PlaybackPrefix(recordingId, revision);
+  const keys = await listObjects(`${prefix.key}/timeline/`, prefix.bucket);
+  const stills: Array<{ timestampMs: number; url: string }> = [];
+  for (const key of keys) {
+    const leaf = key.slice(`${prefix.key}/timeline/`.length);
+    const match = /^(\d{9})\.jpg$/.exec(leaf);
+    if (!match) continue;
+    const timestampMs = Number(match[1]);
+    stills.push({ timestampMs, url: await mintGetUrl(prefix.bucket, key) });
+  }
+  return stills.sort((first, second) => first.timestampMs - second.timestampMs);
+};
+
+// minio-js listObjects returns a stream; collect keys under the exact prefix
+const listObjects = (prefix: string, bucket: string): Promise<string[]> =>
+  new Promise((resolve, reject) => {
+    const keys: string[] = [];
+    const stream = minio.listObjects(bucket, prefix, false);
+    stream.on("data", (object) => {
+      if (object.name) keys.push(object.name);
+    });
+    stream.on("error", reject);
+    stream.on("end", () => resolve(keys));
+  });

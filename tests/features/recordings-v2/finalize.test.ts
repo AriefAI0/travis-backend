@@ -290,6 +290,62 @@ describe("recording v2 finalize jobs", () => {
     expect(row!.publishedRevision!).toBeGreaterThan(0);
   });
 
+  it("stamps the master domain row finalized when the revision publishes", async () => {
+    const segments = await fixtureSegments(2);
+    const recordingId = await admitMaster();
+    for (const [index, bytes] of segments.entries()) {
+      await sealSegment(recordingId, index, bytes);
+    }
+    await stopRecording(recordingId, 1, testDb);
+
+    const done = await runOnce();
+    expect(done.status).toBe("completed");
+
+    // seeded row is 9001; the admission-minted master carries the next identity
+    // resolve the minted master through the v2 FK (identity sequence starts
+    // below the seeded 9001, so "first row" picks the wrong row)
+    const uploadRow = await testDb.query.recordingUpload.findFirst();
+    const master = await testDb.query.masterVideo.findFirst({
+      where: eq(schema.masterVideo.masterVideoId, uploadRow!.masterVideoId!),
+    });
+    expect(master).not.toBeNull();
+    expect(master!.recordingStatus).toBe("finalized");
+    expect(master!.durationMs).toBeGreaterThan(0);
+    expect(master!.fileSize).toBeGreaterThan(0);
+    // v2 rows keep no legacy stem: legacy URL minters gate on it and stay safe
+    expect(master!.storageStem).toBeNull();
+  });
+
+  it("stamps the clip domain row finalized with end offset = start + duration", async () => {
+    // three slices; index 0 is a degenerate stub ffmpeg cannot probe
+    const segments = await fixtureSegments(3);
+    const backend = await identity();
+    const recordingId = randomUUID();
+    await admitRecording(
+      {
+        recordingId,
+        kind: "clip",
+        resultId: 9001,
+        masterVideoId: 9001,
+        startOffsetMs: 2500,
+      },
+      backend.instanceId,
+      testDb
+    );
+    await sealSegment(recordingId, 0, segments[1]!);
+    await stopRecording(recordingId, 0, testDb);
+
+    const done = await runOnce();
+    expect(done.status).toBe("completed");
+
+    const clip = await testDb.query.videoClip.findFirst();
+    expect(clip).not.toBeNull();
+    expect(clip!.recordingStatus).toBe("finalized");
+    expect(clip!.startOffsetMs).toBe(2500);
+    expect(clip!.endOffsetMs).toBeGreaterThan(2500);
+    expect(clip!.storageStem).toBeNull();
+  });
+
   it("never lets a stale revision replace a newer published one", async () => {
     const recordingId = await admitMaster();
     await stopRecording(recordingId, -1, testDb);
@@ -306,7 +362,8 @@ describe("recording v2 finalize jobs", () => {
       testDb
     );
     expect(done.completed).toBe(true);
-    expect(done.published).toBe(true);
+    // pointer never moved: 99 stays newer than the stale target revision
+    expect(done.published).toBe(false);
 
     const row = await testDb.query.recordingUpload.findFirst();
     expect(row!.publishedRevision).toBe(99);

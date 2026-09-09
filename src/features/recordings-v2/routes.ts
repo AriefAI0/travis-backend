@@ -13,6 +13,7 @@ import { bootstrapBackendIdentity } from "../../db/services/recording-upload.ser
 import {
   admitRecording,
   completeSegment,
+  getRecordingPlaybackV2,
   getRecordingStatus,
   heartbeatRecording,
   issueSegmentTicket,
@@ -44,6 +45,7 @@ const ticketSchema = z.object({
 
 const reconcileSchema = z.object({
   backendInstanceId: z.uuid(),
+  requestId: z.uuid().optional(),
   descriptors: z
     .array(
       z.object({
@@ -116,6 +118,14 @@ export const recordingV2Routes = (database?: DbOrTx, storage: Client = minio) =>
       status
     );
 
+  // deployment identity anchor (spec 11): callers resolve the current
+  // backendInstanceId before reconciling unknown spools
+  routes.get("/api/v2/recordings/_deployment", async (c) => {
+    return respond(c, {
+      recoveryAuthorityEnabled: (await bootstrapBackendIdentity(database)).recoveryAuthorityEnabled
+    })
+  })
+
   // admission: uuid + master/clip domain inputs -> immutable admitted identity
   const handleAdmission = async (c: Context) => {
     const body = await parseBody(c, admissionSchema);
@@ -165,7 +175,9 @@ export const recordingV2Routes = (database?: DbOrTx, storage: Client = minio) =>
       recordingId,
       body.backendInstanceId,
       body.descriptors,
-      database
+      body.requestId,
+      database,
+      storage
     );
     return respond(c, result);
   });
@@ -191,6 +203,13 @@ export const recordingV2Routes = (database?: DbOrTx, storage: Client = minio) =>
     const recordingId = parseUuidParam(c, "id");
     const result = await getRecordingStatus(recordingId, database);
     return respond(c, result);
+  });
+
+  // playback bundle: 404 when unknown, null URLs when unpublished
+  routes.get("/api/v2/recordings/:id/playback", async (c) => {
+    const recordingId = parseUuidParam(c, "id");
+    const playback = await getRecordingPlaybackV2(recordingId, database);
+    return respond(c, playback as unknown as Record<string, unknown>);
   });
 
   return routes;

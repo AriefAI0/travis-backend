@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 
@@ -14,6 +15,8 @@ import { env } from "../../../src/config/env";
 import { buildMinioClient, minio } from "../../../src/lib/minio_storage/clients";
 import { recordingV2Routes } from "../../../src/features/recordings-v2/routes";
 import { onError } from "../../../src/lib/error";
+import { setRecoveryAuthority } from "../../../src/db/services/recording-upload.service";
+import { bootstrapBackendIdentity } from "../../../src/db/services/recording-upload.service";
 
 // domain parents for admission: project > session > ... > result > masterVideo
 const seedDomainChain = async () => {
@@ -324,9 +327,117 @@ describe("recording v2 routes", () => {
 
     const unknown = await post(app, `/api/v2/recordings/${randomUUID()}/reconcile`, {
       backendInstanceId,
+      requestId: randomUUID(),
       descriptors: [],
     });
-    expect(unknown.status).toBe(404);
+    // authority disabled: operational error, spool retained (spec 11)
+    expect(unknown.status).toBe(503);
+    expect(unknown.body).toMatchObject({ code: 'recovery_authority_disabled' });
+  });
+
+  it("resolves an unknown spool to a discard directive only under authority", async () => {
+    const app = mount();
+    await bootstrapBackendIdentity(testDb);
+    const unknownId = randomUUID();
+    const requestId = randomUUID();
+    const backendInstanceId = (await testDb.query.backendIdentity.findFirst())!.instanceId;
+
+    // authority OFF (default): operational error, never a directive
+    const res = await post(app, `/api/v2/recordings/${unknownId}/reconcile`, {
+      backendInstanceId,
+      requestId,
+      descriptors: []
+    });
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ code: "recovery_authority_disabled" });
+
+    // authority ON: audited discard directive
+    await setRecoveryAuthority(true, testDb);
+    const directive = await post(app, `/api/v2/recordings/${unknownId}/reconcile`, {
+      backendInstanceId,
+      requestId,
+      descriptors: []
+    });
+    expect(directive.status).toBe(200);
+    expect(directive.body).toMatchObject({
+      recording: "discard_unknown",
+      requestId,
+      reason: "unknown_recording"
+    });
+    const audit = await testDb.query.recordingDiscardAudit.findMany();
+    expect(audit.length).toBe(1);
+    expect(audit[0]).toMatchObject({ requestId, recordingId: unknownId, reason: "unknown_recording" });
+  });
+
+  it("retains an unknown spool whose MinIO prefix holds objects", async () => {
+    const app = mount();
+    await bootstrapBackendIdentity(testDb);
+    await setRecoveryAuthority(true, testDb);
+    const unknownId = randomUUID();
+    const objectKey = `recordings/${unknownId}/segments/0000000000.ts`;
+    const url = await minio.presignedUrl("PUT", env.BUCKET_RAW, objectKey, 300);
+    expect((await fetch(url, { method: "PUT", body: encode("orphan-bytes") })).status).toBe(200);
+
+    const res = await post(app, `/api/v2/recordings/${unknownId}/reconcile`, {
+      backendInstanceId: (await testDb.query.backendIdentity.findFirst())!.instanceId,
+      requestId: randomUUID(),
+      descriptors: []
+    });
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ code: "retry_later" });
+    await minio.removeObject(env.BUCKET_RAW, objectKey);
+  });
+
+  it("refuses an unknown spool whose manifest points at another backend", async () => {
+    const app = mount();
+    await bootstrapBackendIdentity(testDb);
+    await setRecoveryAuthority(true, testDb);
+    const res = await post(app, `/api/v2/recordings/${randomUUID()}/reconcile`, {
+      backendInstanceId: randomUUID(),
+      requestId: randomUUID(),
+      descriptors: []
+    });
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ code: "identity_conflict" });
+  });
+
+  it("commits a reserved segment whose object already exists correctly", async () => {
+    const app = mount();
+    const recordingId = randomUUID();
+    const admitted = await post(app, "/api/v2/recordings", masterBody(recordingId));
+    const backendInstanceId = admitted.body.backendInstanceId as string;
+
+    const bytes = encode("reserved-then-lost-completion");
+    const checksum = sha256Hex(bytes);
+    const ticket = await post(
+      app,
+      `/api/v2/recordings/${recordingId}/segments/0/ticket`,
+      { checksum, sizeBytes: bytes.length }
+    );
+    const put = await fetch(ticket.body.url as string, {
+      method: "PUT",
+      body: bytes,
+      headers: ticket.body.headers as Record<string, string>
+    });
+    expect(put.status).toBe(200);
+    // completion deliberately lost: the segment stays reserved
+
+    const reconcile = await post(app, `/api/v2/recordings/${recordingId}/reconcile`, {
+      backendInstanceId,
+      descriptors: [{ index: 0, checksum, sizeBytes: bytes.length }]
+    });
+    expect(reconcile.body.segments).toEqual([{ index: 0, action: "stored" }]);
+    const completion = await post(app, `/api/v2/recordings/${recordingId}/segments/0/complete`);
+    expect(completion.body.receipt).toMatchObject({ index: 0 });
+  });
+
+  it("exposes the deployment identity anchor", async () => {
+    const app = mount();
+    await bootstrapBackendIdentity(testDb);
+    const res = await app.request("/api/v2/recordings/_deployment");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { recoveryAuthorityEnabled: boolean } };
+    expect(typeof body.data.recoveryAuthorityEnabled).toBe("boolean");
   });
 
   it("caps reconcile batches at 500 descriptors", async () => {
@@ -452,5 +563,69 @@ describe("recording v2 routes", () => {
     const beat = await post(dead, `/api/v2/recordings/${recordingId}/heartbeat`);
     expect(beat.status).toBe(200);
     expect(beat.body).toMatchObject({ readiness: { postgres: true, minio: false } });
+  });
+
+
+  it("playback read: unpublished recording is not playable and carries no URLs", async () => {
+    const app = mount();
+    const recording = await post(app, "/api/v2/recordings", masterBody());
+    const playback = await get(app, `/api/v2/recordings/${recording.body.recordingId}/playback`);
+    expect(playback.status).toBe(200);
+    expect(playback.body).toMatchObject({
+      recordingId: recording.body.recordingId,
+      kind: "master",
+      playable: false,
+      publishedRevision: null,
+      videoUrl: null,
+      hlsUrl: null,
+      posterUrl: null,
+      timeline: [],
+    });
+  });
+
+  it("playback read: 404 for an unknown recording id", async () => {
+    const app = mount();
+    const playback = await get(app, `/api/v2/recordings/${randomUUID()}/playback`);
+    expect(playback.status).toBe(404);
+  });
+
+  it("playback read: published revision mints presigned artifact URLs", async () => {
+    const app = mount();
+    const recording = await post(app, "/api/v2/recordings", masterBody());
+    const recordingId = recording.body.recordingId;
+
+    // fake three artifacts exactly where the finalize worker writes them
+    const revision = 3;
+    const prefix = `recordings/${recordingId}/playback/${revision}`;
+    const artifactKeys = [
+      `${prefix}/video.mkv`,
+      `${prefix}/hls/index.m3u8`,
+      `${prefix}/poster.jpg`,
+      `${prefix}/timeline/000000000.jpg`,
+      `${prefix}/timeline/000001000.jpg`,
+    ];
+    for (const key of artifactKeys) {
+      await minio.putObject(env.BUCKET_MEDIA, key, Buffer.from("x"));
+    }
+
+    await testDb
+      .update(schema.recordingUpload)
+      .set({ publishedRevision: revision })
+      .where(eq(schema.recordingUpload.recordingId, recordingId as string));
+
+    const playback = await get(app, `/api/v2/recordings/${recordingId}/playback`);
+    expect(playback.status).toBe(200);
+    expect(playback.body.playable).toBe(true);
+    expect(playback.body.publishedRevision).toBe(revision);
+    expect(String(playback.body.videoUrl)).toContain(`${prefix}/video.mkv`);
+    expect(String(playback.body.hlsUrl)).toContain(`${prefix}/hls/index.m3u8`);
+    expect(String(playback.body.posterUrl)).toContain(`${prefix}/poster.jpg`);
+    const timeline = playback.body.timeline as Array<{ timestampMs: number; url: string }>;
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0]?.timestampMs).toBe(0);
+    expect(timeline[1]?.timestampMs).toBe(1000);
+
+    // cleanup these media-bucket artifacts
+    await minio.removeObjects(env.BUCKET_MEDIA, artifactKeys);
   });
 });

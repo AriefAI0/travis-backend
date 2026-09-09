@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Client } from "minio";
@@ -160,14 +160,15 @@ export const processNextRecordingFinalizeJob = async (
       await storage.statObject(leaf.bucket, leaf.key);
     }
 
-    await buildAndUploadArtifacts(upload, job.targetRevision, range, storage, database);
+    const built = await buildAndUploadArtifacts(upload, job.targetRevision, range, storage, database);
 
     if (leaseLost) return { status: "deferred", jobId: job.jobId, detail: "lease lost" };
     const done = await completeRecordingFinalizeJob(
       job.jobId,
       ownerId,
       { recordingId: upload.recordingId, revision: job.targetRevision },
-      database
+      database,
+      { durationMs: built.durationMs, fileSizeBytes: built.mkvBytes }
     );
     if (!done.completed) {
       return { status: "deferred", jobId: job.jobId, detail: "lease lost at publish" };
@@ -214,6 +215,13 @@ interface ArtifactUpload {
   contentType: string;
 }
 
+// measured facts from one artifact build; the publisher stamps the domain row
+export interface BuiltRevision {
+  artifacts: ArtifactUpload[];
+  durationMs: number | null;
+  mkvBytes: number | null;
+}
+
 // assemble the revision stream, remux artifacts under the revision prefix,
 // upload everything — the caller publishes the pointer only after this returns
 // flow: download+concat > mkv > probe > hls > poster > timeline > upload all
@@ -223,7 +231,7 @@ async function buildAndUploadArtifacts(
   indexes: number[],
   storage: Client,
   database: DbOrTx
-): Promise<ArtifactUpload[]> {
+): Promise<BuiltRevision> {
   void database;
   const dir = join(env.DATA_DIR, "tmp", `v2-${upload.recordingId}-${revision}`);
   await mkdir(dir, { recursive: true });
@@ -295,7 +303,8 @@ async function buildAndUploadArtifacts(
       revision,
       artifacts: artifacts.length,
     });
-    return artifacts;
+    const mkvBytes = (await stat(mkvPath)).size;
+    return { artifacts, durationMs, mkvBytes };
   } finally {
     await rm(dir, { recursive: true, force: true }); // temp never outlives the job
   }

@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
-import { recordingFinalizeJob, recordingUpload } from "../schema";
+import { masterVideo, recordingFinalizeJob, recordingUpload, videoClip } from "../schema";
 
 // spec 13: 60s leases renewed every 15s, five attempts, then an operational
 // error surfaced with a five-minute retry cadence. Spec 9: a capture with no
@@ -150,15 +150,26 @@ export const failRecordingFinalizeJob = async (
   });
 };
 
+// facts the finalize worker measured for the revision it built; stamped onto
+// the domain row in the same transaction as the pointer so domain readers
+// (lists, reports, playback gate) never see finalized without a published
+// revision behind it
+export type RecordingPublishStamp = {
+  durationMs: number | null;
+  fileSizeBytes: number | null;
+};
+
 // complete the job and move the publication pointer in one transaction.
 // The pointer only moves forward — a stale revision can never replace a
 // newer published one — and only while the caller still owns the lease.
 // Pass publish=null for jobs with nothing to publish (empty capture).
+// The domain stamp rides the same forward-only condition as the pointer.
 export const completeRecordingFinalizeJob = async (
   jobId: string,
   ownerId: string,
   publish: { recordingId: string; revision: number } | null,
-  database: DbOrTx = db
+  database: DbOrTx = db,
+  stamp?: RecordingPublishStamp
 ) => {
   return database.transaction(async (tx) => {
     const completed = await tx
@@ -174,7 +185,7 @@ export const completeRecordingFinalizeJob = async (
       .returning();
     if (!completed[0]) return { completed: false as const, published: false as const };
     if (!publish) return { completed: true as const, published: false as const };
-    await tx
+    const moved = await tx
       .update(recordingUpload)
       .set({ publishedRevision: publish.revision })
       .where(
@@ -185,9 +196,60 @@ export const completeRecordingFinalizeJob = async (
             lt(recordingUpload.publishedRevision, publish.revision)
           )
         )
-      );
+      )
+      .returning({ recordingId: recordingUpload.recordingId });
+    if (!moved[0]) return { completed: true as const, published: false as const };
+    if (stamp) {
+      await stampDomainRowForPublish(publish.recordingId, stamp, tx);
+    }
     return { completed: true as const, published: true as const };
   });
+};
+
+// v2 publication makes the domain row visible: master/clip flips to finalized
+// with the measured duration and size; a clip's end offset is its start plus
+// the recovered duration (spec 12). Legacy stems stay untouched — v2 rows
+// have no stem, and legacy minters gate on it, so legacy URLs never lie.
+const stampDomainRowForPublish = async (
+  recordingId: string,
+  stamp: RecordingPublishStamp,
+  tx: DbOrTx
+) => {
+  const upload = await tx
+    .select({ kind: recordingUpload.kind, masterVideoId: recordingUpload.masterVideoId, clipId: recordingUpload.clipId })
+    .from(recordingUpload)
+    .where(eq(recordingUpload.recordingId, recordingId))
+    .limit(1);
+  const row = upload[0];
+  if (!row) return;
+  if (row.kind === "master" && row.masterVideoId !== null) {
+    await tx
+      .update(masterVideo)
+      .set({
+        recordingStatus: "finalized",
+        durationMs: stamp.durationMs,
+        fileSize: stamp.fileSizeBytes,
+        lastUpdatedAt: new Date(),
+      })
+      .where(eq(masterVideo.masterVideoId, row.masterVideoId));
+  } else if (row.kind === "clip" && row.clipId !== null) {
+    const clip = await tx
+      .select({ startOffsetMs: videoClip.startOffsetMs })
+      .from(videoClip)
+      .where(eq(videoClip.clipId, row.clipId))
+      .limit(1);
+    const startOffsetMs = clip[0]?.startOffsetMs ?? 0;
+    const durationMs = stamp.durationMs ?? 0;
+    await tx
+      .update(videoClip)
+      .set({
+        recordingStatus: "finalized",
+        endOffsetMs: startOffsetMs + durationMs,
+        fileSize: stamp.fileSizeBytes,
+        lastUpdatedAt: new Date(),
+      })
+      .where(eq(videoClip.clipId, row.clipId));
+  }
 };
 
 // flip stale captures to interrupted; returns the rows so the worker can
