@@ -29,6 +29,7 @@ const checksumSchema = z.string().regex(/^[0-9a-f]{64}$/, "expected 64-char lowe
 const admissionSchema = z.object({
   recordingId: z.uuid(),
   kind: z.enum(["master", "clip"]),
+  projectId: z.number().int().positive().optional(),
   sessionId: z.number().int().positive().optional(),
   startEpoch: z.number().int().positive().optional(),
   resultId: z.number().int().positive().optional(),

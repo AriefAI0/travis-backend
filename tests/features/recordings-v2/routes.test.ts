@@ -189,6 +189,20 @@ describe("recording v2 routes", () => {
     expect(changed.body).toMatchObject({ code: "identity_conflict" });
   });
 
+  it("mints an auto session when a master admits without a sessionId", async () => {
+    const app = mount();
+    const res = await post(app, "/api/v2/recordings", {
+      recordingId: randomUUID(),
+      kind: "master",
+      projectId: 9001,
+      startEpoch: 1000,
+    });
+    expect(res.status).toBe(201);
+    const domain = res.body.domain as { sessionId: number; masterVideoId: number };
+    expect(domain.sessionId).toBeGreaterThan(0);
+    expect(domain.masterVideoId).toBeGreaterThan(0);
+  });
+
   it("stores a segment after an enforced PUT and replays the receipt", async () => {
     const app = mount();
     const recordingId = randomUUID();

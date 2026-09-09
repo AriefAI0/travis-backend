@@ -7,6 +7,7 @@ import { AppError } from "../../lib/error";
 import { v2SegmentLeaf } from "../../lib/minio_storage/paths";
 import { createMasterVideoRecord } from "../repositories/master-video.repository";
 import { createVideoClipRecord } from "../repositories/video-clip.repository";
+import { createSession } from "./session.service";
 import {
   findRecordingSegment,
   listRecordingSegments,
@@ -29,6 +30,7 @@ export const SEGMENT_TICKET_TTL_SECONDS = 300;
 export type AdmitRecordingBody = {
   recordingId: string;
   kind: "master" | "clip";
+  projectId?: number;
   sessionId?: number;
   startEpoch?: number;
   resultId?: number;
@@ -150,16 +152,27 @@ export const admitRecording = async (
     }
     let domain: RecordingDomainIdentity;
     if (body.kind === "master") {
-      if (body.sessionId === undefined || body.startEpoch === undefined) {
-        throw new AppError(
-          400,
-          "validation_error",
-          "master admission requires sessionId and startEpoch"
-        );
+      if (body.startEpoch === undefined) {
+        throw new AppError(400, "validation_error", "master admission requires startEpoch");
+      }
+      // spec 2: the server owns session numbering — a master without a
+      // sessionId admits into a freshly minted auto session for its project.
+      let sessionId = body.sessionId ?? null;
+      let projectId = body.projectId ?? null;
+      if (sessionId === null) {
+        if (projectId === null) {
+          throw new AppError(
+            400,
+            "validation_error",
+            "master admission requires projectId when sessionId is omitted"
+          );
+        }
+        const minted = (await createSession({ projectId }, tx))!;
+        sessionId = minted.sessionId;
       }
       const created = (await createMasterVideoRecord(
         {
-          sessionId: body.sessionId,
+          sessionId,
           startEpoch: body.startEpoch,
           recordingStatus: "recording",
         },
