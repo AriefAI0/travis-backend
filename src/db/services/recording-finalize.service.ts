@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lt, lte, notInArray, or, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { masterVideo, recordingFinalizeJob, recordingUpload, videoClip } from "../schema";
@@ -35,15 +35,19 @@ export const scheduleRecordingFinalize = async (
   return inserted[0] ?? null;
 };
 
-// claim one due job with FOR UPDATE SKIP LOCKED in its own transaction;
-// expired leases are reclaimable. Null when nothing is due.
+// claim one job while serializing all work for one recording.
 export const claimNextRecordingFinalizeJob = async (ownerId: string, database: DbOrTx = db) => {
   return database.transaction(async (tx) => {
+    const skipped: string[] = [];
+    // flow: lock job > lock upload > check lease
+    for (;;) {
     const now = new Date();
     const due = await tx
       .select()
       .from(recordingFinalizeJob)
       .where(
+        and(
+        skipped.length ? notInArray(recordingFinalizeJob.recordingId, skipped) : undefined,
         or(
           and(
             inArray(recordingFinalizeJob.state, ["pending", "failed"]),
@@ -53,23 +57,49 @@ export const claimNextRecordingFinalizeJob = async (ownerId: string, database: D
             eq(recordingFinalizeJob.state, "running"),
             lt(recordingFinalizeJob.leaseExpiresAt, now)
           )
-        )
+        ))
       )
-      .orderBy(asc(recordingFinalizeJob.nextAttemptAt))
+      .orderBy(asc(recordingFinalizeJob.nextAttemptAt), asc(recordingFinalizeJob.jobId))
       .limit(1)
       .for("update", { skipLocked: true });
-    const job = due[0];
-    if (!job) return null;
-    const claimed = await tx
-      .update(recordingFinalizeJob)
-      .set({
-        state: "running",
-        leaseOwnerId: ownerId,
-        leaseExpiresAt: new Date(now.getTime() + JOB_LEASE_SECONDS * 1000),
-      })
-      .where(eq(recordingFinalizeJob.jobId, job.jobId))
-      .returning();
-    return claimed[0] ?? null;
+
+      const job = due[0];
+      if (!job) return null;
+      skipped.push(job.recordingId);
+      const upload = await tx
+        .select({ recordingId: recordingUpload.recordingId })
+        .from(recordingUpload)
+        .where(eq(recordingUpload.recordingId, job.recordingId))
+        .for("update", { skipLocked: true })
+        .limit(1);
+      if (!upload[0]) continue;
+
+      const running = await tx
+        .select({ jobId: recordingFinalizeJob.jobId })
+        .from(recordingFinalizeJob)
+        .where(
+          and(
+            eq(recordingFinalizeJob.recordingId, job.recordingId),
+            eq(recordingFinalizeJob.state, "running"),
+            gt(recordingFinalizeJob.leaseExpiresAt, new Date()),
+            sql`${recordingFinalizeJob.jobId} <> ${job.jobId}`
+          )
+        )
+        .limit(1);
+      if (running[0]) continue;
+
+      const claimed = await tx
+        .update(recordingFinalizeJob)
+        .set({
+          state: "running",
+          leaseOwnerId: ownerId,
+          leaseExpiresAt: new Date(now.getTime() + JOB_LEASE_SECONDS * 1000),
+        })
+        .where(eq(recordingFinalizeJob.jobId, job.jobId))
+        .returning();
+      if (claimed[0]) return claimed[0];
+    }
+    return null;
   });
 };
 

@@ -151,6 +151,21 @@ export const processNextRecordingFinalizeJob = async (
       range = Array.from({ length: contiguous + 1 }, (_, i) => i);
     }
 
+    const currentBeforeBuild = await lookupRecordingUpload(job.recordingId, database);
+    if (!currentBeforeBuild) {
+      await failRecordingFinalizeJob(job.jobId, ownerId, "recording row missing", database);
+      return { status: "failed", jobId: job.jobId, detail: "recording row missing" };
+    }
+    const latestRevision = currentBeforeBuild.segmentRevision;
+    const publishedRevision = currentBeforeBuild.publishedRevision;
+    if (latestRevision > job.targetRevision || (publishedRevision ?? -1) >= job.targetRevision) {
+      const done = await completeRecordingFinalizeJob(job.jobId, ownerId, null, database);
+      if (!done.completed) return { status: "deferred", jobId: job.jobId, detail: "lease lost" };
+      if (latestRevision > (publishedRevision ?? -1)) {
+        await scheduleRecordingFinalize(job.recordingId, latestRevision, undefined, database);
+      }
+      return { status: "completed", jobId: job.jobId, detail: "obsolete revision" };
+    }
     if (leaseLost) return { status: "deferred", jobId: job.jobId, detail: "lease lost" };
 
     // raw objects first (spec 13) — a stored receipt with a missing object is
@@ -160,8 +175,27 @@ export const processNextRecordingFinalizeJob = async (
       await storage.statObject(leaf.bucket, leaf.key);
     }
 
+    log.info("v2 finalize build start", {
+      recording: upload.recordingId,
+      jobId: job.jobId,
+      revision: job.targetRevision,
+      attempt: job.attempts + 1,
+      range: [range[0], range[range.length - 1]],
+    });
     const built = await buildAndUploadArtifacts(upload, job.targetRevision, range, storage, database);
+    log.info("v2 finalize build end", {
+      recording: upload.recordingId,
+      jobId: job.jobId,
+      revision: job.targetRevision,
+      attempt: job.attempts + 1,
+      range: [range[0], range[range.length - 1]],
+    });
 
+    const currentAfterBuild = await lookupRecordingUpload(job.recordingId, database);
+    if (!currentAfterBuild) {
+      await failRecordingFinalizeJob(job.jobId, ownerId, "recording row missing", database);
+      return { status: "failed", jobId: job.jobId, detail: "recording row missing" };
+    }
     if (leaseLost) return { status: "deferred", jobId: job.jobId, detail: "lease lost" };
     const done = await completeRecordingFinalizeJob(
       job.jobId,
@@ -174,10 +208,10 @@ export const processNextRecordingFinalizeJob = async (
       return { status: "deferred", jobId: job.jobId, detail: "lease lost at publish" };
     }
     // receipts moved while we built artifacts: line up the newer revision
-    if (upload.segmentRevision > job.targetRevision) {
+    if (currentAfterBuild.segmentRevision > job.targetRevision) {
       await scheduleRecordingFinalize(
-        upload.recordingId,
-        upload.segmentRevision,
+        currentAfterBuild.recordingId,
+        currentAfterBuild.segmentRevision,
         undefined,
         database
       );
