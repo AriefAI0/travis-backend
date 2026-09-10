@@ -425,4 +425,51 @@ describe("recording v2 finalize jobs", () => {
       minio.statObject(prefix.bucket, `${prefix.key}/timeline/000000000.jpg`)
     ).rejects.toThrow();
   });
+
+  it("skips a recording that already has a running job", async () => {
+    const busy = await admitMaster();
+    const other = await admitMaster();
+    await scheduleRecordingFinalize(busy, 1, undefined, testDb);
+    await scheduleRecordingFinalize(busy, 2, undefined, testDb);
+    await scheduleRecordingFinalize(other, 1, undefined, testDb);
+
+    const running = await claimNextRecordingFinalizeJob("worker-a", testDb);
+    expect(running!.recordingId).toBe(busy);
+
+    // worker-b takes the other recording but never the busy recording's second job
+    const second = await claimNextRecordingFinalizeJob("worker-b", testDb);
+    expect(second!.recordingId).toBe(other);
+
+    // nothing stays claimable while the busy recording holds its live lease
+    const drained = await claimNextRecordingFinalizeJob("worker-c", testDb);
+    expect(drained).toBeNull();
+  });
+
+  it("completes an obsolete queued revision without building it", async () => {
+    const segments = await fixtureSegments(3);
+    const recordingId = await admitMaster();
+    await sealSegment(recordingId, 0, segments[1]!);
+    await sealSegment(recordingId, 1, segments[2]!);
+    await stopRecording(recordingId, 1, testDb); // schedules the current revision
+
+    // a stale revision-1 job for the same range arrives late
+    await scheduleRecordingFinalize(recordingId, 1, undefined, testDb);
+
+    let obsolete = 0;
+    let built = 0;
+    for (let i = 0; i < 6; i++) {
+      const result = await runOnce();
+      if (result.status === "idle") break;
+      expect(result.status).toBe("completed");
+      if (result.detail === "obsolete revision") obsolete += 1;
+      else built += 1;
+    }
+    expect(obsolete).toBe(1);
+    expect(built).toBe(1);
+
+    const row = await testDb.query.recordingUpload.findFirst();
+    expect(row!.publishedRevision).toBe(row!.segmentRevision);
+    // the stale revision never produced artifacts
+    await expect(artifactExists(recordingId, 1, "video.mkv")).rejects.toThrow();
+  });
 });
