@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
+import { Readable } from "node:stream";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 
@@ -401,7 +402,8 @@ describe("recording v2 routes", () => {
     expect(res.body).toMatchObject({ code: "identity_conflict" });
   });
 
-  it("commits a reserved segment whose object already exists correctly", async () => {
+  // Lost completions schedule finalization after capture ends.
+  it.each(["recording", "stopped", "interrupted"] as const)("reconciles matching bytes while %s", async (captureState) => {
     const app = mount();
     const recordingId = randomUUID();
     const admitted = await post(app, "/api/v2/recordings", masterBody(recordingId));
@@ -420,16 +422,121 @@ describe("recording v2 routes", () => {
       headers: ticket.body.headers as Record<string, string>
     });
     expect(put.status).toBe(200);
-    // completion deliberately lost: the segment stays reserved
+    // Completion stays lost until reconciliation checks bytes.
+    await testDb
+      .update(schema.recordingUpload)
+      .set({ captureState, finalSegmentIndex: captureState === "recording" ? null : 0 })
+      .where(eq(schema.recordingUpload.recordingId, recordingId));
 
-    const reconcile = await post(app, `/api/v2/recordings/${recordingId}/reconcile`, {
+    const reconcileBody = {
       backendInstanceId,
-      descriptors: [{ index: 0, checksum, sizeBytes: bytes.length }]
-    });
+      descriptors: [{ index: 0, checksum, sizeBytes: bytes.length }],
+    };
+    const reconcile = await post(app, `/api/v2/recordings/${recordingId}/reconcile`, reconcileBody);
+    expect(reconcile.status).toBe(200);
+    expect(reconcile.body).toMatchObject({ captureState, segmentRevision: 1, publishedRevision: null });
     expect(reconcile.body.segments).toEqual([{ index: 0, action: "stored" }]);
+    const jobs = await testDb.query.recordingFinalizeJob.findMany();
+    expect(jobs).toHaveLength(captureState === "recording" ? 0 : 1);
+    if (captureState !== "recording") {
+      expect(jobs[0]).toMatchObject({ recordingId, targetRevision: 1, state: "pending" });
+    }
+
+    const replay = await post(app, `/api/v2/recordings/${recordingId}/reconcile`, reconcileBody);
+    expect(replay.status).toBe(200);
+    expect(replay.body.segmentRevision).toBe(1);
+    expect(replay.body.segments).toEqual([{ index: 0, action: "stored" }]);
+    expect(await testDb.query.recordingFinalizeJob.findMany()).toHaveLength(jobs.length);
     const completion = await post(app, `/api/v2/recordings/${recordingId}/segments/0/complete`);
     expect(completion.body.receipt).toMatchObject({ index: 0 });
+    expect(completion.body.revisionBumped).toBe(false);
   });
+
+  // Size and checksum conflicts retain reserved receipts.
+  it.each(["forge-payload0", "short"])("rejects reserved object bytes %s during reconcile", async (text) => {
+    const app = mount();
+    const recordingId = randomUUID();
+    const admitted = await post(app, "/api/v2/recordings", masterBody(recordingId));
+    const bytes = encode("legit-payload0");
+    const checksum = sha256Hex(bytes);
+    const ticket = await post(app, `/api/v2/recordings/${recordingId}/segments/0/ticket`, {
+      checksum,
+      sizeBytes: bytes.length,
+    });
+    expect(ticket.status).toBe(200);
+    await minio.putObject(env.BUCKET_RAW, ticket.body.objectKey as string, Buffer.from(text));
+
+    const reconcile = await post(app, `/api/v2/recordings/${recordingId}/reconcile`, {
+      backendInstanceId: admitted.body.backendInstanceId,
+      descriptors: [{ index: 0, checksum, sizeBytes: bytes.length }],
+    });
+    expect(reconcile.status).toBe(200);
+    expect(reconcile.body.segmentRevision).toBe(0);
+    expect(reconcile.body.segments).toEqual([{ index: 0, action: "conflict" }]);
+    expect(await testDb.query.recordingSegment.findFirst()).toMatchObject({
+      receiptState: "reserved",
+      storedAt: null,
+    });
+    expect(await testDb.query.recordingFinalizeJob.findMany()).toHaveLength(0);
+  });
+
+  // GET and stream errors retain upload eligibility.
+  it.each(["missing", "get-outage", "stream-outage"] as const)(
+    "handles %s after the reserved object stat",
+    async (scenario) => {
+      const storage = buildMinioClient("http://127.0.0.1:9", "k", "s");
+      const app = mount(storage);
+      const recordingId = randomUUID();
+      const admitted = await post(app, "/api/v2/recordings", masterBody(recordingId));
+      const bytes = encode("reserved-object");
+      const checksum = sha256Hex(bytes);
+      const ticket = await post(app, `/api/v2/recordings/${recordingId}/segments/0/ticket`, {
+        checksum,
+        sizeBytes: bytes.length,
+      });
+      expect(ticket.status).toBe(200);
+      const stat = spyOn(storage, "statObject").mockResolvedValue({
+        size: bytes.length,
+        etag: "test",
+        lastModified: new Date(),
+        metaData: {},
+      });
+      const object = spyOn(storage, "getObject");
+      if (scenario === "stream-outage") {
+        // A partial stream never acknowledges complete bytes.
+        object.mockResolvedValue(Readable.from((async function* () {
+          yield Buffer.from(bytes.subarray(0, 3));
+          throw Object.assign(new Error("Storage stream interrupted"), { code: "ECONNRESET" });
+        })()));
+      } else {
+        object.mockRejectedValue(Object.assign(new Error("Object fetch failed"), {
+          code: scenario === "missing" ? "NoSuchKey" : "ECONNREFUSED",
+        }));
+      }
+      try {
+        const reconcile = await post(app, `/api/v2/recordings/${recordingId}/reconcile`, {
+          backendInstanceId: admitted.body.backendInstanceId,
+          descriptors: [{ index: 0, checksum, sizeBytes: bytes.length }],
+        });
+        expect(reconcile.status).toBe(scenario === "missing" ? 200 : 503);
+        if (scenario === "missing") {
+          expect(reconcile.body.segmentRevision).toBe(0);
+          expect(reconcile.body.segments).toEqual([{ index: 0, action: "upload" }]);
+        } else {
+          expect(reconcile.body).toMatchObject({ code: "storage_unavailable" });
+        }
+        expect(await testDb.query.recordingSegment.findFirst()).toMatchObject({
+          receiptState: "reserved",
+          storedAt: null,
+        });
+        expect((await get(app, `/api/v2/recordings/${recordingId}`)).body.segmentRevision).toBe(0);
+        expect(await testDb.query.recordingFinalizeJob.findMany()).toHaveLength(0);
+      } finally {
+        stat.mockRestore();
+        object.mockRestore();
+      }
+    }
+  );
 
   it("exposes the deployment identity anchor", async () => {
     const app = mount();
@@ -546,7 +653,7 @@ describe("recording v2 routes", () => {
   it("surfaces a storage outage as 503 completion and false readiness", async () => {
     const dead = mount(buildMinioClient("http://127.0.0.1:9", "k", "s"));
     const recordingId = randomUUID();
-    await post(dead, "/api/v2/recordings", masterBody(recordingId));
+    const admitted = await post(dead, "/api/v2/recordings", masterBody(recordingId));
 
     const bytes = encode("offline-segment");
     const ticket = await post(dead, `/api/v2/recordings/${recordingId}/segments/0/ticket`, {
@@ -559,6 +666,18 @@ describe("recording v2 routes", () => {
     const completion = await post(dead, `/api/v2/recordings/${recordingId}/segments/0/complete`);
     expect(completion.status).toBe(503);
     expect(completion.body).toMatchObject({ code: "storage_unavailable" });
+
+    const reconcile = await post(dead, `/api/v2/recordings/${recordingId}/reconcile`, {
+      backendInstanceId: admitted.body.backendInstanceId,
+      descriptors: [{ index: 0, checksum: sha256Hex(bytes), sizeBytes: bytes.length }],
+    });
+    expect(reconcile.status).toBe(503);
+    expect(reconcile.body).toMatchObject({ code: "storage_unavailable" });
+    expect((await get(dead, `/api/v2/recordings/${recordingId}`)).body.segmentRevision).toBe(0);
+    expect(await testDb.query.recordingSegment.findFirst()).toMatchObject({
+      receiptState: "reserved",
+      storedAt: null,
+    });
 
     const beat = await post(dead, `/api/v2/recordings/${recordingId}/heartbeat`);
     expect(beat.status).toBe(200);

@@ -316,12 +316,25 @@ export const completeSegment = async (
       `Segment ${segmentIndex} of recording ${recordingId} has no reservation`
     );
   }
-  let stat: Awaited<ReturnType<Client["statObject"]>>;
+  const hash = createHash("sha256");
+  // Storage errors never commit a receipt.
   try {
-    stat = await storage.statObject(env.BUCKET_RAW, segment.objectKey);
+    const stat = await storage.statObject(env.BUCKET_RAW, segment.objectKey);
+    if (stat.size !== segment.expectedSizeBytes) {
+      throw new AppError(
+        409,
+        "segment_conflict",
+        `Object for segment ${segmentIndex} of recording ${recordingId} has size ${stat.size}, expected ${segment.expectedSizeBytes}`
+      );
+    }
+    const stream = await storage.getObject(env.BUCKET_RAW, segment.objectKey);
+    for await (const chunk of stream) {
+      hash.update(chunk as Buffer);
+    }
   } catch (err) {
+    if (err instanceof AppError) throw err;
     const code = (err as { code?: string }).code;
-    // statObject uses HEAD — missing keys surface as "NotFound", not NoSuchKey
+    // HEAD and GET use different missing-object codes.
     if (code === "NoSuchKey" || code === "NotFound") {
       throw new AppError(
         409,
@@ -332,20 +345,8 @@ export const completeSegment = async (
     throw new AppError(
       503,
       "storage_unavailable",
-      `Object check failed for segment ${segmentIndex} of recording ${recordingId}`
+      `Object check failed for segment ${segmentIndex} of recording ${recordingId}. Retry completion.`
     );
-  }
-  if (stat.size !== segment.expectedSizeBytes) {
-    throw new AppError(
-      409,
-      "segment_conflict",
-      `Object for segment ${segmentIndex} of recording ${recordingId} has size ${stat.size}, expected ${segment.expectedSizeBytes}`
-    );
-  }
-  const stream = await storage.getObject(env.BUCKET_RAW, segment.objectKey);
-  const hash = createHash("sha256");
-  for await (const chunk of stream) {
-    hash.update(chunk as Buffer);
   }
   const actualHex = hash.digest("hex");
   if (actualHex !== segment.expectedChecksum) {
@@ -504,30 +505,29 @@ export const reconcileRecording = async (
       segmentActions.push({ index: d.index, action: "stored" });
       continue;
     }
-    // spec 14: a reserved segment whose object already exists correctly
-    // commits its receipt without uploading again (size check; content was
-    // checksum-enforced at PUT time)
+    // Check bytes before acknowledging lost completions.
     if (storage !== undefined) {
       try {
-        const stat = await storage.statObject(env.BUCKET_RAW, row.objectKey);
-        if (stat.size === row.expectedSizeBytes) {
-          await commitRecordingSegmentReceipt(recordingId, d.index, database ?? db);
-          segmentActions.push({ index: d.index, action: "stored" });
+        await completeSegment(recordingId, d.index, storage, database ?? db);
+        segmentActions.push({ index: d.index, action: "stored" });
+        continue;
+      } catch (err) {
+        if (err instanceof AppError && err.code === "segment_conflict") {
+          segmentActions.push({ index: d.index, action: "conflict" });
           continue;
         }
-        segmentActions.push({ index: d.index, action: "conflict" });
-        continue;
-      } catch {
-        // absent object: re-upload (another ticket for the same segment)
+        if (!(err instanceof AppError) || err.code !== "segment_not_stored") throw err;
       }
     }
     segmentActions.push({ index: d.index, action: "upload" });
   }
+  // Receipts and finalization can advance during reconciliation.
+  const current = (await lookupRecordingUpload(recordingId, database ?? db)) ?? upload;
   return {
     recording: "resume" as const,
-    captureState: upload.captureState,
-    segmentRevision: upload.segmentRevision,
-    publishedRevision: upload.publishedRevision,
+    captureState: current.captureState,
+    segmentRevision: current.segmentRevision,
+    publishedRevision: current.publishedRevision,
     segments: segmentActions,
   };
 };
