@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import { json } from "../../helpers/json";
@@ -10,7 +12,8 @@ import { startServer, type TestServer } from "../../helpers/server";
 // PUT real bytes straight to MinIO, report the ETag, stop, verify the master.
 // Small stale window so the resume test flips in seconds, not 30s.
 const MB = 1024 * 1024;
-const DATA_DIR = "C:/Users/arief/AppData/Local/Temp/travis-e2e-direct";
+// host temp dir: a hardcoded Windows path fails when the suite runs in WSL
+const DATA_DIR = join(tmpdir(), "travis-e2e-direct");
 let server: TestServer;
 let seed: SeededHierarchy;
 
