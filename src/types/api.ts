@@ -387,6 +387,9 @@ export type MasterVideoPlaybackData = {
   endEpoch: number | null;
   durationMs: number | null;
   recordingStatus: string;
+  // relative playback path carrying a scoped token; null until segment zero is
+  // committed. Optional by design: the route mints it, the service never mints.
+  hlsUrl?: string | null;
   sessionRecordings: MasterVideoSessionRecording[];
   thumbnails: MasterVideoTimelineThumbnail[];
   events: MasterVideoPlaybackEvent[];

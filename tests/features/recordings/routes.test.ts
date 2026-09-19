@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
+import { eq } from "drizzle-orm";
 import { appFor } from "../../helpers/app";
 import {
   closeTestDatabase,
@@ -110,16 +111,12 @@ describe("recordings routes", () => {
     const unfinished = await app.request("/api/v1/recordings/unfinished");
     expect((await json(unfinished)).data).toHaveLength(1);
 
-    // playback before finalize is wrong_state, not 404
-    const blocked = await app.request(
+    // playback opens before finalize; an empty master has no HLS URL yet
+    const empty = await app.request(
       `/api/v1/recordings/${masterVideoId}/playback?projectId=1`,
     );
-    expect(blocked.status).toBe(409);
-    expect(await json<unknown>(blocked)).toEqual({
-      status: 409,
-      code: "wrong_state",
-      title: "Only finalized master videos can be opened for playback",
-    });
+    expect(empty.status).toBe(200);
+    expect((await json(empty)).data.hlsUrl).toBeNull();
 
     // the finalize bridge path flips the row; playback then serves the stem
     await markMasterVideoFinalized(
@@ -140,6 +137,75 @@ describe("recordings routes", () => {
 
     const sweep = await app.request("/api/v1/recordings/unfinished");
     expect((await json(sweep)).data).toHaveLength(0);
+  });
+
+  it("playback returns a scoped HLS URL as soon as segment zero is committed", async () => {
+    await seedContext(baseContext);
+    const master = await createMasterVideo(
+      { sessionId: 101, startEpoch: 1_755_684_000, recordingStatus: "recording" },
+      testDb,
+    );
+    const masterVideoId = master!.masterVideoId;
+
+    // one open ingest with one contiguous segment: playable mid-capture
+    const [ingest] = await testDb
+      .insert(schema.recordingIngest)
+      .values({
+        kind: "master",
+        masterVideoId,
+        ticketHash: "a".repeat(64),
+        keyDate: "2026-09-20",
+        contiguousSequence: 0,
+      })
+      .returning({ ingestId: schema.recordingIngest.ingestId });
+    await testDb.insert(schema.recordingIngestSegment).values({
+      ingestId: ingest!.ingestId,
+      sequence: 0,
+      checksumSha256: "b".repeat(64),
+      sizeBytes: 1024,
+      durationMs: 2000,
+      objectKey: `1/1/101/2026/09/20/master/${masterVideoId}/segments/0000000000.ts`,
+    });
+
+    const open = await json<{ data: { hlsUrl: string } }>(
+      await app.request(`/api/v1/recordings/${masterVideoId}/playback?projectId=1`),
+    );
+    expect(open.data.hlsUrl).toMatch(
+      new RegExp(`^/api/v2/hls/master/${masterVideoId}/index[.]m3u8[?]t=[^&]+$`),
+    );
+    expect(open.data.hlsUrl).toContain("t=v1.");
+
+    // closing it keeps the same URL playable
+    await testDb
+      .update(schema.recordingIngest)
+      .set({ closedAt: new Date(), finalSequence: 0 })
+      .where(eq(schema.recordingIngest.ingestId, ingest!.ingestId));
+
+    const closed = await json<{ data: { hlsUrl: string } }>(
+      await app.request(`/api/v1/recordings/${masterVideoId}/playback?projectId=1`),
+    );
+    expect(closed.data.hlsUrl).toContain(`/api/v2/hls/master/${masterVideoId}/index.m3u8`);
+  });
+
+  it("playback stays unplayable for a closed master with no segments", async () => {
+    await seedContext(baseContext);
+    const master = await createMasterVideo(
+      { sessionId: 101, startEpoch: 1_755_684_000, recordingStatus: "recording" },
+      testDb,
+    );
+    await testDb.insert(schema.recordingIngest).values({
+      kind: "master",
+      masterVideoId: master!.masterVideoId,
+      ticketHash: "c".repeat(64),
+      keyDate: "2026-09-20",
+      closedAt: new Date(),
+      finalSequence: -1,
+    });
+
+    const res = await json<{ data: { hlsUrl: string | null } }>(
+      await app.request(`/api/v1/recordings/${master!.masterVideoId}/playback?projectId=1`),
+    );
+    expect(res.data.hlsUrl).toBeNull();
   });
 
   it("unfinished respects optional projectId filter", async () => {

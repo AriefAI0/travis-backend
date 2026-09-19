@@ -421,9 +421,8 @@ export const getMasterVideoPlaybackData = async (
     database,
   );
 
-  if (normalizedRecordingStatus !== RECORDING_PERSISTENCE_STATUS.finalized) {
-    throw new Error("Only finalized master videos can be opened for playback");
-  }
+  // no recording-status gate: the bundle is a read, and playability comes from
+  // the stored segments. Legacy fields stay until their consumers go.
 
   const eventRows = await (database ?? db)
     .select({

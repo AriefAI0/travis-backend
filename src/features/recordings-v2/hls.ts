@@ -9,7 +9,7 @@ import { and, asc, eq, lte, sql } from "drizzle-orm";
 import { db, type DbOrTx } from "../../db/client";
 import { notFound } from "../../lib/error";
 import { recordingIngest, recordingIngestSegment } from "../../db/schema";
-import type { PlaybackScope } from "./playback-token";
+import { mintPlaybackToken, type PlaybackScope } from "./playback-token";
 
 // locked window: a live playlist never carries more than this many entries
 export const HLS_OPEN_WINDOW_ENTRIES = 540;
@@ -137,6 +137,19 @@ export const readPlaylistSource = async (
     mediaSequence: window.mediaSequence,
     targetDurationSeconds: targetDurationSeconds(window.segments),
   };
+};
+
+// the URL a client hands to its player: relative path plus a scoped token.
+// null when no first segment is committed, so an empty recording stays closed.
+export const mintRecordingPlaybackUrl = async (
+  scope: PlaybackScope,
+  database?: DbOrTx,
+): Promise<string | null> => {
+  const first = await findPlayableSegment(scope, 0, database);
+  if (!first) return null;
+
+  const token = encodeURIComponent(mintPlaybackToken(scope));
+  return `/api/v2/hls/${scope.kind}/${scope.id}/index.m3u8?t=${token}`;
 };
 
 // one stored object, resolved from the requested sequence alone — never a scan

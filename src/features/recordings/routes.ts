@@ -9,6 +9,7 @@ import {
   listUnfinishedMasterVideos,
   listVideoClipPlaybackByResultIds,
 } from "../../db/services/video.service";
+import { mintRecordingPlaybackUrl } from "../recordings-v2/hls";
 import { notFound } from "../../lib/error";
 import { parseBody, parseId, parseQuery } from "../../lib/parse";
 import { ok } from "../../lib/response";
@@ -42,13 +43,16 @@ export const recordingRoutes = (database?: DbOrTx) => {
     return ok(c, video);
   });
 
-  // playback bundle; non-finalized throws -> 409 via onError map
+  // playback bundle; the master plays as soon as segment zero is committed
   routes.get("/api/v1/recordings/:id/playback", async (c) => {
     const id = parseId(c, "id");
     const query = parseQuery(c, playbackQuerySchema);
     const playback = await getMasterVideoPlaybackData(query.projectId, id, database);
     if (!playback) throw notFound("Master video playback");
-    return ok(c, playback);
+    return ok(c, {
+      ...playback,
+      hlsUrl: await mintRecordingPlaybackUrl({ kind: "master", id }, database),
+    });
   });
 
   // batch read: resultId -> playback clips (keys stringify in JSON)

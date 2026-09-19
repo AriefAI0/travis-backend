@@ -654,6 +654,25 @@ describe("video.service", () => {
     expect(playback!.thumbnails.every((t) => t.storageStem === "p1/s101/master_1")).toBe(true);
   });
 
+  it("playback no longer gates on recording status or a storage stem", async () => {
+    await seedVideoContext();
+
+    // still marked recording: the read must answer, not throw
+    const masterVideo = await createMasterVideo(
+      {
+        sessionId: 101,
+        startEpoch: 1_760_000_000,
+        recordingStatus: "recording",
+      },
+      testDb,
+    );
+
+    const playback = await getMasterVideoPlaybackData(1, masterVideo!.masterVideoId, testDb);
+    expect(playback!.recordingStatus).toBe("recording");
+    expect(playback!.storageStem).toBeNull();
+    expect(playback!.events).toEqual([]);
+  });
+
   it("file_size accepts a value above the 2 GB integer ceiling", async () => {
     await seedVideoContext();
 
