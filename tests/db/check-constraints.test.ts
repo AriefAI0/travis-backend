@@ -28,6 +28,18 @@ const expectEnumRejection = async (promise: Promise<unknown>) => {
   );
 };
 
+// CHECK and unique index violations surface as pg error strings
+const expectDbRejection = async (promise: Promise<unknown>, pattern: RegExp) => {
+  const error = await promise.then(
+    () => {
+      throw new Error("expected the database to reject this write, but it succeeded");
+    },
+    (rejection: unknown) => rejection,
+  );
+  const causeMessage = (error as { cause?: { message?: string } })?.cause?.message;
+  expect(String(`${error} ${causeMessage ?? ""}`)).toMatch(pattern);
+};
+
 describe("enum constraints (pg port of CHECK suite)", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
@@ -131,6 +143,133 @@ describe("enum constraints (pg port of CHECK suite)", () => {
         sql`INSERT INTO master_video (master_video_id, session_id, storage_stem, start_epoch, recording_status)
             VALUES (9999, 9003, 'p9003/s9003/master_9999', 0, 'recovering')`,
       ),
+    );
+  });
+});
+
+// Direct ingest ledger: one target per row, one open clip ingest per clip,
+// and a composite segment key that swallows a replay.
+describe("direct recording ingest constraints", () => {
+  beforeAll(ensureTestDatabase);
+  afterAll(closeTestDatabase);
+
+  beforeEach(async () => {
+    await truncateTestDatabase();
+  });
+
+  // project > session > master_video, plus the chain a video_clip needs
+  const seedTargets = async () => {
+    await testDb.insert(schema.project).values({ projectId: 9100, title: "P" });
+    await testDb.insert(schema.session).values({ sessionId: 9100, projectId: 9100, name: "S" });
+    await testDb
+      .insert(schema.masterVideo)
+      .values({ masterVideoId: 9100, sessionId: 9100, startEpoch: 0 });
+    await testDb.insert(schema.asset).values({ assetId: 9100, projectId: 9100, name: "A" });
+    await testDb
+      .insert(schema.component)
+      .values({ componentId: 9100, assetId: 9100, projectId: 9100, name: "C" });
+    await testDb.insert(schema.item).values({
+      itemId: 9100,
+      componentId: 9100,
+      projectId: 9100,
+      assetId: 9100,
+      itemLabel: "I",
+    });
+    await testDb
+      .insert(schema.sessionItem)
+      .values({ sessionItemId: 9100, sessionId: 9100, itemId: 9100 });
+    await testDb.insert(schema.result).values({
+      resultId: 9100,
+      sessionItemId: 9100,
+      inspectionTypeCode: "GVI",
+      projectId: 9100,
+      assetId: 9100,
+      componentId: 9100,
+      itemId: 9100,
+      sessionId: 9100,
+    });
+    await testDb
+      .insert(schema.videoClip)
+      .values({ clipId: 9100, resultId: 9100, masterVideoId: 9100, startOffsetMs: 0 });
+  };
+
+  it("recording_ingest accepts one target and rejects zero or two", async () => {
+    await seedTargets();
+
+    await testDb.insert(schema.recordingIngest).values({
+      kind: "master",
+      masterVideoId: 9100,
+      ticketHash: "a".repeat(64),
+      keyDate: "2026-09-20",
+    });
+    await testDb.insert(schema.recordingIngest).values({
+      kind: "clip",
+      clipId: 9100,
+      ticketHash: "b".repeat(64),
+      keyDate: "2026-09-20",
+    });
+
+    await expectDbRejection(
+      testDb.execute(
+        sql`INSERT INTO recording_ingest (kind, ticket_hash, key_date)
+            VALUES ('master', 'c', '2026-09-20')`,
+      ),
+      /violates check constraint|recording_ingest_kind_target_check/i,
+    );
+    await expectDbRejection(
+      testDb.execute(
+        sql`INSERT INTO recording_ingest (kind, master_video_id, clip_id, ticket_hash, key_date)
+            VALUES ('clip', 9100, 9100, 'd', '2026-09-20')`,
+      ),
+      /violates check constraint|recording_ingest_kind_target_check/i,
+    );
+  });
+
+  it("a clip holds at most one open ingest", async () => {
+    await seedTargets();
+    await testDb.insert(schema.recordingIngest).values({
+      kind: "clip",
+      clipId: 9100,
+      ticketHash: "a".repeat(64),
+      keyDate: "2026-09-20",
+    });
+
+    await expectDbRejection(
+      testDb.insert(schema.recordingIngest).values({
+        kind: "clip",
+        clipId: 9100,
+        ticketHash: "b".repeat(64),
+        keyDate: "2026-09-20",
+      }),
+      /duplicate key|uq_recording_ingest_open_clip/i,
+    );
+  });
+
+  it("a segment replay hits the composite key instead of a second row", async () => {
+    await seedTargets();
+    const [ingest] = await testDb
+      .insert(schema.recordingIngest)
+      .values({
+        kind: "master",
+        masterVideoId: 9100,
+        ticketHash: "a".repeat(64),
+        keyDate: "2026-09-20",
+      })
+      .returning({ ingestId: schema.recordingIngest.ingestId });
+
+    const segment = {
+      ingestId: ingest!.ingestId,
+      sequence: 0,
+      checksumSha256: "e".repeat(64),
+      sizeBytes: 1024,
+      durationMs: 2000,
+      objectKey: "1/9100/9100/2026/09/20/master/9100/0000000000.ts",
+    };
+    await testDb.insert(schema.recordingIngestSegment).values(segment);
+
+    await expectDbRejection(
+      testDb.insert(schema.recordingIngestSegment).values(segment),
+      /duplicate key|recording_ingest_segment_pk/i,
     );
   });
 });

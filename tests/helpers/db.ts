@@ -46,6 +46,8 @@ export const testDb: TestDb = drizzle(pool, { schema });
 
 // FK dependency order: children first (app deleteOrder + typed details)
 const deleteOrder = [
+  schema.recordingIngestSegment,
+  schema.recordingIngest,
   schema.recordingSegment,
   schema.recordingFinalizeJob,
   schema.recordingDiscardAudit,

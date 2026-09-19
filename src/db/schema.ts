@@ -1,4 +1,4 @@
-import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, timestamp, uuid, primaryKey, index, unique, uniqueIndex, check,} from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, timestamp, uuid, date, primaryKey, index, unique, uniqueIndex, check,} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /* =================== CHANGABLE ENUMRATIONS =================== */
@@ -733,5 +733,85 @@ export const recordingDiscardAudit = pgTable(
     uqRecordingDiscardAuditRequestRecording: unique(
       "uq_recording_discard_audit_request_recording"
     ).on(table.requestId, table.recordingId),
+  })
+);
+
+/* =========================================================
+   RECORDING INGEST (direct protocol)
+   Backend-owned identity: a numeric ingestId plus a hashed
+   bearer ticket. No client UUID, no nonce, no raw ticket.
+========================================================= */
+export const recordingIngestKind = pgEnum("recording_ingest_kind", ["master", "clip"]);
+
+/* ---------------------------------------------------------
+   One row per capture attempt. The row carries the contiguous
+   pointer and the close facts, so segment commit and close can
+   serialize on it.
+--------------------------------------------------------- */
+export const recordingIngest = pgTable(
+  "recording_ingest",
+  {
+    ingestId: integer("ingest_id").primaryKey().generatedByDefaultAsIdentity(),
+    kind: recordingIngestKind("kind").notNull(),
+    // exactly one target per kind (check below); cascade: the ingest is
+    // transport metadata and dies with the domain row it feeds
+    masterVideoId: integer("master_video_id").references(() => masterVideo.masterVideoId, {
+      onDelete: "cascade",
+    }),
+    clipId: integer("clip_id").references(() => videoClip.clipId, { onDelete: "cascade" }),
+    // sha-256 hex of the bearer ticket; the raw ticket never reaches the database
+    ticketHash: text("ticket_hash").notNull(),
+    // recording start UTC, frozen at admission: a midnight rollover never moves keys
+    keyDate: date("key_date", { mode: "string" }).notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+    // null until the first committed segment; the sweep falls back to openedAt
+    lastSegmentAt: timestamp("last_segment_at", { withTimezone: true, mode: "date" }),
+    closedAt: timestamp("closed_at", { withTimezone: true, mode: "date" }),
+    // last sequence of the contiguous prefix, -1 while the prefix is empty
+    contiguousSequence: integer("contiguous_sequence").notNull().default(-1),
+    // frozen at close; playable range never passes it
+    finalSequence: integer("final_sequence"),
+    durationMs: integer("duration_ms"),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    recordingIngestKindTargetCheck: check(
+      "recording_ingest_kind_target_check",
+      sql`(${table.kind} = 'master' AND ${table.masterVideoId} IS NOT NULL AND ${table.clipId} IS NULL)
+       OR (${table.kind} = 'clip' AND ${table.clipId} IS NOT NULL AND ${table.masterVideoId} IS NULL)`,
+    ),
+    // one open ingest per clip: admission of a second is a 409, enforced here
+    uqRecordingIngestOpenClip: uniqueIndex("uq_recording_ingest_open_clip")
+      .on(table.clipId)
+      .where(sql`${table.closedAt} IS NULL AND ${table.kind} = 'clip'`),
+    idxRecordingIngestOpen: index("idx_recording_ingest_open").on(table.closedAt),
+  })
+);
+
+/* ---------------------------------------------------------
+   One stored TS object per row. Composite PK (ingest, sequence)
+   makes a replay hit the same row instead of a duplicate.
+--------------------------------------------------------- */
+export const recordingIngestSegment = pgTable(
+  "recording_ingest_segment",
+  {
+    ingestId: integer("ingest_id")
+      .notNull()
+      .references(() => recordingIngest.ingestId, { onDelete: "cascade" }),
+    sequence: integer("sequence").notNull(),
+    checksumSha256: text("checksum_sha256").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    // measured on the client, never derived from the 2 s splitmuxsink target
+    durationMs: integer("duration_ms").notNull(),
+    discontinuity: boolean("discontinuity").notNull().default(false),
+    objectKey: text("object_key").notNull(),
+    storedAt: timestamp("stored_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+
+    ...createdAt,
+  },
+  (table) => ({
+    recordingIngestSegmentPk: primaryKey({ columns: [table.ingestId, table.sequence] }),
   })
 );

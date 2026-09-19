@@ -50,6 +50,13 @@
       "when": 1788889624286,
       "tag": "0006_shallow_cyclops",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789851444180,
+      "tag": "0007_massive_nehzno",
+      "breakpoints": true
     }
   ]
 }
