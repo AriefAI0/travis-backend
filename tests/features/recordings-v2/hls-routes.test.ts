@@ -15,7 +15,7 @@ import {
   mintPlaybackToken,
   playbackTokenExpiry,
   PLAYBACK_TOKEN_TTL_SECONDS,
-} from "../../../src/features/recordings-v2/playback-token";
+} from "../../../src/lib/playback_token";
 
 const PROJECT_ID = 9600;
 

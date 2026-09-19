@@ -22,17 +22,6 @@ export const mintImageGetUrl = (row: {
   return mintGetUrl(leaf.bucket, leaf.key);
 };
 
-// video gate: only a finalized clip has objects behind its stem. Images mint
-// ungated — result_image has no status column and no processing step.
-export const mintClipVideoUrl = (clip: {
-  recordingStatus: string;
-  storageStem: string | null;
-}) => {
-  if (clip.recordingStatus !== "finalized" || !clip.storageStem) return null;
-  const { bucket, key } = clipLeaves(clip.storageStem).mkv;
-  return mintGetUrl(bucket, key);
-};
-
 // card still for a master or a clip — ffmpeg_finalize writes it beside the mkv.
 // Same gate as the video: the poster is produced by the same finalize run, so
 // an unfinalized stem has neither. Named thumbnailUrl, not posterUrl:

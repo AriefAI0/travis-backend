@@ -213,11 +213,11 @@ export type ItemResultSidebarClip = {
   clipId: number;
   resultId: number;
   storageStem: string | null;
-  // mint gate: only a finalized clip has playable objects behind its stem
+  // legacy outcome column; no playback read consults it any more
   recordingStatus: string;
-  // presigned mkv GET; null while unfinalized or finalization_failed
+  // relative HLS path with a clip-scoped token; null until segment zero is stored
   videoUrl: string | null;
-  // presigned card still; same gate as videoUrl, written by the same finalize
+  // presigned card still, written by the finalize run; still status-gated
   thumbnailUrl: string | null;
   startOffsetMs: number;
   endOffsetMs: number | null;

@@ -11,7 +11,7 @@ import { mintShortGetUrl } from "../../lib/minio_storage/mint";
 import { v2SegmentIndexName } from "../../lib/minio_storage/paths";
 import { parseId } from "../../lib/parse";
 import { findPlayableSegment, readPlaylistSource, buildPlaylist } from "./hls";
-import { verifyPlaybackToken, type PlaybackScope } from "./playback-token";
+import { verifyPlaybackToken, type PlaybackScope } from "../../lib/playback_token";
 
 // relative child URIs keep the playlist host-agnostic
 const segmentUri = (token: string) => (sequence: number) =>

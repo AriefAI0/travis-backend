@@ -190,17 +190,16 @@ describe("evidence image routes", () => {
     expect(entryAfter.posterUrl).toBe(entryAfter.images[0].url);
   });
 
-  it("sidebar clip videoUrl gates on finalized status", async () => {
+  it("sidebar clip videoUrl follows stored segments, never the outcome status", async () => {
     await seedResultContext();
     await createImage({ contentType: "image/png" });
 
-    // clip still recording: stem present, url must be null
     await testDb.insert(schema.masterVideo).values({
       masterVideoId: 1,
       sessionId: 101,
       startEpoch: 1000,
-      recordingStatus: "finalized",
     });
+    // status and stem say nothing about playability any more
     await testDb.insert(schema.videoClip).values({
       clipId: 7,
       resultId: 5001,
@@ -211,24 +210,44 @@ describe("evidence image routes", () => {
       storageStem: "p1/s101/master_1/GVI/clip_7",
     });
 
+    const empty = await json(await app.request("/api/v1/items/100/results"));
+    const emptyClip = empty.data.sessions[0].results[0].clips[0];
+    expect(emptyClip.videoUrl).toBeNull();
+    // the still still follows the finalize run, so it stays null here
+    expect(emptyClip.thumbnailUrl).toBeNull();
+
+    // one stored segment: the clip plays, mid-capture, with a clip-scoped token
+    const [ingest] = await testDb
+      .insert(schema.recordingIngest)
+      .values({
+        kind: "clip",
+        clipId: 7,
+        ticketHash: "a".repeat(64),
+        keyDate: "2026-09-20",
+        contiguousSequence: 0,
+      })
+      .returning({ ingestId: schema.recordingIngest.ingestId });
+    await testDb.insert(schema.recordingIngestSegment).values({
+      ingestId: ingest!.ingestId,
+      sequence: 0,
+      checksumSha256: "b".repeat(64),
+      sizeBytes: 1024,
+      durationMs: 2000,
+      objectKey: "1/1/101/2026/09/20/clips/7/segments/0000000000.ts",
+    });
+
     const open = await json(await app.request("/api/v1/items/100/results"));
     const openClip = open.data.sessions[0].results[0].clips[0];
     expect(openClip.recordingStatus).toBe("recording");
-    expect(openClip.videoUrl).toBeNull();
-    // the still is written by the same finalize run, so it gates identically
-    expect(openClip.thumbnailUrl).toBeNull();
+    expect(openClip.videoUrl).toMatch(/^\/api\/v2\/hls\/clip\/7\/index[.]m3u8[?]t=v1[.]/);
 
-    // finalized: url mints against the mkv leaf of the stem
-    await testDb
-      .update(schema.videoClip)
-      .set({ recordingStatus: "finalized" })
-      .where(eq(schema.videoClip.clipId, 7));
-    const closed = await json(await app.request("/api/v1/items/100/results"));
-    const closedClip = closed.data.sessions[0].results[0].clips[0];
-    expect(closedClip.videoUrl).toContain("p1/s101/master_1/GVI/clip_7/video.mkv");
-    // sibling of the mkv, thumbs bucket, same stem
-    expect(closedClip.thumbnailUrl).toContain("travis-thumbs");
-    expect(closedClip.thumbnailUrl).toContain("p1/s101/master_1/GVI/clip_7/poster.jpg");
+    // the clip half of the token never opens a master route
+    const token = new URL(`http://x${openClip.videoUrl}`).searchParams.get("t")!;
+    const claims = JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString()) as {
+      k: string;
+      i: number;
+    };
+    expect(claims).toMatchObject({ k: "clip", i: 7 });
   });
 
   it("clip thumbnailUrl is null when a finalized clip has no stem", async () => {
@@ -249,6 +268,7 @@ describe("evidence image routes", () => {
       recordingStatus: "finalized",
       storageStem: null,
     });
+    // no segments either, so the clip has no playback URL
 
     const res = await json(await app.request("/api/v1/results/5001/evidence"));
     expect(res.data.clips[0].videoUrl).toBeNull();

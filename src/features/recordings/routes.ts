@@ -9,7 +9,7 @@ import {
   listUnfinishedMasterVideos,
   listVideoClipPlaybackByResultIds,
 } from "../../db/services/video.service";
-import { mintRecordingPlaybackUrl } from "../recordings-v2/hls";
+import { mintMasterPlaybackUrl } from "../../db/services/recording-playback.service";
 import { notFound } from "../../lib/error";
 import { parseBody, parseId, parseQuery } from "../../lib/parse";
 import { ok } from "../../lib/response";
@@ -51,7 +51,7 @@ export const recordingRoutes = (database?: DbOrTx) => {
     if (!playback) throw notFound("Master video playback");
     return ok(c, {
       ...playback,
-      hlsUrl: await mintRecordingPlaybackUrl({ kind: "master", id }, database),
+      hlsUrl: await mintMasterPlaybackUrl(id, database),
     });
   });
 

@@ -7,8 +7,8 @@ import {
   playbackTokenExpiry,
   verifyPlaybackToken,
   type PlaybackScope,
-} from "../../../src/features/recordings-v2/playback-token";
-import { env } from "../../../src/config/env";
+} from "../../src/lib/playback_token";
+import { env } from "../../src/config/env";
 
 const MASTER: PlaybackScope = { kind: "master", id: 41 };
 const OTHER: PlaybackScope = { kind: "master", id: 42 };
@@ -100,7 +100,7 @@ describe("PLAYBACK_TOKEN_SECRET boot gate", () => {
       [
         process.execPath,
         "-e",
-        `await import("${new URL("../../../src/config/env.ts", import.meta.url).pathname}");`,
+        `await import("${new URL("../../src/config/env.ts", import.meta.url).pathname}");`,
       ],
       {
         // a temp cwd keeps the repo .env out of the child's environment

@@ -4,8 +4,8 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { env } from "../../config/env";
-import { AppError } from "../../lib/error";
+import { env } from "../config/env";
+import { AppError } from "./error";
 
 export type PlaybackScope = {
   kind: "master" | "clip";

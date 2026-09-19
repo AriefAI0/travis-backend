@@ -5,9 +5,9 @@ import { db, type DbOrTx } from "../client";
 import { AppError } from "../../lib/error";
 import {
   listResultImageSummariesByResultIds,
-  mintClipVideoUrl,
   mintRecordingThumbnailUrl,
 } from "./result-media.service";
+import { listPlayableClipIds, playbackUrl } from "./recording-playback.service";
 import { getItemById } from "./structure.service";
 import { listSessionItemsByItemId, listSessionsByIds } from "./session.service";
 import { listVideoClipPlaybackByResultIds } from "./video.service";
@@ -442,6 +442,12 @@ export const getItemResultSidebar = async (
     listVideoClipPlaybackByResultIds(resultIds, database),
   ]);
 
+  // one batched read decides clip playability for every clip in the sidebar
+  const playableClipIds = await listPlayableClipIds(
+    [...clipsByResultId.values()].flat().map((clip) => clip.clipId),
+    database,
+  );
+
   const sessionById = new Map(
     sessions.map((session) => [session.sessionId, session]),
   );
@@ -497,7 +503,9 @@ export const getItemResultSidebar = async (
                   durationMs: clipPlayback.durationMs,
                   startEpochMs: clipPlayback.startEpochMs,
                   endEpochMs: clipPlayback.endEpochMs,
-                  videoUrl: await mintClipVideoUrl(clipPlayback),
+                  videoUrl: playableClipIds.has(clipPlayback.clipId)
+                    ? playbackUrl({ kind: "clip", id: clipPlayback.clipId })
+                    : null,
                   thumbnailUrl: await mintRecordingThumbnailUrl(clipPlayback),
                 }),
               ),
@@ -635,8 +643,14 @@ export const getResultEvidence = async (
     listResultImageSummariesByResultIds([resultId], database),
   ]);
 
+  const resultClips = clipsByResultId.get(resultId) ?? [];
+  const playableClipIds = await listPlayableClipIds(
+    resultClips.map((clip) => clip.clipId),
+    database,
+  );
+
   const clips = await Promise.all(
-    (clipsByResultId.get(resultId) ?? []).map(async (clipPlayback) => ({
+    resultClips.map(async (clipPlayback) => ({
       clipId: clipPlayback.clipId,
       resultId: clipPlayback.resultId,
       storageStem: clipPlayback.storageStem,
@@ -646,7 +660,9 @@ export const getResultEvidence = async (
       durationMs: clipPlayback.durationMs,
       startEpochMs: clipPlayback.startEpochMs,
       endEpochMs: clipPlayback.endEpochMs,
-      videoUrl: await mintClipVideoUrl(clipPlayback),
+      videoUrl: playableClipIds.has(clipPlayback.clipId)
+        ? playbackUrl({ kind: "clip", id: clipPlayback.clipId })
+        : null,
       thumbnailUrl: await mintRecordingThumbnailUrl(clipPlayback),
     })),
   );

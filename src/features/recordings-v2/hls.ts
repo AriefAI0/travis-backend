@@ -4,12 +4,15 @@
 // The playlist is rebuilt on every request, so a capture that is still running
 // serves a live window and a closed recording serves its full VOD range.
 
-import { and, asc, eq, lte, sql } from "drizzle-orm";
-
-import { db, type DbOrTx } from "../../db/client";
+import type { DbOrTx } from "../../db/client";
 import { notFound } from "../../lib/error";
-import { recordingIngest, recordingIngestSegment } from "../../db/schema";
-import { mintPlaybackToken, type PlaybackScope } from "./playback-token";
+import type { PlaybackScope } from "../../lib/playback_token";
+import {
+  findIngestSegmentRecord,
+  findPlayableIngestRecord,
+  listIngestSegmentRecords,
+} from "../../db/repositories/recording-ingest.repository";
+import { lastPlayableSequence } from "../../db/services/recording-playback.service";
 
 // locked window: a live playlist never carries more than this many entries
 export const HLS_OPEN_WINDOW_ENTRIES = 540;
@@ -76,56 +79,17 @@ export function buildPlaylist(source: PlaylistSource, segmentUri: (sequence: num
   return `${lines.join("\n")}\n`;
 }
 
-// the playable ingest of a recording: a live one wins, else the newest closed one
-const findPlayableIngest = async (scope: PlaybackScope, handle: DbOrTx) =>
-  (await handle
-    .select()
-    .from(recordingIngest)
-    .where(
-      scope.kind === "master"
-        ? eq(recordingIngest.masterVideoId, scope.id)
-        : eq(recordingIngest.clipId, scope.id),
-    )
-    // an open ingest first (live), then the newest closed one
-    .orderBy(sql`${recordingIngest.closedAt} IS NULL DESC`, asc(recordingIngest.ingestId))
-    .limit(1))[0] ?? null;
-
 // read the pointer and the rows, then derive the window from the rows alone
 export const readPlaylistSource = async (
   scope: PlaybackScope,
   database?: DbOrTx,
 ): Promise<PlaylistSource> => {
-  const handle = database ?? db;
-  const ingest = await findPlayableIngest(scope, handle);
+  const ingest = await findPlayableIngestRecord(scope, database);
   if (!ingest) throw notFound("Ingest");
 
   // a closed ingest hides everything beyond its frozen range
   const visibleEnd = ingest.closedAt === null ? null : (ingest.finalSequence ?? -1);
-  const rows =
-    visibleEnd === null
-      ? await handle
-          .select({
-            sequence: recordingIngestSegment.sequence,
-            durationMs: recordingIngestSegment.durationMs,
-            discontinuity: recordingIngestSegment.discontinuity,
-          })
-          .from(recordingIngestSegment)
-          .where(eq(recordingIngestSegment.ingestId, ingest.ingestId))
-          .orderBy(asc(recordingIngestSegment.sequence))
-      : await handle
-          .select({
-            sequence: recordingIngestSegment.sequence,
-            durationMs: recordingIngestSegment.durationMs,
-            discontinuity: recordingIngestSegment.discontinuity,
-          })
-          .from(recordingIngestSegment)
-          .where(
-            and(
-              eq(recordingIngestSegment.ingestId, ingest.ingestId),
-              lte(recordingIngestSegment.sequence, visibleEnd),
-            ),
-          )
-          .orderBy(asc(recordingIngestSegment.sequence));
+  const rows = await listIngestSegmentRecords(ingest.ingestId, visibleEnd, database);
 
   const prefix = contiguousPrefix(rows);
   const closed = ingest.closedAt !== null;
@@ -139,48 +103,15 @@ export const readPlaylistSource = async (
   };
 };
 
-// the URL a client hands to its player: relative path plus a scoped token.
-// null when no first segment is committed, so an empty recording stays closed.
-export const mintRecordingPlaybackUrl = async (
-  scope: PlaybackScope,
-  database?: DbOrTx,
-): Promise<string | null> => {
-  const first = await findPlayableSegment(scope, 0, database);
-  if (!first) return null;
-
-  const token = encodeURIComponent(mintPlaybackToken(scope));
-  return `/api/v2/hls/${scope.kind}/${scope.id}/index.m3u8?t=${token}`;
-};
-
 // one stored object, resolved from the requested sequence alone — never a scan
 export const findPlayableSegment = async (
   scope: PlaybackScope,
   sequence: number,
   database?: DbOrTx,
 ): Promise<{ sequence: number; objectKey: string } | null> => {
-  const handle = database ?? db;
-  const ingest = await findPlayableIngest(scope, handle);
+  const ingest = await findPlayableIngestRecord(scope, database);
   if (!ingest) return null;
+  if (sequence < 0 || sequence > lastPlayableSequence(ingest)) return null;
 
-  // the frozen range and the contiguous prefix both bound what a token may reach
-  const lastVisible =
-    ingest.closedAt === null ? ingest.contiguousSequence : (ingest.finalSequence ?? -1);
-  if (sequence < 0 || sequence > lastVisible) return null;
-
-  const row = (
-    await handle
-      .select({
-        sequence: recordingIngestSegment.sequence,
-        objectKey: recordingIngestSegment.objectKey,
-      })
-      .from(recordingIngestSegment)
-      .where(
-        and(
-          eq(recordingIngestSegment.ingestId, ingest.ingestId),
-          eq(recordingIngestSegment.sequence, sequence),
-        ),
-      )
-      .limit(1)
-  )[0];
-  return row ?? null;
+  return findIngestSegmentRecord(ingest.ingestId, sequence, database);
 };
