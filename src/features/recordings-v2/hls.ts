@@ -138,3 +138,36 @@ export const readPlaylistSource = async (
     targetDurationSeconds: targetDurationSeconds(window.segments),
   };
 };
+
+// one stored object, resolved from the requested sequence alone — never a scan
+export const findPlayableSegment = async (
+  scope: PlaybackScope,
+  sequence: number,
+  database?: DbOrTx,
+): Promise<{ sequence: number; objectKey: string } | null> => {
+  const handle = database ?? db;
+  const ingest = await findPlayableIngest(scope, handle);
+  if (!ingest) return null;
+
+  // the frozen range and the contiguous prefix both bound what a token may reach
+  const lastVisible =
+    ingest.closedAt === null ? ingest.contiguousSequence : (ingest.finalSequence ?? -1);
+  if (sequence < 0 || sequence > lastVisible) return null;
+
+  const row = (
+    await handle
+      .select({
+        sequence: recordingIngestSegment.sequence,
+        objectKey: recordingIngestSegment.objectKey,
+      })
+      .from(recordingIngestSegment)
+      .where(
+        and(
+          eq(recordingIngestSegment.ingestId, ingest.ingestId),
+          eq(recordingIngestSegment.sequence, sequence),
+        ),
+      )
+      .limit(1)
+  )[0];
+  return row ?? null;
+};
