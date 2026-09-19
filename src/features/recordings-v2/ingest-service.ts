@@ -13,7 +13,7 @@ import {
   resolveOrganizationId,
   type MediaScope,
 } from "../../lib/minio_storage/paths";
-import { recordingIngest, recordingIngestSegment } from "../../db/schema";
+import { masterVideo, recordingIngest, recordingIngestSegment, videoClip } from "../../db/schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import {
   createMasterVideoRecord,
@@ -206,6 +206,125 @@ export const admitIngest = async (
 ): Promise<IngestAdmission> => {
   const run = (tx: DbOrTx) =>
     input.kind === "master" ? admitMaster(input, tx) : admitClip(input, tx);
+  return database ? run(database) : db.transaction(run);
+};
+
+/* =========================================================
+   CLOSE
+   One idle rule bounds crash recovery: 15 s without a
+   committed segment. Close and segment commit share the row
+   lock, so the frozen range is never torn.
+========================================================= */
+
+export const INGEST_IDLE_CLOSE_MS = 15_000;
+
+export type IngestCloseResult = {
+  ingestId: number;
+  // contiguous prefix frozen at close; -1 for an ingest with no segments
+  finalSequence: number;
+  durationMs: number;
+  closedAt: Date;
+  replayed: boolean;
+};
+
+// the ingest is idle when its last activity sits at or before the cutoff
+export const ingestIdleSince = (ingest: typeof recordingIngest.$inferSelect): Date =>
+  ingest.lastSegmentAt ?? ingest.openedAt;
+
+// stamp the domain row with the facts the recording ended with
+const stampDomainClose = async (
+  ingest: typeof recordingIngest.$inferSelect,
+  summary: { contiguousSequence: number; durationMs: number },
+  tx: DbOrTx,
+) => {
+  const now = new Date();
+  if (ingest.kind === "master") {
+    const master = await findMasterVideoById(ingest.masterVideoId!, tx);
+    if (!master) return;
+    await tx
+      .update(masterVideo)
+      .set({
+        durationMs: summary.durationMs,
+        // epoch seconds: the sub-second tail would lie about the media
+        endEpoch: master.startEpoch + Math.floor(summary.durationMs / 1000),
+        lastUpdatedAt: now,
+      })
+      .where(eq(masterVideo.masterVideoId, master.masterVideoId));
+    return;
+  }
+
+  const clip = await findVideoClipById(ingest.clipId!, tx);
+  if (!clip) return;
+  await tx
+    .update(videoClip)
+    .set({ endOffsetMs: clip.startOffsetMs + summary.durationMs, lastUpdatedAt: now })
+    .where(eq(videoClip.clipId, clip.clipId));
+};
+
+// shared close path: explicit close and the sweep differ only in their guard
+const runClose = async (
+  ingestId: number,
+  guard: { ticket?: string; idleCutoff?: Date },
+  tx: DbOrTx,
+): Promise<IngestCloseResult | null> => {
+  const ingest = await lockIngest(ingestId, tx);
+  if (!ingest) throw notFound("Ingest");
+  if (guard.ticket !== undefined && !ticketMatches(guard.ticket, ingest.ticketHash)) {
+    throw new AppError(401, "unauthorized", "Authorization: ticket does not match this ingest");
+  }
+
+  // an equivalent close replays the frozen result instead of re-stamping it
+  if (ingest.closedAt !== null) {
+    return {
+      ingestId,
+      finalSequence: ingest.finalSequence ?? -1,
+      durationMs: ingest.durationMs ?? 0,
+      closedAt: ingest.closedAt,
+      replayed: true,
+    };
+  }
+
+  // a segment landed after the sweep picked this row: leave it open
+  if (guard.idleCutoff && ingestIdleSince(ingest) > guard.idleCutoff) return null;
+
+  const summary = await contiguousSummary(ingestId, tx);
+  const closedAt = new Date();
+  await tx
+    .update(recordingIngest)
+    .set({
+      closedAt,
+      finalSequence: summary.contiguousSequence,
+      durationMs: summary.durationMs,
+      updatedAt: closedAt,
+    })
+    .where(eq(recordingIngest.ingestId, ingestId));
+  await stampDomainClose(ingest, summary, tx);
+
+  return {
+    ingestId,
+    finalSequence: summary.contiguousSequence,
+    durationMs: summary.durationMs,
+    closedAt,
+    replayed: false,
+  };
+};
+
+// explicit close from the client: the ticket proves the caller owns the capture
+export const closeIngest = async (
+  input: { ingestId: number; ticket: string },
+  database?: DbOrTx,
+): Promise<IngestCloseResult> => {
+  const run = async (tx: DbOrTx) => (await runClose(input.ingestId, { ticket: input.ticket }, tx))!;
+  return database ? run(database) : db.transaction(run);
+};
+
+// sweep close: no ticket, and a stale row simply loses the race
+export const closeIdleIngest = async (
+  ingestId: number,
+  idleCutoff: Date,
+  database?: DbOrTx,
+): Promise<IngestCloseResult | null> => {
+  const run = (tx: DbOrTx) => runClose(ingestId, { idleCutoff }, tx);
   return database ? run(database) : db.transaction(run);
 };
 
