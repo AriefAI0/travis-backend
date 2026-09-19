@@ -23,6 +23,10 @@ const schema = z.object({
   PRESIGN_GET_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
   RECORDING_V2_ENABLED: z.stringbool().default(false),
   RECORDING_V2_TOKEN: z.string().min(1).optional(),
+  // signing key for scoped playback tokens; required, separate from ingest tickets
+  PLAYBACK_TOKEN_SECRET: z
+    .string()
+    .min(32, { message: "must be at least 32 characters" }),
   DATA_DIR: z.string().min(1).default("./data"),
   FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
   FFMPEG_CONCURRENCY: z.coerce.number().int().positive().default(1),

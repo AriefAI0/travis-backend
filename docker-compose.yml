@@ -15,6 +15,8 @@ services:
       MINIO_ENDPOINT: ${MINIO_ENDPOINT}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      # drizzle.config.ts imports src/config/env, so this one is required here too
+      PLAYBACK_TOKEN_SECRET: ${PLAYBACK_TOKEN_SECRET}
     networks:
       - travis
     restart: "no"
@@ -36,6 +38,8 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       # recording v2 cutover flag (default off; .env controls it)
       RECORDING_V2_ENABLED: ${RECORDING_V2_ENABLED:-false}
+      # required at boot: signed playback tokens carry no other authority
+      PLAYBACK_TOKEN_SECRET: ${PLAYBACK_TOKEN_SECRET}
     volumes:
       - app-data:/app/data # sqlite tracker + finalize tmp survive redeploys
     networks:
