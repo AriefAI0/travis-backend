@@ -189,6 +189,38 @@ const insertIngest = async (
   return { ingestId: row!.ingestId, ticket, segmentTargetMs: SEGMENT_TARGET_MS };
 };
 
+// rebuild the domain identity of one ingest row from its live parents
+const loadDomain = async (
+  ingest: typeof recordingIngest.$inferSelect,
+  database: DbOrTx,
+): Promise<IngestDomain> => {
+  if (ingest.kind === "master") {
+    const master = await findMasterVideoById(ingest.masterVideoId!, database);
+    if (!master) throw notFound("Master video");
+    const session = await findSessionById(master.sessionId, database);
+    if (!session) throw notFound("Session");
+    return {
+      kind: "master",
+      masterVideoId: master.masterVideoId,
+      sessionId: master.sessionId,
+      projectId: session.projectId,
+    };
+  }
+
+  const clip = await findVideoClipById(ingest.clipId!, database);
+  if (!clip) throw notFound("Video clip");
+  const result = await findResultById(clip.resultId, database);
+  if (!result) throw notFound("Result");
+  return {
+    kind: "clip",
+    clipId: clip.clipId,
+    resultId: clip.resultId,
+    masterVideoId: clip.masterVideoId,
+    sessionId: result.sessionId,
+    projectId: result.projectId,
+  };
+};
+
 // the partial unique index is the race guard; this read gives the clear 409 first
 export const findOpenIngestByClip = async (clipId: number, database: DbOrTx = db) =>
   (await database.query.recordingIngest.findFirst({
@@ -326,6 +358,59 @@ export const closeIdleIngest = async (
 ): Promise<IngestCloseResult | null> => {
   const run = (tx: DbOrTx) => runClose(ingestId, { idleCutoff }, tx);
   return database ? run(database) : db.transaction(run);
+};
+
+/* =========================================================
+   STATUS
+   Read-only view of one ingest for the recording client.
+========================================================= */
+
+export type IngestStatus = {
+  ingestId: number;
+  kind: "master" | "clip";
+  domain: IngestDomain;
+  open: boolean;
+  openedAt: Date;
+  lastSegmentAt: Date | null;
+  closedAt: Date | null;
+  contiguousSequence: number;
+  finalSequence: number | null;
+  durationMs: number | null;
+  segmentCount: number;
+};
+
+export const getIngestStatus = async (
+  ingestId: number,
+  ticket: string,
+  database?: DbOrTx,
+): Promise<IngestStatus> => {
+  const handle = database ?? db;
+  const ingest = await handle.query.recordingIngest.findFirst({
+    where: eq(recordingIngest.ingestId, ingestId),
+  });
+  if (!ingest) throw notFound("Ingest");
+  if (!ticketMatches(ticket, ingest.ticketHash)) {
+    throw new AppError(401, "unauthorized", "Authorization: ticket does not match this ingest");
+  }
+
+  const stored = await handle
+    .select({ sequence: recordingIngestSegment.sequence })
+    .from(recordingIngestSegment)
+    .where(eq(recordingIngestSegment.ingestId, ingestId));
+
+  return {
+    ingestId: ingest.ingestId,
+    kind: ingest.kind,
+    domain: await loadDomain(ingest, handle),
+    open: ingest.closedAt === null,
+    openedAt: ingest.openedAt,
+    lastSegmentAt: ingest.lastSegmentAt,
+    closedAt: ingest.closedAt,
+    contiguousSequence: ingest.contiguousSequence,
+    finalSequence: ingest.finalSequence,
+    durationMs: ingest.durationMs,
+    segmentCount: stored.length,
+  };
 };
 
 /* =========================================================

@@ -7,6 +7,7 @@ import { projectRoutes } from "./features/projects/routes";
 import { recordingRoutes } from "./features/recordings/routes";
 import { resultRoutes } from "./features/results/routes";
 import { recordingV2Routes } from "./features/recordings-v2/routes";
+import { ingestRoutes } from "./features/recordings-v2/ingest-routes";
 import { sessionRoutes } from "./features/sessions/routes";
 import { structureRoutes } from "./features/structure/routes";
 import { env } from "./config/env";
@@ -32,5 +33,6 @@ app.route("/", inspectionRoutes());
 app.route("/", recordingRoutes());
 app.route("/", resultRoutes());
 app.route("/", recordingV2Routes());
+app.route("/", ingestRoutes());
 
 export type AppType = typeof app;
