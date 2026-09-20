@@ -57,6 +57,13 @@
       "when": 1789851444180,
       "tag": "0007_massive_nehzno",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789876728813,
+      "tag": "0008_icy_nomad",
+      "breakpoints": true
     }
   ]
 }

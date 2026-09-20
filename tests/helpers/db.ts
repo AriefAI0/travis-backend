@@ -48,11 +48,6 @@ export const testDb: TestDb = drizzle(pool, { schema });
 const deleteOrder = [
   schema.recordingIngestSegment,
   schema.recordingIngest,
-  schema.recordingSegment,
-  schema.recordingFinalizeJob,
-  schema.recordingDiscardAudit,
-  schema.recordingUpload,
-  schema.backendIdentity,
   schema.videoClip,
   schema.resultImage,
   schema.resultMgiFinding,
