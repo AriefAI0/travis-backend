@@ -1,6 +1,6 @@
 import type { ItemResultSidebarImage } from "../../types/api";
 import { env } from "../../config/env";
-import { snipImages } from "../../lib/minio_storage/paths";
+import { imageLeavesUnder } from "../../lib/minio_storage/paths";
 import { mintGetUrl } from "../../lib/minio_storage/mint";
 import type { DbOrTx } from "../client";
 import {
@@ -18,7 +18,7 @@ export const mintImageGetUrl = (row: {
   contentType: string;
   hasAnnotated: boolean;
 }) => {
-  const leaves = snipImages(row.storageStem, row.imageId, row.contentType);
+  const leaves = imageLeavesUnder(row.storageStem, row.imageId, row.contentType);
   const leaf = row.hasAnnotated ? leaves.annotated : leaves.raw;
   return mintGetUrl(leaf.bucket, leaf.key);
 };

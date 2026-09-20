@@ -83,10 +83,11 @@ describe("evidence image routes", () => {
     expect(data.imageId).toBeGreaterThan(0);
     expect(data.variant).toBe("raw");
     expect(data.contentType).toBe("image/png");
-    // stem derives from the result row alone, GVI prefix from its type
-    expect(data.storageStem).toBe("p1/s101/GVI/result_5001");
-    expect(data.url).toContain("travis-images");
-    expect(data.url).toContain(`p1/s101/GVI/result_5001/img_${data.imageId}_raw.png`);
+    // stem is the dated results directory in the media bucket; the org id
+    // depends on the seeded default, so assert the scoped tail only
+    expect(data.storageStem).toMatch(/^[0-9]+\/1\/101\/\d{4}\/\d{2}\/\d{2}\/results\/5001$/);
+    expect(data.url).toContain("travis-media");
+    expect(data.url).toContain(`/results/5001/img_${data.imageId}_raw.png`);
     expect(data.expiresInSeconds).toBe(900);
 
     // row persists the format and the un-annotated flag
@@ -95,7 +96,7 @@ describe("evidence image routes", () => {
     )[0]!;
     expect(row).toMatchObject({
       resultId: 5001,
-      storageStem: "p1/s101/GVI/result_5001",
+      storageStem: data.storageStem,
       contentType: "image/png",
       hasAnnotated: false,
     });
@@ -298,7 +299,7 @@ describe("evidence image routes", () => {
     const res = await app.request("/api/v1/results/5001/evidence");
     expect(res.status).toBe(200);
     const { data } = await json(res);
-    expect(data.images[0].url).toContain("travis-images");
+    expect(data.images[0].url).toContain("travis-media");
     expect(data.clips).toEqual([]);
   });
 });

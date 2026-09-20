@@ -1,4 +1,9 @@
-import { imageExtension, snipImages, snipStem } from "../../lib/minio_storage/paths";
+import {
+  imageExtension,
+  imageLeavesUnder,
+  resultImageStem,
+  resolveOrganizationId,
+} from "../../lib/minio_storage/paths";
 import { AppError } from "../../lib/error";
 import { mintPutUrl } from "../../lib/minio_storage/mint";
 import type { DbOrTx } from "../client";
@@ -8,6 +13,7 @@ import {
   findResultImageById,
   updateResultImageById,
 } from "../repositories/result-image.repository";
+import { findProjectById } from "../repositories/project.repository";
 import { getResultById, touchResult } from "./result.service";
 
 export type ImageUploadTicket = {
@@ -34,7 +40,30 @@ const requireImage = async (imageId: number, database?: DbOrTx) => {
   return imageRow;
 };
 
-// flow: result row > snip stem > insert row > leaf from assigned imageId > PUT url
+// flow: result row > project > org > key date > results stem. The date is the
+// result's own creation date, read from Postgres: one result keeps one
+// directory, and a stored stem never moves.
+const resolveImageStem = async (
+  resultRow: { projectId: number; sessionId: number; resultId: number; createdAt: Date },
+  database?: DbOrTx,
+) => {
+  const project = await findProjectById(resultRow.projectId, database);
+  if (!project) {
+    throw new AppError(404, "not_found", `project ${resultRow.projectId} not found`);
+  }
+
+  return resultImageStem(
+    {
+      organizationId: await resolveOrganizationId(project.organizationId, database),
+      projectId: project.projectId,
+      sessionId: resultRow.sessionId,
+      startedAt: resultRow.createdAt,
+    },
+    resultRow.resultId,
+  );
+};
+
+// flow: result row > results stem > insert row > leaf from assigned imageId > PUT url
 // The stem comes from the RESULT alone, never a clip: evidence images must
 // survive a failed recording, so an image with no clip is the normal case.
 export const createImageUploadTicket = async (
@@ -46,12 +75,7 @@ export const createImageUploadTicket = async (
   }
 
   const resultRow = await requireResult(input.resultId, database);
-  const stem = snipStem(
-    resultRow.projectId,
-    resultRow.sessionId,
-    resultRow.inspectionTypeCode,
-    resultRow.resultId,
-  );
+  const stem = await resolveImageStem(resultRow, database);
 
   const imageRow = await createResultImageRecord(
     {
@@ -67,7 +91,7 @@ export const createImageUploadTicket = async (
   // report staleness keys on result.updatedAt — a new image must move it
   await touchResult(resultRow.resultId, database);
 
-  const leaf = snipImages(stem, imageRow.imageId, input.contentType).raw;
+  const leaf = imageLeavesUnder(stem, imageRow.imageId, input.contentType).raw;
   return {
     imageId: imageRow.imageId,
     storageStem: stem,
@@ -91,7 +115,7 @@ export const createAnnotatedUploadTicket = async (
   await updateResultImageById(imageId, { hasAnnotated: true }, database);
   await touchResult(imageRow.resultId, database);
 
-  const leaf = snipImages(imageRow.storageStem, imageId, imageRow.contentType).annotated;
+  const leaf = imageLeavesUnder(imageRow.storageStem, imageId, imageRow.contentType).annotated;
   return {
     imageId,
     storageStem: imageRow.storageStem,

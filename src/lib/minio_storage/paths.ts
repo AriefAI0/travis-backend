@@ -53,16 +53,6 @@ export function clipStem(
   return `p${projectId}/s${sessionId}/master_${masterVideoId}/${typeCode}/clip_${clipId}`;
 }
 
-// snip set stem — carries the type, never nested under a clip
-export function snipStem(
-  projectId: number,
-  sessionId: number,
-  typeCode: InspectionTypeCode,
-  resultId: number,
-): string {
-  return `p${projectId}/s${sessionId}/${typeCode}/result_${resultId}`;
-}
-
 // MPU target: raw is one flat object per recording (rebuildable? no)
 export function rawLeaf(stem: string): Leaf {
   return { bucket: env.BUCKET_RAW, key: `${stem}.ts` };
@@ -101,15 +91,8 @@ export function imageExtension(contentType: string): string | null {
   return IMAGE_EXTENSIONS[contentType] ?? null;
 }
 
-// snip originals live beside their annotated twins in the images bucket.
-// Both leaves share one imageId: annotation edits the image, never clones it.
-export function snipImages(stem: string, imageId: number, contentType: string) {
-  const ext = imageExtension(contentType) ?? "png";
-  return {
-    raw: { bucket: env.BUCKET_IMAGES, key: `${stem}/img_${imageId}_raw.${ext}` },
-    annotated: { bucket: env.BUCKET_IMAGES, key: `${stem}/img_${imageId}_annotated.${ext}` },
-  };
-}
+// snip originals and their annotated twins share one imageId: annotation edits
+// the image, never clones it. Superseded by the dated results directory below.
 
 // stem tail {kind}_{pk} maps a stored stem back to its domain row; failure
 // paths use this until the tracker carries the link natively (phase 5)
@@ -230,18 +213,32 @@ export function exportLeaf(
   return mediaLeaf(scope, kind, targetId, `exports/export_${exportId}.mkv`);
 }
 
-// result images sit under the session date of the recording that produced them
+// result images sit under the session date of the recording that produced them.
+// The stem is the results directory, so a read rebuilds both leaves from it.
+export function resultImageStem(scope: MediaScope, resultId: number): string {
+  return mediaPrefix(scope, "results", resultId);
+}
+
+// raw and annotated twins of one image, under a results-directory stem
+export function imageLeavesUnder(
+  stem: string,
+  imageId: number,
+  contentType: string,
+): { raw: Leaf; annotated: Leaf } {
+  const ext = imageExtension(contentType) ?? "png";
+  return {
+    raw: { bucket: env.BUCKET_MEDIA, key: `${stem}/img_${imageId}_raw.${ext}` },
+    annotated: { bucket: env.BUCKET_MEDIA, key: `${stem}/img_${imageId}_annotated.${ext}` },
+  };
+}
+
 export function resultImageLeaves(
   scope: MediaScope,
   resultId: number,
   imageId: number,
   contentType: string,
 ): { raw: Leaf; annotated: Leaf } {
-  const ext = imageExtension(contentType) ?? "png";
-  return {
-    raw: mediaLeaf(scope, "results", resultId, `img_${imageId}_raw.${ext}`),
-    annotated: mediaLeaf(scope, "results", resultId, `img_${imageId}_annotated.${ext}`),
-  };
+  return imageLeavesUnder(resultImageStem(scope, resultId), imageId, contentType);
 }
 
 // flow: organizationId > null > default org. project.organizationId stays
