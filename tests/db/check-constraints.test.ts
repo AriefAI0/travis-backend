@@ -9,6 +9,9 @@ import {
 } from "../helpers/db";
 import * as schema from "../../src/db/schema";
 
+// frozen key prefix every ingest row carries; the value is not under test here
+const KEY_PREFIX = "1/9001/9001/2026/09/20/master/9001";
+
 // pg port: libsql's CHECK constraints became native pg enums, so invalid values
 // surface as 'invalid input value for enum ...' (22P02), not CHECK failures.
 // These tests verify the enums reject invalid values at the DB layer, bypassing
@@ -169,25 +172,27 @@ describe("direct recording ingest constraints", () => {
       masterVideoId: 9100,
       ticketHash: "a".repeat(64),
       keyDate: "2026-09-20",
+      keyPrefix: KEY_PREFIX,
     });
     await testDb.insert(schema.recordingIngest).values({
       kind: "clip",
       clipId: 9100,
       ticketHash: "b".repeat(64),
       keyDate: "2026-09-20",
+      keyPrefix: KEY_PREFIX,
     });
 
     await expectDbRejection(
       testDb.execute(
-        sql`INSERT INTO recording_ingest (kind, ticket_hash, key_date)
-            VALUES ('master', 'c', '2026-09-20')`,
+        sql`INSERT INTO recording_ingest (kind, ticket_hash, key_date, key_prefix)
+            VALUES ('master', 'c', '2026-09-20', 'prefix')`,
       ),
       /violates check constraint|recording_ingest_kind_target_check/i,
     );
     await expectDbRejection(
       testDb.execute(
-        sql`INSERT INTO recording_ingest (kind, master_video_id, clip_id, ticket_hash, key_date)
-            VALUES ('clip', 9100, 9100, 'd', '2026-09-20')`,
+        sql`INSERT INTO recording_ingest (kind, master_video_id, clip_id, ticket_hash, key_date, key_prefix)
+            VALUES ('clip', 9100, 9100, 'd', '2026-09-20', 'prefix')`,
       ),
       /violates check constraint|recording_ingest_kind_target_check/i,
     );
@@ -200,6 +205,7 @@ describe("direct recording ingest constraints", () => {
       clipId: 9100,
       ticketHash: "a".repeat(64),
       keyDate: "2026-09-20",
+      keyPrefix: KEY_PREFIX,
     });
 
     await expectDbRejection(
@@ -208,6 +214,7 @@ describe("direct recording ingest constraints", () => {
         clipId: 9100,
         ticketHash: "b".repeat(64),
         keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
       }),
       /duplicate key|uq_recording_ingest_open_clip/i,
     );
@@ -222,6 +229,7 @@ describe("direct recording ingest constraints", () => {
         masterVideoId: 9100,
         ticketHash: "a".repeat(64),
         keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
       })
       .returning({ ingestId: schema.recordingIngest.ingestId });
 

@@ -7,11 +7,10 @@ import { db, type DbOrTx } from "../../db/client";
 import { AppError, notFound } from "../../lib/error";
 import { minio } from "../../lib/minio_storage/clients";
 import {
-  clipSegmentLeaf,
-  masterSegmentLeaf,
+  buildClipKeyPrefix,
+  buildMasterKeyPrefix,
   mediaDatePath,
-  resolveOrganizationId,
-  type MediaScope,
+  segmentLeafV2,
 } from "../../lib/minio_storage/paths";
 import { masterVideo, recordingIngest, recordingIngestSegment, videoClip } from "../../db/schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
@@ -27,6 +26,8 @@ import {
   listVideoClipRecordsByResultId,
 } from "../../db/repositories/video-clip.repository";
 import { findResultById } from "../../db/repositories/result.repository";
+import { findItemById } from "../../db/repositories/item.repository";
+import { findSessionItemById } from "../../db/repositories/session-item.repository";
 import { createSession } from "../../db/services/session.service";
 import { enqueueThumbnails } from "./jobs/thumbnails";
 
@@ -90,7 +91,7 @@ export function ticketMatches(ticket: string, storedHash: string): boolean {
   return presented.length === stored.length && timingSafeEqual(presented, stored);
 }
 
-// flow: session row > master row > ingest row. The session is minted per master.
+// flow: project > session row > master row > ingest row. The session is minted per master.
 const admitMaster = async (
   input: AdmitMasterInput,
   tx: DbOrTx,
@@ -100,15 +101,32 @@ const admitMaster = async (
     throw new AppError(400, "validation_error", "startEpoch: expected epoch seconds");
   }
 
+  // the title is part of the frozen prefix, so the project loads first
+  const project = await findProjectById(input.projectId, tx);
+  if (!project) throw notFound("Project");
+
   const session = (await createSession({ projectId: input.projectId }, tx))!;
   const master = (await createMasterVideoRecord(
     { sessionId: session.sessionId, startEpoch: input.startEpoch },
     tx,
   ))!;
 
+  // frozen here: the display number exists only once createSession returned
+  const keyPrefix = buildMasterKeyPrefix({
+    projectId: project.projectId,
+    projectTitle: project.title,
+    displayNumber: session.displayNumber ?? session.sessionId,
+    startEpoch: input.startEpoch,
+  });
+
   return {
     ...(await insertIngest(
-      { kind: "master", masterVideoId: master.masterVideoId, keyDate: mediaDatePath(startedAt) },
+      {
+        kind: "master",
+        masterVideoId: master.masterVideoId,
+        keyDate: mediaDatePath(startedAt),
+        keyPrefix,
+      },
       tx,
     )),
     domain: {
@@ -128,6 +146,16 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
   const master = await findMasterVideoById(input.masterVideoId, tx);
   if (!master) throw notFound("Master video");
 
+  // the clip folder carries the item label and the inspection type
+  const session = await findSessionById(master.sessionId, tx);
+  if (!session) throw notFound("Session");
+  const project = await findProjectById(session.projectId, tx);
+  if (!project) throw notFound("Project");
+  const sessionItem = await findSessionItemById(result.sessionItemId, tx);
+  if (!sessionItem) throw notFound("Session item");
+  const item = await findItemById(sessionItem.itemId, tx);
+  if (!item) throw notFound("Item");
+
   // uq_video_clip_result_id: one clip per result, so a re-record reuses the row
   const [existing] = await listVideoClipRecordsByResultId(input.resultId, tx);
   const clip =
@@ -146,6 +174,17 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
     throw new AppError(409, "recording_in_progress", "Clip already has an open ingest");
   }
 
+  // frozen here, from the master's start: never the clip's own wall clock
+  const keyPrefix = buildClipKeyPrefix({
+    projectId: project.projectId,
+    projectTitle: project.title,
+    displayNumber: session.displayNumber ?? session.sessionId,
+    startEpoch: master.startEpoch,
+    clipId: clip.clipId,
+    itemLabel: item.itemLabel,
+    inspectionType: result.inspectionTypeCode,
+  });
+
   return {
     ...(await insertIngest(
       {
@@ -153,6 +192,7 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
         clipId: clip.clipId,
         // clip keys reuse the master date, never the clip's own wall clock
         keyDate: mediaDatePath(new Date(master.startEpoch * 1000)),
+        keyPrefix,
       },
       tx,
     )),
@@ -170,8 +210,8 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
 // the ingest row is the whole ledger header; the raw ticket stops at the caller
 const insertIngest = async (
   target:
-    | { kind: "master"; masterVideoId: number; keyDate: string }
-    | { kind: "clip"; clipId: number; keyDate: string },
+    | { kind: "master"; masterVideoId: number; keyDate: string; keyPrefix: string }
+    | { kind: "clip"; clipId: number; keyDate: string; keyPrefix: string },
   tx: DbOrTx,
 ): Promise<{ ingestId: number; ticket: string; segmentTargetMs: number }> => {
   const ticket = mintTicket();
@@ -183,6 +223,7 @@ const insertIngest = async (
       clipId: target.kind === "clip" ? target.clipId : null,
       ticketHash: hashTicket(ticket),
       keyDate: target.keyDate,
+      keyPrefix: target.keyPrefix,
     })
     .returning({ ingestId: recordingIngest.ingestId });
 
@@ -558,36 +599,6 @@ const lockIngest = async (ingestId: number, tx: DbOrTx) =>
   (await tx.select().from(recordingIngest).where(eq(recordingIngest.ingestId, ingestId)).for("update"))[0] ??
   null;
 
-// resolve the bucket scope of one recording: org, project, session, key date
-const loadSegmentScope = async (
-  ingest: typeof recordingIngest.$inferSelect,
-  tx: DbOrTx,
-): Promise<MediaScope> => {
-  let masterVideoId = ingest.masterVideoId;
-  if (ingest.kind === "clip") {
-    const clip = await findVideoClipById(ingest.clipId!, tx);
-    if (!clip) throw notFound("Video clip");
-    masterVideoId = clip.masterVideoId;
-  }
-
-  const master = await findMasterVideoById(masterVideoId!, tx);
-  if (!master) throw notFound("Master video");
-
-  const session = await findSessionById(master.sessionId, tx);
-  if (!session) throw notFound("Session");
-
-  const project = await findProjectById(session.projectId, tx);
-  if (!project) throw notFound("Project");
-
-  return {
-    organizationId: await resolveOrganizationId(project.organizationId, tx),
-    projectId: project.projectId,
-    sessionId: session.sessionId,
-    // the ingest row froze the key date at admission
-    startedAt: new Date(`${ingest.keyDate}T00:00:00.000Z`),
-  };
-};
-
 // walk the stored sequences in order: the prefix stops at the first hole
 const contiguousSummary = async (ingestId: number, tx: DbOrTx) => {
   const rows = await tx
@@ -687,11 +698,8 @@ export const storeIngestSegment = async (
       };
     }
 
-    const scope = await loadSegmentScope(ingest, tx);
-    const leaf =
-      ingest.kind === "master"
-        ? masterSegmentLeaf(scope, ingest.masterVideoId!, headers.sequence)
-        : clipSegmentLeaf(scope, ingest.clipId!, headers.sequence);
+    // the prefix was frozen at admission; the tail is the only thing left to build
+    const leaf = segmentLeafV2(ingest.keyPrefix, headers.sequence);
 
     // one immutable object per segment; the row commits only after this returns
     await storage.put(leaf.bucket, leaf.key, body);

@@ -24,6 +24,9 @@ const segment = (sequence: number, durationMs = 2000, discontinuity = false): Pl
   discontinuity,
 });
 
+// frozen key prefix every ingest fixture carries; playlist reads use object_key
+const KEY_PREFIX = "1/9600/9600/2026/09/20/master/9600";
+
 const rows = (count: number) => Array.from({ length: count }, (_, i) => segment(i));
 
 const uri = (sequence: number) => `seg/${String(sequence).padStart(10, "0")}.ts?t=TOKEN`;
@@ -190,6 +193,7 @@ describe("playlist snapshot", () => {
         masterVideoId: master!.masterVideoId,
         ticketHash: "a".repeat(64),
         keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
         closedAt: options.closed ? new Date() : null,
         finalSequence: options.finalSequence ?? null,
       })
@@ -272,6 +276,7 @@ describe("playlist snapshot", () => {
         masterVideoId,
         ticketHash: "d".repeat(64),
         keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
       })
       .returning({ ingestId: schema.recordingIngest.ingestId });
     await testDb.insert(schema.recordingIngestSegment).values({

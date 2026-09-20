@@ -223,6 +223,8 @@ describe("evidence image routes", () => {
         clipId: 7,
         ticketHash: "a".repeat(64),
         keyDate: "2026-09-20",
+        // the legacy numeric directory a backfilled row carries
+        keyPrefix: "1/1/101/2026/09/20/clips/7",
         contiguousSequence: 0,
       })
       .returning({ ingestId: schema.recordingIngest.ingestId });

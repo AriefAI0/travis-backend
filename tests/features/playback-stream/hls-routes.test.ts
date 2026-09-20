@@ -19,6 +19,9 @@ import {
 
 const PROJECT_ID = 9600;
 
+// frozen key prefix every ingest fixture carries; playlist reads use object_key
+const KEY_PREFIX = "1/9600/9600/2026/09/20/master/9600";
+
 describe("hls routes", () => {
   const app = new Hono();
   app.onError(onError);
@@ -48,6 +51,7 @@ describe("hls routes", () => {
         masterVideoId: master!.masterVideoId,
         ticketHash: "a".repeat(64),
         keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
         closedAt: options.closed ? new Date() : null,
         finalSequence: options.finalSequence ?? (options.closed ? options.count - 1 : null),
         contiguousSequence: options.closed ? -1 : options.count - 1,
@@ -88,6 +92,7 @@ describe("hls routes", () => {
         clipId: clip!.clipId,
         ticketHash: "c".repeat(64),
         keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
         closedAt: new Date(),
         finalSequence: count - 1,
       })

@@ -138,6 +138,108 @@ export function resultImageLeaves(
   return imageLeavesUnder(resultImageStem(scope, resultId), imageId, contentType);
 }
 
+/* =========================================================
+   READABLE MEDIA KEYS (v3)
+   The ingest row freezes one directory at admission, so a
+   later rename never scatters one recording across two trees.
+   <projectId>-<titleSlug>-<YYYY-MM-DD>/session-<n>-<YYYY-MM-DD>-<HHMM>/<kind>
+   Leaves are a fixed tail under that frozen prefix.
+========================================================= */
+
+const pad = (value: number, width: number) => String(value).padStart(width, "0");
+
+// non-empty parts joined with a dash: a missing slug leaves no double dash
+const joinParts = (parts: string[]): string =>
+  parts.filter((part) => part.length > 0).join("-");
+
+// lowercase, non-alphanumerics to dashes, first 3 words, hard cut at 24
+export function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .split("-")
+    .filter(Boolean)
+    .slice(0, 3)
+    .join("-")
+    .slice(0, 24)
+    // a hard cut can land on a dash
+    .replace(/-+$/, "");
+}
+
+// UTC day of the recording start: YYYY-MM-DD
+const utcDay = (startEpoch: number): string => {
+  const at = new Date(startEpoch * 1000);
+  return `${pad(at.getUTCFullYear(), 4)}-${pad(at.getUTCMonth() + 1, 2)}-${pad(at.getUTCDate(), 2)}`;
+};
+
+// UTC clock of the recording start: HHMM
+const utcClock = (startEpoch: number): string => {
+  const at = new Date(startEpoch * 1000);
+  return `${pad(at.getUTCHours(), 2)}${pad(at.getUTCMinutes(), 2)}`;
+};
+
+export interface KeyPrefixInput {
+  projectId: number;
+  projectTitle: string;
+  displayNumber: number;
+  // recording start, epoch SECONDS, frozen at admission
+  startEpoch: number;
+}
+
+// <projectId>-<titleSlug>-<YYYY-MM-DD>: the project folder carries the date
+const projectFolder = (input: KeyPrefixInput): string =>
+  joinParts([String(input.projectId), slugify(input.projectTitle), utcDay(input.startEpoch)]);
+
+// session-<displayNumber>-<YYYY-MM-DD>-<HHMM>
+const sessionFolder = (input: KeyPrefixInput): string =>
+  joinParts([
+    "session",
+    String(input.displayNumber),
+    utcDay(input.startEpoch),
+    utcClock(input.startEpoch),
+  ]);
+
+// admission is 1:1, so a session holds exactly one master
+export function buildMasterKeyPrefix(input: KeyPrefixInput): string {
+  return `${projectFolder(input)}/${sessionFolder(input)}/master-video`;
+}
+
+export interface ClipKeyPrefixInput extends KeyPrefixInput {
+  clipId: number;
+  itemLabel: string;
+  inspectionType: string;
+}
+
+// <clipId>-<itemSlug>-<inspection>: the folder names its own inspection
+const clipFolder = (input: ClipKeyPrefixInput): string =>
+  joinParts([String(input.clipId), slugify(input.itemLabel), input.inspectionType.toLowerCase()]);
+
+// same session root as the master, then the clip's own folder
+export function buildClipKeyPrefix(input: ClipKeyPrefixInput): string {
+  return `${projectFolder(input)}/${sessionFolder(input)}/clips/${clipFolder(input)}`;
+}
+
+// one leaf under a frozen prefix; every direct-media object lives in the media bucket
+const mediaLeafV2 = (keyPrefix: string, leaf: string): Leaf => ({
+  bucket: env.BUCKET_MEDIA,
+  key: `${keyPrefix}/${leaf}`,
+});
+
+// one sealed TS segment; master and clip share this tail
+export function segmentLeafV2(keyPrefix: string, sequence: number): Leaf {
+  return mediaLeafV2(keyPrefix, `segments/${v2SegmentIndexName(sequence)}`);
+}
+
+// poster frame, written after the master closes
+export function posterLeafV2(keyPrefix: string): Leaf {
+  return mediaLeafV2(keyPrefix, "thumbnail.jpg");
+}
+
+// filmstrip still; 9-digit ms padding keeps lexicographic order = time order
+export function filmstripLeafV2(keyPrefix: string, timestampMs: number): Leaf {
+  return mediaLeafV2(keyPrefix, `timeline/${pad(timestampMs, 9)}.jpg`);
+}
+
 // flow: organizationId > null > default org. project.organizationId stays
 // nullable until better-auth lands, and no key may open with an empty segment.
 export async function resolveOrganizationId(

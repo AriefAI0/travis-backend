@@ -16,6 +16,9 @@ import {
   stopInspection,
 } from "../../src/db/services/inspection.service";
 import { createSession, listSessionItems } from "../../src/db/services/session.service";
+
+// frozen key prefix every ingest fixture carries; not under test here
+const KEY_PREFIX = "1/1/214/2026/09/20/master/1";
 import {
   getResultById,
   getResultMgiDetailByResultId,
@@ -67,6 +70,7 @@ const seedRecordingMaster = async (sessionId: number) => {
     masterVideoId: master!.masterVideoId,
     ticketHash: "f".repeat(64),
     keyDate: "2026-09-20",
+    keyPrefix: KEY_PREFIX,
   });
   return master;
 };
@@ -149,6 +153,7 @@ describe("inspection.service", () => {
       masterVideoId: master!.masterVideoId,
       ticketHash: "a".repeat(64),
       keyDate: "2026-09-20",
+      keyPrefix: KEY_PREFIX,
       closedAt: new Date(),
       finalSequence: -1,
     });

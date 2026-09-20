@@ -134,6 +134,8 @@ describe("direct ingest admission", () => {
     expect(ingest!.masterVideoId).toBe(admission.domain.masterVideoId);
     expect(ingest!.clipId).toBeNull();
     expect(ingest!.keyDate).toBe("2026-09-20");
+    // readable prefix, frozen here: project slug, display number, UTC start
+    expect(ingest!.keyPrefix).toBe("9200-p-2026-09-20/session-1-2026-09-20-2359/master-video");
     expect(ingest!.closedAt).toBeNull();
     expect(ingest!.contiguousSequence).toBe(-1);
   });
@@ -181,6 +183,10 @@ describe("direct ingest admission", () => {
     expect(ingest!.masterVideoId).toBeNull();
     // the clip inherits the master's key date, not its own wall clock
     expect(ingest!.keyDate).toBe("2026-09-20");
+    // and its folder nests under the same session root, naming the item
+    expect(ingest!.keyPrefix).toBe(
+      `9200-p-2026-09-20/session-1-2026-09-20-2359/clips/${clip.domain.clipId}-i-gvi`,
+    );
   });
 
   test("a second clip admission is refused while the first ingest stays open", async () => {
@@ -269,9 +275,9 @@ describe("direct ingest admission", () => {
     return admission;
   };
 
-  const organizationId = async () => {
-    const [org] = await testDb.select().from(schema.organization);
-    return org!.organizationId;
+  const ingestKeyPrefix = async () => {
+    const [ingest] = await testDb.select().from(schema.recordingIngest);
+    return ingest!.keyPrefix;
   };
 
   test("one segment creates one object, one row, and advances the prefix", async () => {
@@ -288,8 +294,8 @@ describe("direct ingest admission", () => {
     expect(outcome.contiguousSequence).toBe(0);
     expect(outcome.durationMs).toBe(2000);
 
-    const orgId = await organizationId();
-    const expectedKey = `${orgId}/9200/${admission.domain.sessionId}/2026/09/20/master/${admission.domain.masterVideoId}/segments/0000000000.ts`;
+    // the object lands under the prefix admission froze, not a re-derived one
+    const expectedKey = `${await ingestKeyPrefix()}/segments/0000000000.ts`;
     expect(puts).toEqual([{ bucket: "travis-media", key: expectedKey, size: body.byteLength }]);
 
     const [row] = await testDb.select().from(schema.recordingIngestSegment);

@@ -14,6 +14,9 @@ import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, inspectionRoutes);
 
+// frozen key prefix every ingest fixture carries; not under test here
+const KEY_PREFIX = "1/1/214/2026/09/20/master/1";
+
 const startBody = (code: string, extra: Record<string, unknown> = {}) => ({
   sessionId: 101,
   itemId: 100,
@@ -52,6 +55,7 @@ const seedHierarchy = async (withMaster = true) => {
       masterVideoId: 1,
       ticketHash: "b".repeat(64),
       keyDate: "2026-09-20",
+      keyPrefix: KEY_PREFIX,
     });
   }
 };
@@ -393,6 +397,7 @@ describe("inspections routes", () => {
       clipId: cviClip!.clipId,
       ticketHash: "c".repeat(64),
       keyDate: "2026-09-20",
+      keyPrefix: KEY_PREFIX,
     });
 
     const res = await app.request("/api/v1/sessions/101/open-inspections");

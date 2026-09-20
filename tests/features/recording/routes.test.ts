@@ -18,6 +18,9 @@ import {
 
 const app = appFor(testDb, recordingRoutes);
 
+// frozen key prefix every ingest fixture carries; these routes read object_key
+const KEY_PREFIX = "1/1/214/2026/09/20/master/1";
+
 // json request shorthand
 const req = (path: string, method: string, body?: unknown) =>
   app.request(path, {
@@ -116,6 +119,7 @@ describe("recordings routes", () => {
         masterVideoId,
         ticketHash: "d".repeat(64),
         keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
       })
       .returning({ ingestId: schema.recordingIngest.ingestId });
 
@@ -155,6 +159,7 @@ describe("recordings routes", () => {
         masterVideoId,
         ticketHash: "a".repeat(64),
         keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
         contiguousSequence: 0,
       })
       .returning({ ingestId: schema.recordingIngest.ingestId });
@@ -198,6 +203,7 @@ describe("recordings routes", () => {
       masterVideoId: master!.masterVideoId,
       ticketHash: "c".repeat(64),
       keyDate: "2026-09-20",
+      keyPrefix: KEY_PREFIX,
       closedAt: new Date(),
       finalSequence: -1,
     });
@@ -232,6 +238,7 @@ describe("recordings routes", () => {
         masterVideoId: master!.masterVideoId,
         ticketHash: "e".repeat(64),
         keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
       });
     }
 

@@ -9,15 +9,21 @@ import {
 } from "../../helpers/db";
 import * as schema from "../../../src/db/schema";
 import {
+  buildClipKeyPrefix,
+  buildMasterKeyPrefix,
   clipSegmentLeaf,
   exportLeaf,
   filmstripLeaf,
+  filmstripLeafV2,
   masterSegmentLeaf,
   mediaDatePath,
   mediaPrefix,
   posterLeaf,
+  posterLeafV2,
   resolveOrganizationId,
   resultImageLeaves,
+  segmentLeafV2,
+  slugify,
   type MediaScope,
 } from "../../../src/lib/minio_storage/paths";
 
@@ -107,6 +113,108 @@ describe("media key hierarchy", () => {
       expect(key).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}/i); // uuid
       expect(key).not.toMatch(/capture|ingest|recordings\//i);
     }
+  });
+});
+
+describe("readable key prefixes", () => {
+  // 2026-02-19T13:07:42Z
+  const START_EPOCH = Math.floor(Date.parse("2026-02-19T13:07:42.000Z") / 1000);
+  const PROJECT = {
+    projectId: 1,
+    projectTitle: "Platform North",
+    displayNumber: 1,
+    startEpoch: START_EPOCH,
+  };
+  const SESSION_ROOT = "1-platform-north-2026-02-19/session-1-2026-02-19-1307";
+
+  test("slugify lowercases, dashes, caps at 3 words and 24 chars", () => {
+    expect(slugify("Platform North")).toBe("platform-north");
+    expect(slugify("Anode 14 GVI inspection")).toBe("anode-14-gvi");
+    expect(slugify("  Anode -- 14  ")).toBe("anode-14");
+    expect(slugify("A B C D")).toBe("a-b-c");
+    expect(slugify("")).toBe("");
+    expect(slugify("!!!")).toBe("");
+    expect(slugify("abcdefghijklmnopqrstuvwxyz")).toBe("abcdefghijklmnopqrstuvwx");
+  });
+
+  // a cut through the 24th char can land on a dash
+  test("a hard cut never leaves a trailing dash", () => {
+    expect(slugify(`${"a".repeat(23)}-b`)).toBe("a".repeat(23));
+  });
+
+  test("the master prefix carries the project, the session, and the UTC start", () => {
+    expect(buildMasterKeyPrefix(PROJECT)).toBe(`${SESSION_ROOT}/master-video`);
+  });
+
+  test("the clip prefix nests under the same session root", () => {
+    expect(
+      buildClipKeyPrefix({
+        ...PROJECT,
+        clipId: 455,
+        itemLabel: "Anode 14",
+        inspectionType: "GVI",
+      }),
+    ).toBe(`${SESSION_ROOT}/clips/455-anode-14-gvi`);
+  });
+
+  test("an empty part drops out instead of leaving a double dash", () => {
+    expect(buildMasterKeyPrefix({ ...PROJECT, projectTitle: "!!!" })).toBe(
+      "1-2026-02-19/session-1-2026-02-19-1307/master-video",
+    );
+    expect(
+      buildClipKeyPrefix({
+        ...PROJECT,
+        clipId: 455,
+        itemLabel: "",
+        inspectionType: "GVI",
+      }),
+    ).toBe(`${SESSION_ROOT}/clips/455-gvi`);
+  });
+
+  test("dates and times are UTC, so a local reading never leaks in", () => {
+    const lateNight = Math.floor(Date.parse("2026-02-19T23:59:59.000Z") / 1000);
+    expect(buildMasterKeyPrefix({ ...PROJECT, startEpoch: lateNight })).toBe(
+      "1-platform-north-2026-02-19/session-1-2026-02-19-2359/master-video",
+    );
+
+    const justAfter = Math.floor(Date.parse("2026-02-20T00:00:01.000Z") / 1000);
+    expect(buildMasterKeyPrefix({ ...PROJECT, startEpoch: justAfter })).toBe(
+      "1-platform-north-2026-02-20/session-1-2026-02-20-0000/master-video",
+    );
+  });
+});
+
+describe("frozen-prefix leaves", () => {
+  const READABLE = "1-platform-north-2026-02-19/session-1-2026-02-19-1307/master-video";
+  // the numeric directory phase 1's backfill wrote onto pre-existing rows
+  const BACKFILLED = "1/3/12/2026/09/20/master/45";
+
+  // one tail for both shapes is what lets old rows share the new minters
+  test("the segment tail is identical under a readable and a backfilled prefix", () => {
+    expect(segmentLeafV2(READABLE, 3).key).toBe(`${READABLE}/segments/0000000003.ts`);
+    expect(segmentLeafV2(BACKFILLED, 3).key).toBe(
+      `${BACKFILLED}/segments/0000000003.ts`,
+    );
+  });
+
+  test("the poster is named thumbnail.jpg under the frozen prefix", () => {
+    expect(posterLeafV2(READABLE).key).toBe(`${READABLE}/thumbnail.jpg`);
+    expect(posterLeafV2(BACKFILLED).key).toBe(`${BACKFILLED}/thumbnail.jpg`);
+  });
+
+  test("filmstrip stills sort by time as strings under the frozen prefix", () => {
+    expect(filmstripLeafV2(READABLE, 1500).key).toBe(`${READABLE}/timeline/000001500.jpg`);
+    expect(filmstripLeafV2(READABLE, 1500).key < filmstripLeafV2(READABLE, 120_000).key).toBe(true);
+  });
+
+  test("every frozen-prefix leaf lands in the media bucket", () => {
+    const leaves = [
+      segmentLeafV2(READABLE, 0),
+      segmentLeafV2(BACKFILLED, 0),
+      posterLeafV2(READABLE),
+      filmstripLeafV2(READABLE, 0),
+    ];
+    for (const leaf of leaves) expect(leaf.bucket).toBe("travis-media");
   });
 });
 
