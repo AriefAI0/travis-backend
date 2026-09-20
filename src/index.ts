@@ -3,7 +3,6 @@ import { app } from "./app";
 import { log } from "./lib/logger";
 import { ensureBuckets } from "./lib/minio_storage/clients";
 import { ensureDefaultOrganization } from "./db/ensure-org";
-import { bootstrapBackendIdentity } from "./db/services/recording-upload.service";
 import { registerJobHandler, startQueueWorker } from "./lib/jobs/worker";
 import { recoveryBoot } from "./features/minio_handler/recovery";
 import { startStaleTimer } from "./features/minio_handler/stale";
@@ -15,7 +14,6 @@ import { startThumbnailSweep } from "./features/recordings-v2/jobs/thumbnails";
 // Boot even when MinIO is down — /health/ready is what reports it.
 await ensureBuckets().catch((err) => log.error("bucket bootstrap failed", { err: String(err) }));
 await ensureDefaultOrganization().catch((err) => log.error("org bootstrap failed", { err: String(err) }));
-await bootstrapBackendIdentity().catch((err) => log.error("backend identity bootstrap failed", { err: String(err) }));
 await recoveryBoot().catch((err) => log.error("boot recovery failed", { err: String(err) }));
 startStaleTimer();
 registerJobHandler("finalize", finalizeJob, finalizeExhausted);
