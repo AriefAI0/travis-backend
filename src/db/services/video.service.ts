@@ -86,6 +86,8 @@ export type ProjectMasterVideo = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
+  // per-project ordinal: what a recording card labels itself with
+  sessionDisplayNumber: number | null;
   startEpoch: number;
   endEpoch: number | null;
   durationMs: number | null;
@@ -317,6 +319,7 @@ export const getMasterVideoPlaybackData = async (
       masterVideoId: masterVideo.masterVideoId,
       sessionId: masterVideo.sessionId,
       sessionName: session.name,
+      sessionDisplayNumber: session.displayNumber,
       startEpoch: masterVideo.startEpoch,
       endEpoch: masterVideo.endEpoch,
       durationMs: masterVideo.durationMs,

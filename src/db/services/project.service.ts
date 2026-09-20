@@ -13,6 +13,7 @@ import { project } from "../schema";
 
 export type ProjectDashboardItem = {
   projectId: number;
+  displayNumber: number;
   title: string;
   description: string | null;
   documentId: string | null;
@@ -127,6 +128,7 @@ export const listDashboard = async (
   const rows = await listProjectDashboardRows(database);
   return rows.map((row) => ({
     projectId: row.projectId,
+    displayNumber: row.displayNumber,
     title: row.title,
     description: row.description,
     documentId: row.documentId,

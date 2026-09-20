@@ -91,6 +91,8 @@ export type ProjectStructureAssetNode = {
 ========================================================= */
 export type ProjectDashboardItem = {
   projectId: number;
+  // per-org ordinal: the number a user reads. projectId is the identity.
+  displayNumber: number;
   title: string;
   description: string | null;
   documentId: string | null;
@@ -116,6 +118,8 @@ export type UpdateProjectInput = {
 
 export type ProjectRecord = {
   projectId: number;
+  // per-org ordinal: the number a user reads. projectId is the identity.
+  displayNumber: number;
   title: string;
   description: string | null;
   documentId: string | null;
@@ -256,6 +260,9 @@ export type ItemResultSidebarSession = {
   sessionId: number;
   sessionItemId: number;
   sessionName: string | null;
+  // per-project ordinal. Auto-created sessions carry no name, so this is the
+  // label the UI shows: `Session ${sessionDisplayNumber}`.
+  sessionDisplayNumber: number | null;
   results: ItemResultSidebarEntry[];
 };
 
@@ -294,6 +301,8 @@ export type ProjectRecordingListItem = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
+  // per-project ordinal: the recording card's title when the name is null
+  sessionDisplayNumber: number | null;
   startEpoch: number; // epoch seconds, as stored
   endEpoch: number | null;
   durationMs: number | null;
@@ -376,6 +385,8 @@ export type MasterVideoPlaybackData = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
+  // per-project ordinal: the playback header's label when the name is null
+  sessionDisplayNumber: number | null;
   startEpoch: number;
   endEpoch: number | null;
   durationMs: number | null;

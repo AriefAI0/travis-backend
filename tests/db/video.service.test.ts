@@ -131,16 +131,19 @@ const seedProjectRecordingContext = async () => {
     {
       sessionId: 101,
       projectId: 1,
+      displayNumber: 1,
       name: "session-001",
     },
     {
       sessionId: 102,
       projectId: 1,
+      displayNumber: 2,
       name: "session-002",
     },
     {
       sessionId: 201,
       projectId: 2,
+      displayNumber: 1,
       name: "session-001",
     },
   ]);
@@ -274,6 +277,8 @@ describe("video.service", () => {
         masterVideoId: firstProjectOldRecording!.masterVideoId,
         sessionId: 101,
         sessionName: "session-001",
+        // the card labels itself with this, not with sessionId
+        sessionDisplayNumber: 1,
         startEpoch: 1_768_000_000,
         endEpoch: 1_768_000_500,
         durationMs: null,
@@ -284,6 +289,7 @@ describe("video.service", () => {
         masterVideoId: firstProjectNewRecording!.masterVideoId,
         sessionId: 102,
         sessionName: "session-002",
+        sessionDisplayNumber: 2,
         startEpoch: 1_768_003_600,
         endEpoch: null,
         durationMs: null,

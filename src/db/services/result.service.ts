@@ -492,6 +492,8 @@ export const getItemResultSidebar = async (
         sessionId: sessionItemRecord.sessionId,
         sessionItemId: sessionItemRecord.sessionItemId,
         sessionName: sessionRecord?.name ?? null,
+        // auto-created sessions carry no name, so the ordinal is the label
+        sessionDisplayNumber: sessionRecord?.displayNumber ?? null,
         results: await Promise.all(itemResults.map(async (resultRecord) => {
           // summaries arrive ordered by imageId asc, so [0] IS the poster
           const entryImages = imagesByResultId.get(resultRecord.resultId) ?? [];

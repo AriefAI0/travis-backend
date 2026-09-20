@@ -7,6 +7,9 @@ export type ProjectMasterVideoRow = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
+  // per-project ordinal: what a recording card labels itself with. The global
+  // sessionId above is the identity and never reads as a user-facing number.
+  sessionDisplayNumber: number | null;
   startEpoch: number;
   endEpoch: number | null;
   durationMs: number | null;
@@ -57,6 +60,7 @@ export const listMasterVideoRecordsByProjectId = async (
       masterVideoId: masterVideo.masterVideoId,
       sessionId: masterVideo.sessionId,
       sessionName: session.name,
+      sessionDisplayNumber: session.displayNumber,
       startEpoch: masterVideo.startEpoch,
       endEpoch: masterVideo.endEpoch,
       durationMs: masterVideo.durationMs,

@@ -5,6 +5,7 @@ import { asset, component, item, project } from "../schema";
 
 export type ProjectDashboardRow = {
   projectId: number;
+  displayNumber: number;
   title: string;
   description: string | null;
   documentId: string | null;
@@ -75,6 +76,7 @@ export const listProjectDashboardRows = async (
   return database
     .select({
       projectId: project.projectId,
+      displayNumber: project.displayNumber,
       title: project.title,
       description: project.description,
       documentId: project.documentId,
@@ -89,6 +91,7 @@ export const listProjectDashboardRows = async (
     .leftJoin(item, eq(item.componentId, component.componentId))
     .groupBy(
       project.projectId,
+      project.displayNumber,
       project.title,
       project.description,
       project.documentId,
