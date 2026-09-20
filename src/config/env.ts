@@ -14,6 +14,9 @@ const schema = z.object({
   // One bucket holds every media object: raw segments, stills, exports, images.
   BUCKET_MEDIA: z.string().min(1).default("travis-media"),
   PRESIGN_GET_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
+  // Browser origins allowed to fetch HLS. Dev renderer is localhost; the
+  // packaged renderer loads from file://, which sends Origin: null.
+  CORS_ALLOWED_ORIGINS: z.string().default("http://localhost:5173,null"),
   RECORDING_V2_TOKEN: z.string().min(1).optional(),
   // signing key for scoped playback tokens; required, separate from ingest tickets
   PLAYBACK_TOKEN_SECRET: z
@@ -44,3 +47,8 @@ export const env = parsed.data;
 
 // Every bucket the server owns. All are ensured to exist at boot.
 export const buckets = [env.BUCKET_MEDIA] as const;
+
+// Origins the renderer may play from; blank entries dropped.
+export const corsAllowedOrigins = env.CORS_ALLOWED_ORIGINS.split(",")
+  .map((origin) => origin.trim())
+  .filter((origin) => origin.length > 0);

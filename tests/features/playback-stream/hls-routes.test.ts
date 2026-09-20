@@ -292,4 +292,58 @@ describe("hls routes", () => {
     const notHls = await app.request("/api/v2/hls/master/abc/index.m3u8");
     expect(notHls.status).toBe(400); // id must be an integer, not a router miss
   });
+
+  test("an allowed origin is echoed on the playlist, a foreign one gets no header", async () => {
+    const { masterVideoId } = await seedMaster({ count: 1, closed: true });
+    const token = mintPlaybackToken({ kind: "master", id: masterVideoId });
+    const path = `/api/v2/hls/master/${masterVideoId}/index.m3u8?t=${token}`;
+
+    const allowed = await app.request(path, {
+      headers: { origin: "http://localhost:5173" },
+    });
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+    expect(allowed.headers.get("vary")).toBe("Origin");
+
+    const foreign = await app.request(path, {
+      headers: { origin: "http://elsewhere.example" },
+    });
+    expect(foreign.status).toBe(200);
+    expect(foreign.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("the packaged renderer origin (null) is allowed", async () => {
+    const { masterVideoId } = await seedMaster({ count: 1, closed: true });
+    const token = mintPlaybackToken({ kind: "master", id: masterVideoId });
+
+    const res = await app.request(
+      `/api/v2/hls/master/${masterVideoId}/index.m3u8?t=${token}`,
+      { headers: { origin: "null" } },
+    );
+    expect(res.headers.get("access-control-allow-origin")).toBe("null");
+  });
+
+  test("a segment redirect carries the same CORS header as the playlist", async () => {
+    const { masterVideoId } = await seedMaster({ count: 1, closed: true });
+    const token = mintPlaybackToken({ kind: "master", id: masterVideoId });
+
+    const res = await app.request(
+      `/api/v2/hls/master/${masterVideoId}/0000000000.ts?t=${token}`,
+      { headers: { origin: "http://localhost:5173" } },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+  });
+
+  test("a preflight answers without a token", async () => {
+    const { masterVideoId } = await seedMaster({ count: 1, closed: true });
+
+    const res = await app.request(`/api/v2/hls/master/${masterVideoId}/index.m3u8`, {
+      method: "OPTIONS",
+      headers: { origin: "http://localhost:5173" },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+    expect(res.headers.get("access-control-allow-methods")).toContain("GET");
+  });
 });

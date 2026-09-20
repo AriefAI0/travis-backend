@@ -356,6 +356,8 @@ export type MasterVideoTimelineThumbnail = {
   width: number;
   height: number;
   sizeBytes: number;
+  // presigned GET, minted per read; null when the stem has no object yet
+  url: string | null;
 };
 
 export type MasterVideoPlaybackEvent = {
@@ -371,6 +373,10 @@ export type MasterVideoPlaybackEvent = {
   remarks: string | null;
   images: ItemResultSidebarImage[];
   imageCount: number;
+  // relative clip playlist with a clip-scoped token; null until segment zero
+  videoUrl: string | null;
+  // presigned clip still; null until the clip still job has run
+  thumbnailUrl: string | null;
 };
 
 // session sibling of the opened master video (not a camera-angle source)
@@ -389,7 +395,10 @@ export type MasterVideoPlaybackData = {
   sessionDisplayNumber: number | null;
   startEpoch: number;
   endEpoch: number | null;
+  // master row duration at close, else the open ingest's live duration
   durationMs: number | null;
+  // derived from the ingest, never stored: an open ingest means recording
+  recordingStatus: "recording" | "finalized";
   // relative playback path carrying a scoped token; null until segment zero is
   // committed. Optional by design: the route mints it, the service never mints.
   hlsUrl?: string | null;

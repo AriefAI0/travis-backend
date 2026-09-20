@@ -38,6 +38,28 @@ All configuration is env-only; `.env.example` documents every variable with
 its default. Validated at boot by `src/config/env.ts` — the app fails fast on
 a bad value.
 
+## CORS for playback
+
+The desktop renderer plays HLS from another origin, so both hops of a segment
+request must answer CORS:
+
+- The HLS routes (`/api/v2/hls/*`) echo `Access-Control-Allow-Origin` for
+  origins listed in `CORS_ALLOWED_ORIGINS` (default
+  `http://localhost:5173,null`; `null` is the packaged `file://` renderer).
+- The MinIO media bucket needs a CORS rule of its own, because a segment
+  request redirects the browser to a presigned MinIO URL. The `minio@8.0.7`
+  client cannot set it, so apply it once per deployment:
+
+```sh
+mc alias set travis http://127.0.0.1:9000 "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
+mc cors set travis/travis-media --config /dev/stdin <<'JSON'
+{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","null"],"AllowedMethods":["GET"],"AllowedHeaders":["*"],"ExposeHeaders":["Content-Length","Content-Range"],"MaxAgeSeconds":3600}]}
+JSON
+```
+
+Verify the whole chain in the app: open a recording and press Play. A blocked
+hop surfaces as a CORS error in the renderer console, not as a 4xx.
+
 ## Object layout
 
 Every direct-media object lives in one bucket (`BUCKET_MEDIA`). A recording's

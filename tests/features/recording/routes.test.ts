@@ -194,6 +194,135 @@ describe("recordings routes", () => {
     expect(closed.data.hlsUrl).toContain(`/api/v2/hls/master/${masterVideoId}/index.m3u8`);
   });
 
+  it("playback carries live status and duration plus minted media urls", async () => {
+    await seedContext(baseContext);
+    const master = await createMasterVideo(
+      { sessionId: 101, startEpoch: 1_755_684_000 },
+      testDb,
+    );
+    const masterVideoId = master!.masterVideoId;
+
+    // open ingest: two committed segments, 2 s each, live duration on the row
+    const [ingest] = await testDb
+      .insert(schema.recordingIngest)
+      .values({
+        kind: "master",
+        masterVideoId,
+        ticketHash: "f".repeat(64),
+        keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
+        contiguousSequence: 1,
+        durationMs: 4000,
+      })
+      .returning({ ingestId: schema.recordingIngest.ingestId });
+    for (const sequence of [0, 1]) {
+      await testDb.insert(schema.recordingIngestSegment).values({
+        ingestId: ingest!.ingestId,
+        sequence,
+        checksumSha256: "b".repeat(64),
+        sizeBytes: 1024,
+        durationMs: 2000,
+        objectKey: `${KEY_PREFIX}/segments/000000000${sequence}.ts`,
+      });
+    }
+
+    // one stored still, and one clip whose own ingest already holds segment zero
+    await testDb.insert(schema.timelineThumbnail).values({
+      masterVideoId,
+      timestampMs: 0,
+      storageStem: `${KEY_PREFIX}/timeline/000000000.jpg`,
+      width: 320,
+      height: 180,
+      sizeBytes: 4096,
+    });
+    const clip = await createVideoClip(
+      {
+        resultId: baseContext.sessionItem + 1,
+        masterVideoId,
+        startOffsetMs: 0,
+        endOffsetMs: 4000,
+      },
+      testDb,
+    );
+    const [clipIngest] = await testDb
+      .insert(schema.recordingIngest)
+      .values({
+        kind: "clip",
+        clipId: clip!.clipId,
+        ticketHash: "c".repeat(64),
+        keyDate: "2026-09-20",
+        keyPrefix: KEY_PREFIX,
+        contiguousSequence: 0,
+      })
+      .returning({ ingestId: schema.recordingIngest.ingestId });
+    await testDb.insert(schema.recordingIngestSegment).values({
+      ingestId: clipIngest!.ingestId,
+      sequence: 0,
+      checksumSha256: "d".repeat(64),
+      sizeBytes: 1024,
+      durationMs: 2000,
+      objectKey: `${KEY_PREFIX}/segments/0000000000.ts`,
+    });
+
+    const { data } = await json<{
+      data: {
+        recordingStatus: string;
+        durationMs: number | null;
+        thumbnails: { timestampMs: number; url: string | null }[];
+        events: { clipId: number; videoUrl: string | null; thumbnailUrl: string | null }[];
+      };
+    }>(await app.request(`/api/v1/recordings/${masterVideoId}/playback?projectId=1`));
+
+    expect(data.recordingStatus).toBe("recording");
+    // the master row has no duration until close: the open ingest supplies it
+    expect(data.durationMs).toBe(4000);
+    expect(data.thumbnails).toHaveLength(1);
+    expect(data.thumbnails[0]!.url).toContain("travis-media");
+    expect(data.events).toHaveLength(1);
+    expect(data.events[0]!.videoUrl).toContain(`/api/v2/hls/clip/${clip!.clipId}/index.m3u8`);
+    expect(data.events[0]!.thumbnailUrl).toBeNull();
+
+    // closing flips the status; the same URL stays playable
+    await testDb
+      .update(schema.recordingIngest)
+      .set({ closedAt: new Date(), finalSequence: 1 })
+      .where(eq(schema.recordingIngest.ingestId, ingest!.ingestId));
+
+    const closed = await json<{ data: { recordingStatus: string } }>(
+      await app.request(`/api/v1/recordings/${masterVideoId}/playback?projectId=1`),
+    );
+    expect(closed.data.recordingStatus).toBe("finalized");
+  });
+
+  it("an event with no playable clip ingest gets a null videoUrl", async () => {
+    await seedContext(baseContext);
+    const master = await createMasterVideo(
+      { sessionId: 101, startEpoch: 1_755_684_000, endEpoch: 1_755_684_300 },
+      testDb,
+    );
+    const masterVideoId = master!.masterVideoId;
+
+    // a clip with no ingest at all: nothing to play yet
+    await createVideoClip(
+      {
+        resultId: baseContext.sessionItem + 1,
+        masterVideoId,
+        startOffsetMs: 0,
+        endOffsetMs: 4000,
+      },
+      testDb,
+    );
+
+    const { data } = await json<{
+      data: { recordingStatus: string; events: { videoUrl: string | null }[] };
+    }>(await app.request(`/api/v1/recordings/${masterVideoId}/playback?projectId=1`));
+
+    // no ingest at all reads as finalized, and the event stays unplayable
+    expect(data.recordingStatus).toBe("finalized");
+    expect(data.events).toHaveLength(1);
+    expect(data.events[0]!.videoUrl).toBeNull();
+  });
+
   it("playback stays unplayable for a closed master with no segments", async () => {
     await seedContext(baseContext);
     const master = await createMasterVideo(

@@ -44,6 +44,11 @@ import {
   videoClip,
 } from "../schema";
 import { listResultImageSummariesByResultIds } from "./result-media.service";
+import {
+  listPlayableClipIds,
+  playbackUrl,
+} from "./recording-playback.service";
+import { findPlayableIngestRecord } from "../repositories/recording-ingest.repository";
 
 export type CreateMasterVideoInput = {
   sessionId: number;
@@ -394,8 +399,23 @@ export const getMasterVideoPlaybackData = async (
       database,
     );
 
+  // The ingest is the status: open means the capture is still running, and its
+  // duration is the only number that grows before close.
+  const playableIngest = await findPlayableIngestRecord(
+    { kind: "master", id: masterVideoId },
+    database,
+  );
+
+  // Batched: one pair of queries for every clip in the events.
+  const playableClipIds = await listPlayableClipIds(
+    (eventRows as PlaybackEventRow[]).map((row) => row.clipId),
+    database,
+  );
+
   return {
     ...selectedMasterVideo,
+    durationMs: selectedMasterVideo.durationMs ?? playableIngest?.durationMs ?? null,
+    recordingStatus: playableIngest?.closedAt === null ? "recording" : "finalized",
     sessionRecordings: [...sessionMasterVideos]
       // copy first: sort mutates in place
       .sort((firstSource, secondSource) =>
@@ -409,15 +429,19 @@ export const getMasterVideoPlaybackData = async (
         endEpoch: sourceVideo.endEpoch,
         durationMs: sourceVideo.durationMs,
       })),
-    thumbnails: timelineThumbnails.map((thumbnail) => ({
-      thumbnailId: thumbnail.thumbnailId,
-      masterVideoId: thumbnail.masterVideoId,
-      timestampMs: thumbnail.timestampMs,
-      storageStem: thumbnail.storageStem,
-      width: thumbnail.width,
-      height: thumbnail.height,
-      sizeBytes: thumbnail.sizeBytes,
-    })),
+    // presigned per read: the strip renders these directly
+    thumbnails: await Promise.all(
+      timelineThumbnails.map(async (thumbnail) => ({
+        thumbnailId: thumbnail.thumbnailId,
+        masterVideoId: thumbnail.masterVideoId,
+        timestampMs: thumbnail.timestampMs,
+        storageStem: thumbnail.storageStem,
+        width: thumbnail.width,
+        height: thumbnail.height,
+        sizeBytes: thumbnail.sizeBytes,
+        url: await mintTimelineThumbnailUrl(thumbnail.storageStem),
+      })),
+    ),
     events: (eventRows as PlaybackEventRow[]).map((eventRow) => ({
       eventId: `clip-${eventRow.clipId}`,
       resultId: eventRow.resultId,
@@ -431,6 +455,11 @@ export const getMasterVideoPlaybackData = async (
       remarks: eventRow.remarks,
       images: imagesByResultId.get(eventRow.resultId) ?? [],
       imageCount: eventRow.imageCount,
+      videoUrl: playableClipIds.has(eventRow.clipId)
+        ? playbackUrl({ kind: "clip", id: eventRow.clipId })
+        : null,
+      // clip stills land with the thumbnail job; no producer yet
+      thumbnailUrl: null,
     })),
   };
 };
