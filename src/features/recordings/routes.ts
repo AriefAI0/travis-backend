@@ -20,8 +20,8 @@ import {
   unfinishedRecordingsQuerySchema,
 } from "../../types/api";
 
-// READ-ONLY recording surface. Recording lifecycle lives on the ingest
-// transport (/api/minio_handler) — create there, finalize via the job bridge.
+// READ-ONLY recording surface. Recording lifecycle lives on the direct ingest
+// transport (/api/v2/ingests) — create there, close on idle timeout.
 export const recordingRoutes = (database?: DbOrTx) => {
   const routes = new Hono();
 

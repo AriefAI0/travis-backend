@@ -12,7 +12,6 @@ import * as schema from "../../../src/db/schema";
 import { env } from "../../../src/config/env";
 import { onError } from "../../../src/lib/error";
 import { ingestRoutes } from "../../../src/features/recordings-v2/ingest-routes";
-import { minioHandlerRoutes } from "../../../src/features/minio_handler/routes";
 import { SEGMENT_MAX_BYTES, type SegmentStorage } from "../../../src/features/recordings-v2/ingest-service";
 
 const PROJECT_ID = 9400;
@@ -69,11 +68,10 @@ describe("direct ingest routes", () => {
     },
   };
 
-  // ingest and the legacy handler on one app: both must answer
+  // only the direct ingest transport is mounted here
   const app = new Hono();
   app.onError(onError);
   app.route("/", ingestRoutes(testDb, storage));
-  app.route("/", minioHandlerRoutes);
 
   beforeAll(async () => {
     await ensureTestDatabase();
@@ -294,7 +292,7 @@ describe("direct ingest routes", () => {
     ).toBe(404);
   });
 
-  test("the removed v2 surface is gone and the legacy handler still answers", async () => {
+  test("both the old v2 surface and the legacy handler are gone", async () => {
     // old v2 admission is deleted: a plain router miss, not a handled 400
     const removed = await app.request("/api/v2/recordings", {
       method: "POST",
@@ -303,12 +301,10 @@ describe("direct ingest routes", () => {
     });
     expect(removed.status).toBe(404);
 
-    // legacy handler route still mounted under its unversioned prefix: a missing
-    // index query is its own 400, not the router's plain 404
-    const legacy = await read(
-      await app.request("/api/minio_handler/sessions/unknown-id/segments", { method: "POST" }),
-    );
-    expect(legacy.status).toBe(400);
-    expect(legacy.body.code).toBe("bad_index");
+    // legacy handler is unmounted: a router miss, not its own bad_index 400
+    const legacy = await app.request("/api/minio_handler/sessions/unknown-id/segments", {
+      method: "POST",
+    });
+    expect(legacy.status).toBe(404);
   });
 });

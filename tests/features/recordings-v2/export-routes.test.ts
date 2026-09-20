@@ -78,9 +78,9 @@ describe("export stubs reserve nothing real", () => {
 
   // Acceptance: the replaced surfaces are untouched by this stub.
   test("old v2 and legacy routes still answer", async () => {
-    // Legacy ingest transport keeps its live prefix.
+    // Legacy ingest transport is unmounted.
     const legacy = await app.request("/api/minio_handler/health");
-    expect([200, 404]).toContain(legacy.status);
+    expect(legacy.status).toBe(404);
 
     // v2 recording surface still routes (a missing id is a real answer, not a
     // missing route).

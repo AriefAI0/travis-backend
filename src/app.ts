@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { healthRoutesFor } from "./features/health/routes";
-import { minioHandlerRoutes } from "./features/minio_handler/routes";
 import { inspectionRoutes } from "./features/inspections/routes";
 import { projectRoutes } from "./features/projects/routes";
 import { recordingRoutes } from "./features/recordings/routes";
@@ -26,7 +25,6 @@ if (env.NODE_ENV !== "test") {
 
 app.onError(onError);
 app.route("/", healthRoutesFor(minio, [{ name: "db", check: pingDb }, { name: "tracker", check: trackerReady }]));
-app.route("/", minioHandlerRoutes);
 app.route("/", projectRoutes());
 app.route("/", structureRoutes());
 app.route("/", sessionRoutes());
