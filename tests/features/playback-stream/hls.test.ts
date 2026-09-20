@@ -16,7 +16,7 @@ import {
   readPlaylistSource,
   targetDurationSeconds,
   type PlaylistSegment,
-} from "../../../src/features/recordings-v2/hls";
+} from "../../../src/features/playback-stream/hls";
 
 const segment = (sequence: number, durationMs = 2000, discontinuity = false): PlaylistSegment => ({
   sequence,

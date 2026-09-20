@@ -6,7 +6,7 @@ import { projectRoutes } from "./features/projects/routes";
 import { recordingRoutes } from "./features/recordings/routes";
 import { resultRoutes } from "./features/results/routes";
 import { ingestRoutes } from "./features/recordings-v2/ingest-routes";
-import { hlsRoutes } from "./features/recordings-v2/hls-routes";
+import { hlsRoutes } from "./features/playback-stream/hls-routes";
 import { exportRoutes } from "./features/recordings-v2/export-routes";
 import { sessionRoutes } from "./features/sessions/routes";
 import { structureRoutes } from "./features/structure/routes";

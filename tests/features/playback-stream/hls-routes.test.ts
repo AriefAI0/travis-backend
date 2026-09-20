@@ -10,7 +10,7 @@ import {
 } from "../../helpers/db";
 import * as schema from "../../../src/db/schema";
 import { onError } from "../../../src/lib/error";
-import { hlsRoutes } from "../../../src/features/recordings-v2/hls-routes";
+import { hlsRoutes } from "../../../src/features/playback-stream/hls-routes";
 import {
   mintPlaybackToken,
   playbackTokenExpiry,
