@@ -3,10 +3,7 @@ import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
 import { AppError } from "../../lib/error";
-import {
-  listResultImageSummariesByResultIds,
-  mintRecordingThumbnailUrl,
-} from "./result-media.service";
+import { listResultImageSummariesByResultIds } from "./result-media.service";
 import { listPlayableClipIds, playbackUrl } from "./recording-playback.service";
 import { getItemById } from "./structure.service";
 import { listSessionItemsByItemId, listSessionsByIds } from "./session.service";
@@ -496,8 +493,6 @@ export const getItemResultSidebar = async (
                 async (clipPlayback) => ({
                   clipId: clipPlayback.clipId,
                   resultId: clipPlayback.resultId,
-                  storageStem: clipPlayback.storageStem,
-                  recordingStatus: clipPlayback.recordingStatus,
                   startOffsetMs: clipPlayback.startOffsetMs,
                   endOffsetMs: clipPlayback.endOffsetMs,
                   durationMs: clipPlayback.durationMs,
@@ -506,7 +501,9 @@ export const getItemResultSidebar = async (
                   videoUrl: playableClipIds.has(clipPlayback.clipId)
                     ? playbackUrl({ kind: "clip", id: clipPlayback.clipId })
                     : null,
-                  thumbnailUrl: await mintRecordingThumbnailUrl(clipPlayback),
+                  // no clip still producer in the direct protocol; the card
+                  // falls back to the result's first image
+                  thumbnailUrl: null,
                 }),
               ),
             ),
@@ -653,8 +650,6 @@ export const getResultEvidence = async (
     resultClips.map(async (clipPlayback) => ({
       clipId: clipPlayback.clipId,
       resultId: clipPlayback.resultId,
-      storageStem: clipPlayback.storageStem,
-      recordingStatus: clipPlayback.recordingStatus,
       startOffsetMs: clipPlayback.startOffsetMs,
       endOffsetMs: clipPlayback.endOffsetMs,
       durationMs: clipPlayback.durationMs,
@@ -663,7 +658,8 @@ export const getResultEvidence = async (
       videoUrl: playableClipIds.has(clipPlayback.clipId)
         ? playbackUrl({ kind: "clip", id: clipPlayback.clipId })
         : null,
-      thumbnailUrl: await mintRecordingThumbnailUrl(clipPlayback),
+      // no clip still producer in the direct protocol; the card falls back
+      thumbnailUrl: null,
     })),
   );
 

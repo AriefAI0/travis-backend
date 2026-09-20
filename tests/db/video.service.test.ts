@@ -331,7 +331,6 @@ describe("video.service", () => {
         masterVideoId: masterVideo!.masterVideoId,
         startOffsetMs: 320_000,
         endOffsetMs: 350_000,
-        storageStem: " clips/clip-5001-gvi.mp4 ",
       },
       testDb,
     );
@@ -361,7 +360,6 @@ describe("video.service", () => {
       masterVideoId: masterVideo!.masterVideoId,
       startOffsetMs: 320_000,
       endOffsetMs: 350_000,
-      storageStem: "clips/clip-5001-gvi.mp4",
     });
     expect(createdVideoClip?.clipId).toBeTypeOf("number");
     expect(await listVideoClips(testDb)).toHaveLength(3);
@@ -397,8 +395,6 @@ describe("video.service", () => {
       clipId: createdVideoClip!.clipId,
       resultId: 5001,
       masterVideoId: masterVideo!.masterVideoId,
-      storageStem: "clips/clip-5001-gvi.mp4",
-      recordingStatus: "finalized",
       masterVideoStartEpoch: 1_760_000_000,
       masterVideoEndEpoch: 1_760_003_600,
       masterVideoDurationMs: 3_600_000,
@@ -474,8 +470,6 @@ describe("video.service", () => {
       clipId: activeVideoClip!.clipId,
       resultId: 5001,
       masterVideoId: masterVideo!.masterVideoId,
-      storageStem: null,
-      recordingStatus: "finalized",
       masterVideoStartEpoch: 1_760_000_000,
       masterVideoEndEpoch: 1_760_003_600,
       masterVideoDurationMs: 3_600_000,
@@ -488,7 +482,7 @@ describe("video.service", () => {
 
     const completedVideoClip = await updateVideoClip(
       activeVideoClip!.clipId,
-      { endOffsetMs: 180_000, storageStem: " p1/s101/clip_9 " },
+      { endOffsetMs: 180_000 },
       testDb,
     );
 
@@ -496,7 +490,6 @@ describe("video.service", () => {
       clipId: activeVideoClip!.clipId,
       startOffsetMs: 120_000,
       endOffsetMs: 180_000,
-      storageStem: "p1/s101/clip_9",
     });
   });
 
@@ -518,7 +511,6 @@ describe("video.service", () => {
         masterVideoId: masterVideo!.masterVideoId,
         startOffsetMs: 320_000,
         endOffsetMs: 350_000,
-        storageStem: "clips/clip-5001-mgi.mp4",
       },
       testDb,
     );

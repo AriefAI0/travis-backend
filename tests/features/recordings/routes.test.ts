@@ -270,8 +270,6 @@ describe("recordings routes", () => {
         masterVideoId: master!.masterVideoId,
         startOffsetMs: 0,
         endOffsetMs: null, // open clip
-        storageStem: "p1/s101/clip_1",
-        recordingStatus: "recording",
       },
       testDb,
     );
@@ -285,12 +283,17 @@ describe("recordings routes", () => {
     const activeOther = await app.request("/api/v1/clips/active?projectId=2");
     expect((await json(activeOther)).data).toHaveLength(0);
 
-    // batch read keyed by resultId (stringified in JSON), stem carried
+    // batch read keyed by resultId (stringified in JSON), timing facts carried
     const batch = await req("/api/v1/clips/by-result-ids", "POST", { resultIds: [resultId] });
     expect(batch.status).toBe(200);
     const byResult = (await json(batch)).data;
     expect(byResult[String(resultId)]).toHaveLength(1);
-    expect(byResult[String(resultId)][0].storageStem).toBe("p1/s101/clip_1");
+    expect(byResult[String(resultId)][0]).toMatchObject({
+      clipId,
+      resultId,
+      startOffsetMs: 0,
+      endOffsetMs: null,
+    });
 
     // closing the clip empties the active sweep
     await updateVideoClip(clipId, { endOffsetMs: 5_000 }, testDb);

@@ -212,12 +212,9 @@ export type CviDetail = {
 export type ItemResultSidebarClip = {
   clipId: number;
   resultId: number;
-  storageStem: string | null;
-  // legacy outcome column; no playback read consults it any more
-  recordingStatus: string;
   // relative HLS path with a clip-scoped token; null until segment zero is stored
   videoUrl: string | null;
-  // presigned card still, written by the finalize run; still status-gated
+  // no clip still producer yet; the card falls back to the result's first image
   thumbnailUrl: string | null;
   startOffsetMs: number;
   endOffsetMs: number | null;
@@ -363,7 +360,6 @@ export type MasterVideoPlaybackEvent = {
   startOffsetMs: number;
   endOffsetMs: number | null;
   remarks: string | null;
-  storageStem: string | null;
   images: ItemResultSidebarImage[];
   imageCount: number;
 };

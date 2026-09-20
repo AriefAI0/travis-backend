@@ -29,7 +29,6 @@ import {
   listVideoClipRecords,
   listVideoClipRecordsByMasterVideoId,
   listVideoClipRecordsByResultId,
-  listVideoClipRecordsByStatuses,
   updateVideoClipById,
   type VideoClipPlaybackRow,
 } from "../repositories/video-clip.repository";
@@ -57,8 +56,6 @@ export type CreateVideoClipInput = {
   masterVideoId: number;
   startOffsetMs: number;
   endOffsetMs?: number | null;
-  storageStem?: string | null;
-  recordingStatus?: RecordingPersistenceStatus;
 };
 
 export type CreateMasterVideoTimelineThumbnailInput = {
@@ -75,8 +72,6 @@ export type VideoClipPlayback = {
   clipId: number;
   resultId: number;
   masterVideoId: number;
-  storageStem: string | null;
-  recordingStatus: string;
   masterVideoStartEpoch: number;
   masterVideoEndEpoch: number | null;
   masterVideoDurationMs: number | null;
@@ -112,21 +107,6 @@ type PlaybackEventRow = {
   imageCount: number;
 };
 
-export const RECORDING_PERSISTENCE_STATUS = {
-  recording: "recording",
-  finalized: "finalized",
-  interrupted: "interrupted",
-  finalizationFailed: "finalization_failed",
-  canceled: "canceled",
-} as const;
-
-export type RecordingPersistenceStatus =
-  (typeof RECORDING_PERSISTENCE_STATUS)[keyof typeof RECORDING_PERSISTENCE_STATUS];
-
-const recordingPersistenceStatuses = new Set<string>(
-  Object.values(RECORDING_PERSISTENCE_STATUS),
-);
-
 const validateMasterVideoTimeRange = (
   startEpoch: number,
   endEpoch?: number | null,
@@ -152,30 +132,6 @@ const normalizeRequiredText = (value: string, fieldName: string) => {
   }
 
   return trimmedValue;
-};
-
-const normalizeOptionalText = (
-  value: string | null | undefined,
-  _fieldName?: string,
-) => {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  const trimmedValue = value.trim();
-
-  return trimmedValue ? trimmedValue : null;
-};
-
-const normalizeRecordingPersistenceStatus = (
-  value: string,
-  fieldName: string,
-): RecordingPersistenceStatus => {
-  if (!recordingPersistenceStatuses.has(value)) {
-    throw new Error(`${fieldName} is invalid`);
-  }
-
-  return value as RecordingPersistenceStatus;
 };
 
 const normalizeMasterVideoUpdate = (
@@ -567,12 +523,6 @@ export const createVideoClip = async (
       masterVideoId: data.masterVideoId,
       startOffsetMs: data.startOffsetMs,
       endOffsetMs: data.endOffsetMs ?? null,
-      storageStem: normalizeOptionalText(
-        data.storageStem,
-        "Video clip storage stem",
-      ),
-      recordingStatus:
-        data.recordingStatus ?? RECORDING_PERSISTENCE_STATUS.finalized,
       lastUpdatedAt: new Date(),
     },
     database,
@@ -715,51 +665,14 @@ export const updateVideoClip = async (
     clipId,
     {
       ...data,
-      storageStem:
-        "storageStem" in data
-          ? normalizeOptionalText(data.storageStem, "Video clip storage stem")
-          : undefined,
-      recordingStatus:
-        "recordingStatus" in data && data.recordingStatus !== undefined
-          ? normalizeRecordingPersistenceStatus(
-              data.recordingStatus,
-              "Video clip recording status",
-            )
-          : undefined,
       lastUpdatedAt: new Date(),
     },
     database,
   );
 };
 
-// status carries the fact; the log carries the reason
-export const markVideoClipFinalizationFailed = async (
-  clipId: number,
-  _error: string,
-  database?: DbOrTx,
-) =>
-  updateVideoClip(clipId, {
-    recordingStatus: RECORDING_PERSISTENCE_STATUS.finalizationFailed,
-  }, database);
-
-export const markVideoClipFinalized = async (
-  clipId: number,
-  data: {
-    // Null since TS segments became the clip master (no local file to stat).
-    fileSize: number | null;
-    // ingest clips span 0..duration; absent leaves app-managed offsets alone
-    endOffsetMs?: number;
-  },
-  database?: DbOrTx,
-) =>
-  updateVideoClip(clipId, {
-    recordingStatus: RECORDING_PERSISTENCE_STATUS.finalized,
-    ...(data.endOffsetMs !== undefined ? { endOffsetMs: data.endOffsetMs } : {}),
-    fileSize: data.fileSize,
-  }, database);
-
-// active inspections: open clips (endOffsetMs null); status is unreliable
-// because created clips default to 'finalized' until the recorder flips it
+// open clips only: the ingest close stamps endOffsetMs, which is the whole
+// close signal in the direct protocol.
 export const listActiveVideoClips = async (database?: DbOrTx) =>
   listActiveVideoClipRecords(database);
 

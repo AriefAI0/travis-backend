@@ -22,7 +22,6 @@ import {
   listResults,
 } from "../../src/db/services/result.service";
 import {
-  RECORDING_PERSISTENCE_STATUS,
   createMasterVideo,
   createVideoClip,
   getVideoClipById,
@@ -287,7 +286,6 @@ describe("inspection.service", () => {
         masterVideoId: master.masterVideoId,
         startOffsetMs: 0,
         endOffsetMs: null,
-        recordingStatus: RECORDING_PERSISTENCE_STATUS.recording,
       },
       testDb,
     ))!;

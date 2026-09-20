@@ -7,8 +7,6 @@ export type VideoClipPlaybackRow = {
   clipId: number;
   resultId: number;
   masterVideoId: number;
-  storageStem: string | null;
-  recordingStatus: string;
   masterVideoStartEpoch: number;
   masterVideoEndEpoch: number | null;
   startOffsetMs: number;
@@ -86,8 +84,6 @@ export const findVideoClipPlaybackRowById = async (
       clipId: videoClip.clipId,
       resultId: videoClip.resultId,
       masterVideoId: videoClip.masterVideoId,
-      storageStem: videoClip.storageStem,
-      recordingStatus: videoClip.recordingStatus,
       masterVideoStartEpoch: masterVideo.startEpoch,
       masterVideoEndEpoch: masterVideo.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,
@@ -115,8 +111,6 @@ export const listVideoClipPlaybackRowsByResultIds = async (
       clipId: videoClip.clipId,
       resultId: videoClip.resultId,
       masterVideoId: videoClip.masterVideoId,
-      storageStem: videoClip.storageStem,
-      recordingStatus: videoClip.recordingStatus,
       masterVideoStartEpoch: masterVideo.startEpoch,
       masterVideoEndEpoch: masterVideo.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,
@@ -147,20 +141,6 @@ export const updateVideoClipById = async (
     .returning();
 
   return updatedVideoClips[0] ?? null;
-};
-
-export const listVideoClipRecordsByStatuses = async (
-  statuses: ("recording" | "finalized" | "interrupted" | "finalization_failed" | "canceled")[],
-  database: DbOrTx = db,
-) => {
-  if (statuses.length === 0) {
-    return [];
-  }
-
-  return database.query.videoClip.findMany({
-    where: inArray(videoClip.recordingStatus, statuses),
-    orderBy: asc(videoClip.clipId),
-  });
 };
 
 export const deleteVideoClipById = async (

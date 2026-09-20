@@ -1501,7 +1501,6 @@ describe("result.service", () => {
           masterVideoId: masterVideo!.masterVideoId,
           startOffsetMs: 1000,
           endOffsetMs: 5000,
-          storageStem: `file://clip_${result!.resultId}.mkv`,
         },
         testDb,
       );
@@ -3222,7 +3221,6 @@ describe("result.service", () => {
           masterVideoId: masterVideo!.masterVideoId,
           startOffsetMs: 1000,
           endOffsetMs: 5000,
-          storageStem: "p1/s1/clip_1",
         },
         testDb,
       );
@@ -3233,7 +3231,8 @@ describe("result.service", () => {
 
       const evidence = await getResultEvidence(resultRecord!.resultId, testDb);
       expect(evidence.clips).toHaveLength(1);
-      expect(evidence.clips[0]!.storageStem).toBe("p1/s1/clip_1");
+      // no clip still producer yet: the card face is absent by design
+      expect(evidence.clips[0]!.thumbnailUrl).toBeNull();
       expect(evidence.images).toHaveLength(1);
       expect(evidence.images[0]!.storageStem).toBe("p1/s1/result_1");
     });

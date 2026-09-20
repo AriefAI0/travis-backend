@@ -238,8 +238,9 @@ describe("evidence image routes", () => {
 
     const open = await json(await app.request("/api/v1/items/100/results"));
     const openClip = open.data.sessions[0].results[0].clips[0];
-    expect(openClip.recordingStatus).toBe("recording");
     expect(openClip.videoUrl).toMatch(/^\/api\/v2\/hls\/clip\/7\/index[.]m3u8[?]t=v1[.]/);
+    // no clip still producer: the card face stays absent
+    expect(openClip.thumbnailUrl).toBeNull();
 
     // the clip half of the token never opens a master route
     const token = new URL(`http://x${openClip.videoUrl}`).searchParams.get("t")!;
@@ -275,13 +276,12 @@ describe("evidence image routes", () => {
     expect(res.data.clips[0].thumbnailUrl).toBeNull();
   });
 
-  it("evidence clips carry thumbnailUrl on the same gate as the sidebar", async () => {
+  it("evidence clips carry no still until a clip thumbnail producer exists", async () => {
     await seedResultContext();
     await testDb.insert(schema.masterVideo).values({
       masterVideoId: 1,
       sessionId: 101,
       startEpoch: 1000,
-      recordingStatus: "finalized",
     });
     await testDb.insert(schema.videoClip).values({
       clipId: 9,
@@ -289,14 +289,11 @@ describe("evidence image routes", () => {
       masterVideoId: 1,
       startOffsetMs: 0,
       endOffsetMs: 5_000,
-      recordingStatus: "finalized",
-      storageStem: "p1/s101/master_1/GVI/clip_9",
     });
 
     const res = await json(await app.request("/api/v1/results/5001/evidence"));
-    expect(res.data.clips[0].thumbnailUrl).toContain(
-      "p1/s101/master_1/GVI/clip_9/poster.jpg",
-    );
+    expect(res.data.clips[0].thumbnailUrl).toBeNull();
+    expect(res.data.clips[0].endOffsetMs).toBe(5_000);
   });
 
   it("evidence read mirrors the sidebar media fields", async () => {
