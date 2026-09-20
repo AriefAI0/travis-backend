@@ -80,10 +80,11 @@ const seedItemResultSidebar = async (
   });
 
   // Sessions are parents of both master_video and session_item → insert first.
+  // The ordinal follows the loop: one project cannot repeat a display number.
   for (let s = 1; s <= sessions; s += 1) {
     await db
       .insert(schema.session)
-      .values({ sessionId: s, projectId, name: `S${s}` });
+      .values({ displayNumber: s, sessionId: s, projectId, name: `S${s}` });
   }
 
   await db.insert(schema.masterVideo).values({
@@ -140,7 +141,7 @@ const seedMasterVideoPlayback = async (resultsWithClips: number) => {
   const projectId = 1;
 
   await db.insert(schema.project).values({ displayNumber: projectId, projectId, title: "P" });
-  await db.insert(schema.session).values({ sessionId: 1, projectId, name: "S" });
+  await db.insert(schema.session).values({ displayNumber: 2, sessionId: 1, projectId, name: "S" });
   await db.insert(schema.masterVideo).values({
     masterVideoId: 1,
     sessionId: 1,
@@ -193,7 +194,7 @@ const seedProjectSummary = async (resultCount: number) => {
   const projectId = 1;
 
   await db.insert(schema.project).values({ displayNumber: projectId, projectId, title: "P" });
-  await db.insert(schema.session).values({ sessionId: 1, projectId, name: "S" });
+  await db.insert(schema.session).values({ displayNumber: 3, sessionId: 1, projectId, name: "S" });
   await db.insert(schema.masterVideo).values({
     masterVideoId: 1,
     sessionId: 1,

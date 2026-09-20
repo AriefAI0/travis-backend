@@ -33,7 +33,7 @@ describe("archived_at filtering", () => {
 
   it("hides archived rows from list reads but keeps them findable by id", async () => {
     await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "P" });
-    await testDb.insert(schema.session).values({ sessionId: 1, projectId: 1, name: "S" });
+    await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 1, projectId: 1, name: "S" });
     await testDb.insert(schema.asset).values({ assetId: 1, projectId: 1, name: "A" });
     await testDb
       .insert(schema.component)

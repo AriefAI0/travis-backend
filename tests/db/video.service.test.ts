@@ -37,11 +37,13 @@ const seedVideoContext = async () => {
 
   await testDb.insert(schema.session).values([
     {
+      displayNumber: 1,
       sessionId: 101,
       projectId: 1,
       name: "Run 1",
     },
     {
+      displayNumber: 2,
       sessionId: 102,
       projectId: 1,
       name: "Run 2",

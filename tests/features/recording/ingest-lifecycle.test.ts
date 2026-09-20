@@ -31,7 +31,7 @@ const quietStorage: SegmentStorage = { put: async () => {} };
 
 const seedDomain = async () => {
   await testDb.insert(schema.project).values({ displayNumber: 9300, projectId: 9300, title: "P" });
-  await testDb.insert(schema.session).values({ sessionId: 9300, projectId: 9300, name: "S" });
+  await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 9300, projectId: 9300, name: "S" });
   await testDb.insert(schema.asset).values({ assetId: 9300, projectId: 9300, name: "A" });
   await testDb
     .insert(schema.component)

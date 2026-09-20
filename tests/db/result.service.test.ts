@@ -55,6 +55,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 1,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -142,6 +143,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 2,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -239,10 +241,10 @@ describe("result.service", () => {
         .returning()
         .then((rows) => rows[0]!);
 
-      const seedSession = async (name: string) => {
+      const seedSession = async (name: string, displayNumber: number) => {
         const session = await testDb
           .insert(schema.session)
-          .values({ projectId: project.projectId, name })
+          .values({ displayNumber, projectId: project.projectId, name })
           .returning()
           .then((rows) => rows[0]!);
         const sessionItem = await testDb
@@ -261,7 +263,7 @@ describe("result.service", () => {
         };
       };
 
-      const firstSession = await seedSession("Run 1");
+      const firstSession = await seedSession("Run 1", 1);
       const results = [
         await createResult(firstSession, testDb),
         await createResult(firstSession, testDb),
@@ -271,7 +273,7 @@ describe("result.service", () => {
       expect(results.map((row) => row!.displayNumber)).toEqual([1, 2, 3]);
 
       // a different session is a different sequence
-      const secondSession = await seedSession("Run 2");
+      const secondSession = await seedSession("Run 2", 2);
       const firstOfSecond = await createResult(secondSession, testDb);
       expect(firstOfSecond!.displayNumber).toBe(1);
     });
@@ -296,6 +298,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 4,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -384,6 +387,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 5,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -471,6 +475,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 6,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -553,6 +558,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 7,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -642,6 +648,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 8,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -728,6 +735,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 9,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -823,6 +831,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 10,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -918,6 +927,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 11,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -1007,6 +1017,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 12,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -1086,6 +1097,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 13,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -1183,6 +1195,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 14,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -1278,6 +1291,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 15,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -1421,6 +1435,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 16,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -1509,6 +1524,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 17,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -1610,6 +1626,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 18,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -1737,6 +1754,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 19,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -1836,6 +1854,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 20,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -1950,6 +1969,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 21,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -2047,6 +2067,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 22,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -2142,6 +2163,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 23,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -2245,6 +2267,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 24,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -2344,6 +2367,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 25,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -2441,6 +2465,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 26,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -2546,6 +2571,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 27,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -2641,6 +2667,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 28,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -2734,6 +2761,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 29,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -2835,6 +2863,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 30,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -2937,6 +2966,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 31,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -3034,6 +3064,7 @@ describe("result.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 32,
           projectId: project.projectId,
           name: "Session 1",
           startedAt: new Date(),
@@ -3130,7 +3161,7 @@ describe("result.service", () => {
       await testDb.insert(schema.project).values({ displayNumber: projectId, projectId, title: label });
       const session = await testDb
         .insert(schema.session)
-        .values({ projectId, name: `${label}-S` })
+        .values({ displayNumber: 33, projectId, name: `${label}-S` })
         .returning()
         .then((rows) => rows[0]!);
       const asset = await testDb

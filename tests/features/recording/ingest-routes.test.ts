@@ -20,7 +20,7 @@ const seedDomain = async () => {
   await testDb.insert(schema.project).values({ displayNumber: PROJECT_ID, projectId: PROJECT_ID, title: "P" });
   await testDb
     .insert(schema.session)
-    .values({ sessionId: PROJECT_ID, projectId: PROJECT_ID, name: "S" });
+    .values({ displayNumber: 1, sessionId: PROJECT_ID, projectId: PROJECT_ID, name: "S" });
   await testDb.insert(schema.asset).values({ assetId: PROJECT_ID, projectId: PROJECT_ID, name: "A" });
   await testDb
     .insert(schema.component)

@@ -100,7 +100,7 @@ export const session = pgTable(
       .references(() => project.projectId, { onDelete: "cascade" }),
 
     name: text("name"),
-    displayNumber: integer("display_number"),
+    displayNumber: integer("display_number").notNull(),
     startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
     endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }),
 

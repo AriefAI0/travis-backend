@@ -172,7 +172,7 @@ describe("playlist snapshot", () => {
     await testDb.insert(schema.project).values({ displayNumber: PROJECT_ID, projectId: PROJECT_ID, title: "P" });
     await testDb
       .insert(schema.session)
-      .values({ sessionId: PROJECT_ID, projectId: PROJECT_ID, name: "S" });
+      .values({ displayNumber: 1, sessionId: PROJECT_ID, projectId: PROJECT_ID, name: "S" });
   });
 
   // one master with an ingest row, and segments written straight to the ledger

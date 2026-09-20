@@ -18,6 +18,7 @@ const app = appFor(testDb, resultRoutes);
 const seedResultContext = async () => {
   await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.session).values({
+    displayNumber: 1,
     sessionId: 101,
     projectId: 1,
     name: "Run 1",
@@ -77,7 +78,7 @@ const sessionStem = async (resultId: number, label: string) => {
   const iso = row!.createdAt.toISOString();
   const day = iso.slice(0, 10);
   const clock = iso.slice(11, 16).replace(":", "");
-  return `1-alpha-${day}/session-101-${day}-${clock}/results/${resultId}-${label}/evidence-img`;
+  return `1-alpha-${day}/session-1-${day}-${clock}/results/${resultId}-${label}/evidence-img`;
 };
 
 // One master and one clip on the seeded result: the home an evidence image
@@ -137,7 +138,7 @@ describe("evidence image routes", () => {
 
     const { data } = await json<{ data: Ticket }>(await createImage({ contentType: "image/png" }));
 
-    const stem = "1-alpha-1970-01-01/session-101-1970-01-01-0016/clips/5001-jl-01-gvi/evidence-img";
+    const stem = "1-alpha-1970-01-01/session-1-1970-01-01-0016/clips/5001-jl-01-gvi/evidence-img";
     expect(data.storageStem).toBe(stem);
     expect(data.url).toContain(`${stem}/${data.imageId}.png`);
   });

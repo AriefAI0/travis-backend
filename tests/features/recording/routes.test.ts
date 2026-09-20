@@ -40,6 +40,7 @@ const seedContext = async (p: {
 }) => {
   await testDb.insert(schema.project).values({ displayNumber: p.project, projectId: p.project, title: `P${p.project}` });
   await testDb.insert(schema.session).values({
+    displayNumber: 1,
     sessionId: p.session,
     projectId: p.project,
     name: "Run 1",

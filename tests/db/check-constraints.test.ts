@@ -79,7 +79,7 @@ describe("enum constraints (pg port of CHECK suite)", () => {
 
   it("result.inspection_type_code rejects values outside the enum", async () => {
     await testDb.insert(schema.project).values({ displayNumber: 9002, projectId: 9002, title: "P" });
-    await testDb.insert(schema.session).values({ sessionId: 9002, projectId: 9002, name: "S" });
+    await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 9002, projectId: 9002, name: "S" });
     await testDb.insert(schema.asset).values({ assetId: 9002, projectId: 9002, name: "A" });
     await testDb
       .insert(schema.component)
@@ -133,7 +133,7 @@ describe("direct recording ingest constraints", () => {
   // project > session > master_video, plus the chain a video_clip needs
   const seedTargets = async () => {
     await testDb.insert(schema.project).values({ displayNumber: 9100, projectId: 9100, title: "P" });
-    await testDb.insert(schema.session).values({ sessionId: 9100, projectId: 9100, name: "S" });
+    await testDb.insert(schema.session).values({ displayNumber: 2, sessionId: 9100, projectId: 9100, name: "S" });
     await testDb
       .insert(schema.masterVideo)
       .values({ masterVideoId: 9100, sessionId: 9100, startEpoch: 0 });
@@ -250,5 +250,58 @@ describe("direct recording ingest constraints", () => {
       testDb.insert(schema.recordingIngestSegment).values(segment),
       /duplicate key|recording_ingest_segment_pk/i,
     );
+  });
+});
+
+// The ordinal is what a user reads and what every media key carries, so the
+// database refuses a row without one. The identity column is not a substitute.
+describe("ordinal columns are required", () => {
+  beforeAll(ensureTestDatabase);
+  afterAll(closeTestDatabase);
+
+  beforeEach(async () => {
+    await truncateTestDatabase();
+  });
+
+  it("rejects a project with no display number", async () => {
+    await expectDbRejection(
+      testDb.execute(sql`INSERT INTO project (title) VALUES ('no ordinal')`),
+      /null value in column "display_number"/i,
+    );
+  });
+
+  it("rejects a session with no display number", async () => {
+    await testDb
+      .insert(schema.project)
+      .values({ displayNumber: 1, projectId: 9200, title: "P" });
+
+    await expectDbRejection(
+      testDb.execute(sql`INSERT INTO session (project_id) VALUES (9200)`),
+      /null value in column "display_number"/i,
+    );
+  });
+
+  // A project cannot repeat an ordinal: the sibling row takes 1, so 1 is taken.
+  it("rejects a second session claiming an ordinal already used in the project", async () => {
+    await testDb
+      .insert(schema.project)
+      .values({ displayNumber: 1, projectId: 9201, title: "P" });
+    await testDb
+      .insert(schema.session)
+      .values({ displayNumber: 1, projectId: 9201, name: "S" });
+
+    await expectDbRejection(
+      testDb.insert(schema.session).values({ displayNumber: 1, projectId: 9201, name: "S2" }),
+      /duplicate key|uniq_session_project_display/i,
+    );
+
+    // a different project may use the same ordinal
+    await testDb
+      .insert(schema.project)
+      .values({ displayNumber: 2, projectId: 9202, title: "P2" });
+    await testDb
+      .insert(schema.session)
+      .values({ displayNumber: 1, projectId: 9202, name: "S" });
+    expect(await testDb.select().from(schema.session)).toHaveLength(2);
   });
 });

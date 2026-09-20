@@ -42,7 +42,7 @@ const seedHierarchy = async (withMaster = true) => {
     itemLabel: "JL-01",
     status: "pending",
   });
-  await testDb.insert(schema.session).values({ sessionId: 101, projectId: 1, name: "Run 1" });
+  await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 101, projectId: 1, name: "Run 1" });
   if (withMaster) {
     await testDb.insert(schema.masterVideo).values({
       masterVideoId: 1,

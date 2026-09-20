@@ -16,6 +16,7 @@ const app = appFor(testDb, resultRoutes);
 const seedResultContext = async () => {
   await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.session).values({
+    displayNumber: 1,
     sessionId: 101,
     projectId: 1,
     name: "Run 1",

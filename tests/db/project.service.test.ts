@@ -165,7 +165,7 @@ describe("project.service", () => {
     );
 
     const sessionRecord = await createSessionRecord(
-      { projectId: projectRecord!.projectId },
+      { projectId: projectRecord!.projectId, displayNumber: 1 },
       testDb,
     );
     const sessionItemRecord = await createSessionItemRecord(
@@ -266,6 +266,7 @@ describe("project.service", () => {
       const session = await testDb
         .insert(schema.session)
         .values({
+          displayNumber: 1,
           projectId: project!.projectId,
           name: "Session 1",
           startedAt: new Date(),
