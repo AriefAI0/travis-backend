@@ -99,6 +99,13 @@
       "when": 1789905715301,
       "tag": "0013_chunky_kid_colt",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789919399751,
+      "tag": "0014_third_rumiko_fujikawa",
+      "breakpoints": true
     }
   ]
 }

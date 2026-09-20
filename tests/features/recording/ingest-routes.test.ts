@@ -69,10 +69,21 @@ describe("direct ingest routes", () => {
     },
   };
 
+  // Still queueing is recorded, never run: the worker owns MinIO and FFmpeg.
+  const dispatched: Array<{ kind: "master" | "clip"; id: number }> = [];
+  const dispatch = {
+    master: (masterVideoId: number) => {
+      dispatched.push({ kind: "master", id: masterVideoId });
+    },
+    clip: (clipId: number) => {
+      dispatched.push({ kind: "clip", id: clipId });
+    },
+  };
+
   // only the direct ingest transport is mounted here
   const app = new Hono();
   app.onError(onError);
-  app.route("/", ingestRoutes(testDb, storage));
+  app.route("/", ingestRoutes(testDb, storage, dispatch));
 
   beforeAll(async () => {
     await ensureTestDatabase();
@@ -85,6 +96,7 @@ describe("direct ingest routes", () => {
 
   beforeEach(async () => {
     puts.length = 0;
+    dispatched.length = 0;
     await truncateTestDatabase();
     await seedDomain();
   });
@@ -157,11 +169,16 @@ describe("direct ingest routes", () => {
     expect(first.status).toBe(201);
     expect(first.body).toMatchObject({ replayed: false, sequence: 0, contiguousSequence: 0 });
     expect(puts).toHaveLength(1);
+    // one advancing commit queues that master's stills, once
+    const domain = admission.body.domain as { masterVideoId: number };
+    expect(dispatched).toEqual([{ kind: "master", id: domain.masterVideoId }]);
 
     const replay = await read(await postSegment(ingestId, ticket, body));
     expect(replay.status).toBe(200);
     expect(replay.body.replayed).toBe(true);
     expect(puts).toHaveLength(1);
+    // a byte-identical replay made no new grid point due
+    expect(dispatched).toHaveLength(1);
   });
 
   test("missing and wrong tickets fail", async () => {

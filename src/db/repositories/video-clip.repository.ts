@@ -1,7 +1,7 @@
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
-import { masterVideo, videoClip } from "../schema";
+import { masterVideo, recordingIngest, recordingIngestSegment, videoClip } from "../schema";
 
 export type VideoClipPlaybackRow = {
   clipId: number;
@@ -11,6 +11,8 @@ export type VideoClipPlaybackRow = {
   masterVideoEndEpoch: number | null;
   startOffsetMs: number;
   endOffsetMs: number | null;
+  // Object key of the clip's card still; null until the still job has run.
+  thumbnailKey: string | null;
 };
 
 export const createVideoClipRecord = async (
@@ -88,6 +90,7 @@ export const findVideoClipPlaybackRowById = async (
       masterVideoEndEpoch: masterVideo.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
+      thumbnailKey: videoClip.thumbnailKey,
     })
     .from(videoClip)
     .innerJoin(
@@ -115,6 +118,7 @@ export const listVideoClipPlaybackRowsByResultIds = async (
       masterVideoEndEpoch: masterVideo.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
+      thumbnailKey: videoClip.thumbnailKey,
     })
     .from(videoClip)
     .innerJoin(
@@ -142,6 +146,23 @@ export const updateVideoClipById = async (
 
   return updatedVideoClips[0] ?? null;
 };
+
+// Clips that hold at least one sealed segment but no card still yet. The job
+// decides nothing here: it takes the first segment and stores one still.
+export const listClipIdsWithThumbnailWork = async (
+  database: DbOrTx = db,
+): Promise<number[]> =>
+  (
+    await database
+      .selectDistinct({ clipId: recordingIngest.clipId })
+      .from(recordingIngest)
+      .innerJoin(videoClip, eq(videoClip.clipId, recordingIngest.clipId))
+      .innerJoin(
+        recordingIngestSegment,
+        eq(recordingIngestSegment.ingestId, recordingIngest.ingestId),
+      )
+      .where(and(isNotNull(recordingIngest.clipId), isNull(videoClip.thumbnailKey)))
+  ).map((row) => row.clipId!);
 
 export const deleteVideoClipById = async (
   clipId: number,

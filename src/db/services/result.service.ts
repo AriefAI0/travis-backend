@@ -3,7 +3,7 @@ import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
 import { AppError } from "../../lib/error";
-import { listResultImageSummariesByResultIds } from "./result-media.service";
+import { listResultImageSummariesByResultIds, mintTimelineThumbnailUrl } from "./result-media.service";
 import { listPlayableClipIds, playbackUrl } from "./recording-playback.service";
 import { getItemById } from "./structure.service";
 import { listSessionItemsByItemId, listSessionsByIds } from "./session.service";
@@ -525,9 +525,9 @@ export const getItemResultSidebar = async (
                   videoUrl: playableClipIds.has(clipPlayback.clipId)
                     ? playbackUrl({ kind: "clip", id: clipPlayback.clipId })
                     : null,
-                  // no clip still producer in the direct protocol; the card
+                  // the clip's own still once its job has run, else the card
                   // falls back to the result's first image
-                  thumbnailUrl: null,
+                  thumbnailUrl: await mintTimelineThumbnailUrl(clipPlayback.thumbnailKey),
                 }),
               ),
             ),
@@ -682,8 +682,8 @@ export const getResultEvidence = async (
       videoUrl: playableClipIds.has(clipPlayback.clipId)
         ? playbackUrl({ kind: "clip", id: clipPlayback.clipId })
         : null,
-      // no clip still producer in the direct protocol; the card falls back
-      thumbnailUrl: null,
+      // the clip's own still once its job has run, else the card falls back
+      thumbnailUrl: await mintTimelineThumbnailUrl(clipPlayback.thumbnailKey),
     })),
   );
 

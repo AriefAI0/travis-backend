@@ -417,6 +417,7 @@ describe("video.service", () => {
       durationMs: 30_000,
       startEpochMs: 1_760_000_320_000,
       endEpochMs: 1_760_000_350_000,
+    thumbnailKey: null,
     });
 
     const updatedVideoClip = await updateVideoClip(
@@ -490,6 +491,7 @@ describe("video.service", () => {
       durationMs: null,
       startEpochMs: 1_760_000_120_000,
       endEpochMs: null,
+    thumbnailKey: null,
     });
 
     const completedVideoClip = await updateVideoClip(

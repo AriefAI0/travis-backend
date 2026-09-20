@@ -1,10 +1,11 @@
-// Asynchronous thumbnails for a closed master: one poster frame plus a
-// filmstrip. Best effort by construction — the HLS playlist is built from
-// segment rows, so a still that never lands changes nothing about playback.
+// Thumbnails for a recording, written while it runs.
 //
-// No job row is kept. A closed master with no timeline rows is the whole
-// signal, so a run that dies mid-flight simply runs again on the next boot.
-// flow: closed master > sealed segments > local stills > dated keys > rows
+// One still per grid point (see thumbnail-grid.ts), taken from the segment that
+// covers it. A closed master additionally gets its poster frame. Best effort by
+// construction — the HLS playlist is built from segment rows, so a still that
+// never lands changes nothing about playback.
+//
+// flow: due grid points > fetch those segments > local stills > dated keys > rows
 
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -16,12 +17,17 @@ import { log } from "../../../lib/logger";
 import { minio } from "../../../lib/minio_storage/clients";
 import { filmstripLeafV2, posterLeafV2 } from "../../../lib/minio_storage/paths";
 import {
+  listClipsNeedingThumbnails,
   listMastersNeedingThumbnails,
+  loadClipStillSource,
   loadThumbnailSource,
+  recordClipStill,
   recordTimelineThumbnails,
-  type TimelineThumbnailInsert,
+  type ClipStillSource,
   type ThumbnailSource,
+  type TimelineThumbnailInsert,
 } from "../../../db/services/recording-thumbnail.service";
+import { dueSamples } from "./thumbnail-grid";
 
 // A still is a review aid, not an artifact: small enough to keep many.
 const STILL_WIDTH = 320;
@@ -32,10 +38,12 @@ const POSTER_AT_MS = 1_000;
 // storage reads and writes, and where the rows land.
 export type ThumbnailDeps = {
   loadSource: (masterVideoId: number) => Promise<ThumbnailSource | null>;
+  loadClipSource: (clipId: number) => Promise<ClipStillSource | null>;
   runFfmpeg: (command: string, args: string[], timeoutMs: number) => Promise<void>;
   fetchSegment: (objectKey: string, destination: string) => Promise<void>;
   putObject: (key: string, body: Uint8Array) => Promise<void>;
   recordRows: (rows: TimelineThumbnailInsert[]) => Promise<number>;
+  recordClipStill: (clipId: number, thumbnailKey: string) => Promise<void>;
 };
 
 // flow: spawn > collect stderr > kill at the deadline > settle once
@@ -74,20 +82,9 @@ const segmentPath = (directory: string, sequence: number): string =>
 
 const stillPath = (directory: string, label: string): string => path.join(directory, `${label}.jpg`);
 
-// One frame per sampled segment, spread across the recording, capped.
-export const filmstripSampleIndexes = (
-  segmentCount: number,
-  maxStills: number,
-): number[] => {
-  if (segmentCount <= 0 || maxStills <= 0) return [];
-  const wanted = Math.min(segmentCount, maxStills);
-  if (wanted === segmentCount) return Array.from({ length: segmentCount }, (_, index) => index);
-  const step = segmentCount / wanted;
-  return Array.from({ length: wanted }, (_, index) => Math.floor(index * step));
-};
-
 const defaultDeps: ThumbnailDeps = {
   loadSource: loadThumbnailSource,
+  loadClipSource: loadClipStillSource,
   runFfmpeg: runFfmpegBounded,
   fetchSegment: async (objectKey, destination) => {
     const stream = await minio.getObject(env.BUCKET_MEDIA, objectKey);
@@ -101,20 +98,72 @@ const defaultDeps: ThumbnailDeps = {
     });
   },
   recordRows: (rows) => recordTimelineThumbnails(rows),
+  recordClipStill: (clipId, thumbnailKey) => recordClipStill(clipId, thumbnailKey),
 };
 
-// Masters waiting or running. Observability only: the sets are the whole
-// state, and no row records it.
-export const pendingThumbnailJobs = (): number => queued.size + inFlight.size;
+// Masters and clips waiting or running. Observability only: the sets are the
+// whole state, and no row records it.
+export const pendingThumbnailJobs = (): number =>
+  queued.size + clipQueued.size + inFlight.size + clipInFlight.size;
+
+// Tests only: the queue is module state shared by every importer, so one file's
+// in-flight job would otherwise decide another file's counts.
+export const resetThumbnailQueue = (): void => {
+  queued.clear();
+  inFlight.clear();
+  clipQueued.clear();
+  clipInFlight.clear();
+};
 
 export type ThumbnailJobResult = {
-  masterVideoId: number
-  posterStored: boolean
-  stills: number
-  skipped: boolean
-}
+  masterVideoId: number;
+  posterStored: boolean;
+  stills: number;
+  skipped: boolean;
+};
 
-// flow: source > temp dir > segments > poster + stills > dated keys > rows
+export type ClipStillJobResult = {
+  clipId: number;
+  stillStored: boolean;
+  skipped: boolean;
+};
+
+// One still from one segment, scaled to `width`. Returns null when the frame
+// could not be read, which is a skip and never an error.
+const writeStill = async (
+  deps: ThumbnailDeps,
+  directory: string,
+  segmentFile: string,
+  label: string,
+  width: number,
+  atMs: number,
+): Promise<Uint8Array | null> => {
+  const file = stillPath(directory, label);
+
+  try {
+    await deps.runFfmpeg(
+      env.FFMPEG_PATH,
+      [
+        "-y",
+        ...(atMs > 0 ? ["-ss", String(atMs / 1000)] : []),
+        "-i", segmentFile,
+        "-frames:v", "1",
+        "-vf", `scale=${width}:-2`,
+        file,
+      ],
+      env.FFMPEG_TIMEOUT_MS,
+    );
+    return new Uint8Array(await readFile(file));
+  } catch (error) {
+    log.warn("thumbnail still failed", {
+      label,
+      err: String(error).slice(0, 200),
+    });
+    return null;
+  }
+};
+
+// flow: source > due points > fetch those segments > stills > dated keys > rows
 export const runThumbnailJob = async (
   masterVideoId: number,
   deps: ThumbnailDeps = defaultDeps,
@@ -124,70 +173,80 @@ export const runThumbnailJob = async (
     return { masterVideoId, posterStored: false, stills: 0, skipped: true };
   }
 
+  const due = dueSamples(
+    source.segments,
+    source.existingTimestamps,
+    env.THUMBNAIL_SAMPLE_BASE_MS,
+    env.THUMBNAIL_MAX_SAMPLES,
+  );
+  const posterDue = source.closed;
+
+  if (due.length === 0 && !posterDue) {
+    return { masterVideoId, posterStored: false, stills: 0, skipped: true };
+  }
+
   const directory = await mkdtemp(path.join(tmpdir(), `travis-thumb-${masterVideoId}-`));
   try {
-    // Every run reads exactly the segments it will use: no pass over the
-    // whole recording for a still nobody asked for.
-    const wanted = filmstripSampleIndexes(source.segments.length, env.THUMBNAIL_MAX_STILLS);
-    const used = wanted.map((index) => source.segments[index]!);
-    for (const segment of used) {
-      await deps.fetchSegment(segment.objectKey, segmentPath(directory, segment.sequence));
+    // Every run reads exactly the segments its due points land in: no pass over
+    // the whole recording for a still nobody asked for.
+    const bySequence = new Map(source.segments.map((row) => [row.sequence, row]));
+    const startBySequence = new Map<number, number>();
+    const wanted = new Set(due.map((row) => row.sequence));
+    let segmentStartMs = 0;
+
+    for (const segment of source.segments) {
+      startBySequence.set(segment.sequence, segmentStartMs);
+      segmentStartMs += segment.durationMs;
     }
 
-    const stored: Array<{ timestampMs: number; body: Uint8Array }> = [];
-    for (const index of wanted) {
-      const segment = source.segments[index]!;
-      const file = stillPath(directory, `still-${segment.sequence}`);
-      const offsetMs = source.segments
-        .slice(0, index)
-        .reduce((total, row) => total + row.durationMs, 0);
-      try {
-        await deps.runFfmpeg(
-          env.FFMPEG_PATH,
-          [
-            "-y",
-            "-i", segmentPath(directory, segment.sequence),
-            "-frames:v", "1",
-            "-vf", `scale=${STILL_WIDTH}:-2`,
-            file,
-          ],
-          env.FFMPEG_TIMEOUT_MS,
-        );
-        stored.push({ timestampMs: offsetMs, body: new Uint8Array(await readFile(file)) });
-      } catch (error) {
-        // One still failing must not cost the others, and must never touch
-        // playback: the playlist does not read this table.
-        log.warn("thumbnail still failed", {
-          masterVideoId,
-          sequence: segment.sequence,
-          err: String(error).slice(0, 200),
-        });
+    if (posterDue && source.segments[0]) {
+      wanted.add(source.segments[0].sequence);
+    }
+
+    for (const sequence of wanted) {
+      const segment = bySequence.get(sequence);
+      if (segment) {
+        await deps.fetchSegment(segment.objectKey, segmentPath(directory, sequence));
       }
     }
 
-    // The poster reads the first segment: the frame a review card wants.
+    const stored: Array<{ timestampMs: number; body: Uint8Array }> = [];
+
+    for (const sample of due) {
+      const sampleStartMs = startBySequence.get(sample.sequence);
+      if (sampleStartMs === undefined) continue;
+
+      const body = await writeStill(
+        deps,
+        directory,
+        segmentPath(directory, sample.sequence),
+        `still-${sample.timestampMs}`,
+        STILL_WIDTH,
+        // offset inside its own segment, so the frame is the grid point
+        sample.timestampMs - sampleStartMs,
+      );
+
+      if (body) stored.push({ timestampMs: sample.timestampMs, body });
+    }
+
+    // The poster is the closed recording's face, taken from its first segment.
     let posterStored = false;
-    const first = source.segments[0];
-    if (first) {
-      const posterFile = stillPath(directory, "poster");
-      try {
-        await deps.runFfmpeg(
-          env.FFMPEG_PATH,
-          [
-            "-y",
-            "-ss", String(POSTER_AT_MS / 1000),
-            "-i", segmentPath(directory, first.sequence),
-            "-frames:v", "1",
-            "-vf", `scale=${POSTER_WIDTH}:-2`,
-            posterFile,
-          ],
-          env.FFMPEG_TIMEOUT_MS,
-        );
+
+    if (posterDue && source.segments[0]) {
+      const first = source.segments[0];
+      const posterBody = await writeStill(
+        deps,
+        directory,
+        segmentPath(directory, first.sequence),
+        "poster",
+        POSTER_WIDTH,
+        POSTER_AT_MS,
+      );
+
+      if (posterBody) {
         const leaf = posterLeafV2(source.keyPrefix);
-        await deps.putObject(leaf.key, new Uint8Array(await readFile(posterFile)));
+        await deps.putObject(leaf.key, posterBody);
         posterStored = true;
-      } catch (error) {
-        log.warn("poster frame failed", { masterVideoId, err: String(error).slice(0, 200) });
       }
     }
 
@@ -215,54 +274,133 @@ export const runThumbnailJob = async (
   }
 };
 
+// One card still per clip, taken from its first sealed segment.
+export const runClipStillJob = async (
+  clipId: number,
+  deps: ThumbnailDeps = defaultDeps,
+): Promise<ClipStillJobResult> => {
+  const source = await deps.loadClipSource(clipId);
+  if (!source) {
+    return { clipId, stillStored: false, skipped: true };
+  }
+
+  const directory = await mkdtemp(path.join(tmpdir(), `travis-clip-still-${clipId}-`));
+  try {
+    const file = segmentPath(directory, 0);
+    await deps.fetchSegment(source.firstSegmentObjectKey, file);
+
+    const body = await writeStill(deps, directory, file, "clip", STILL_WIDTH, 0);
+    if (!body) {
+      return { clipId, stillStored: false, skipped: false };
+    }
+
+    const leaf = posterLeafV2(source.keyPrefix);
+    await deps.putObject(leaf.key, body);
+    await deps.recordClipStill(clipId, leaf.key);
+
+    log.info("clip still stored", { clipId });
+    return { clipId, stillStored: true, skipped: false };
+  } finally {
+    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+  }
+};
+
 /* =========================================================
    QUEUE
-   Bounded and in-process: one master at a time by default so
+   Bounded and in-process: one job at a time by default so
    FFmpeg never competes with itself for the machine.
 ========================================================= */
 
 const queued = new Set<number>();
 const inFlight = new Set<number>();
-let running = 0;
+const clipQueued = new Set<number>();
+const clipInFlight = new Set<number>();
 
-// Fire-and-forget. A master already queued or already running is dropped: one
-// close means one job, and a repeat close has nothing new to describe.
+// Running is what the in-flight sets hold: a counter would drift the moment a
+// job settles outside a reset.
+const runningCount = (): number => inFlight.size + clipInFlight.size;
+
+// Fire-and-forget. A master already waiting is dropped: that one run will see
+// whatever has arrived by the time it picks up. A master already running is
+// queued again, because the run in flight derived its due set before this
+// segment landed and would otherwise leave the tail unfilled.
 export const enqueueThumbnails = (masterVideoId: number, deps?: ThumbnailDeps): void => {
-  if (queued.has(masterVideoId) || inFlight.has(masterVideoId)) return;
+  if (queued.has(masterVideoId)) return;
   queued.add(masterVideoId);
   void pump(deps);
 };
 
+export const enqueueClipStill = (clipId: number, deps?: ThumbnailDeps): void => {
+  if (clipQueued.has(clipId)) return;
+  clipQueued.add(clipId);
+  void pump(deps);
+};
+
 const pump = async (deps?: ThumbnailDeps): Promise<void> => {
-  while (running < env.FFMPEG_CONCURRENCY && queued.size > 0) {
-    const [next] = queued;
-    queued.delete(next!);
-    inFlight.add(next!);
-    running += 1;
-    void runThumbnailJob(next!, deps)
+  while (runningCount() < env.FFMPEG_CONCURRENCY) {
+    // Never two runs for one target: a requeue waits for its own run to settle.
+    const nextMaster = [...queued].find((id) => !inFlight.has(id));
+    const nextClip = nextMaster === undefined ? [...clipQueued].find((id) => !clipInFlight.has(id)) : undefined;
+
+    if (nextMaster === undefined && nextClip === undefined) return;
+
+    if (nextMaster !== undefined) {
+      queued.delete(nextMaster);
+      inFlight.add(nextMaster);
+    } else {
+      clipQueued.delete(nextClip!);
+      clipInFlight.add(nextClip!);
+    }
+
+    const job =
+      nextMaster !== undefined
+        ? runThumbnailJob(nextMaster, deps)
+        : runClipStillJob(nextClip!, deps);
+
+    void job
       .catch((error) => {
         // Best effort: playback reads segment rows, never this table.
-        log.warn("thumbnail job failed", { masterVideoId: next, err: String(error).slice(0, 200) });
+        log.warn("thumbnail job failed", {
+          masterVideoId: nextMaster,
+          clipId: nextClip,
+          err: String(error).slice(0, 200),
+        });
       })
       .finally(() => {
-        running -= 1;
-        inFlight.delete(next!);
+        if (nextMaster !== undefined) {
+          inFlight.delete(nextMaster);
+        } else {
+          clipInFlight.delete(nextClip!);
+        }
+
         void pump(deps);
       });
   }
 };
 
-// Boot scan: closed masters with no timeline rows. Cheap, safe to repeat, and
-// the reason no job row is needed.
+// Boot scan: every recording whose grid is not filled. Cheap, safe to repeat,
+// and the reason no job row is needed.
 export const sweepMissingThumbnails = async (deps?: ThumbnailDeps): Promise<number> => {
-  const missing = await listMastersNeedingThumbnails();
-  for (const masterVideoId of missing) {
+  const masters = await listMastersNeedingThumbnails();
+
+  for (const masterVideoId of masters) {
     enqueueThumbnails(masterVideoId, deps);
   }
-  if (missing.length > 0) {
-    log.info("thumbnail sweep queued closed masters", { count: missing.length });
+
+  const clips = await listClipsNeedingThumbnails();
+
+  for (const clipId of clips) {
+    enqueueClipStill(clipId, deps);
   }
-  return missing.length;
+
+  if (masters.length > 0 || clips.length > 0) {
+    log.info("thumbnail sweep queued recordings", {
+      masters: masters.length,
+      clips: clips.length,
+    });
+  }
+
+  return masters.length + clips.length;
 };
 
 let sweepStarted = false;

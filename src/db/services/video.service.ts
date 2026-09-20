@@ -85,6 +85,8 @@ export type VideoClipPlayback = {
   durationMs: number | null;
   startEpochMs: number;
   endEpochMs: number | null;
+  // object key of the clip's card still; null until the still job has run
+  thumbnailKey: string | null;
 };
 
 export type ProjectMasterVideo = {
@@ -111,6 +113,7 @@ type PlaybackEventRow = {
   endOffsetMs: number | null;
   remarks: string | null;
   imageCount: number;
+  thumbnailKey: string | null;
 };
 
 const validateMasterVideoTimeRange = (
@@ -363,6 +366,7 @@ export const getMasterVideoPlaybackData = async (
       endOffsetMs: videoClip.endOffsetMs,
       remarks: result.remarks,
       imageCount: count(resultImage.imageId),
+      thumbnailKey: videoClip.thumbnailKey,
     })
     .from(videoClip)
     .innerJoin(result, eq(result.resultId, videoClip.resultId))
@@ -382,6 +386,7 @@ export const getMasterVideoPlaybackData = async (
       videoClip.startOffsetMs,
       videoClip.endOffsetMs,
       result.remarks,
+      videoClip.thumbnailKey,
     )
     .orderBy(asc(videoClip.startOffsetMs), asc(videoClip.clipId));
 
@@ -442,25 +447,27 @@ export const getMasterVideoPlaybackData = async (
         url: await mintTimelineThumbnailUrl(thumbnail.storageStem),
       })),
     ),
-    events: (eventRows as PlaybackEventRow[]).map((eventRow) => ({
-      eventId: `clip-${eventRow.clipId}`,
-      resultId: eventRow.resultId,
-      clipId: eventRow.clipId,
-      inspectionTypeCode: eventRow.inspectionTypeCode,
-      itemLabel: eventRow.itemLabel,
-      assetName: eventRow.assetName,
-      componentName: eventRow.componentName,
-      startOffsetMs: eventRow.startOffsetMs,
-      endOffsetMs: eventRow.endOffsetMs,
-      remarks: eventRow.remarks,
-      images: imagesByResultId.get(eventRow.resultId) ?? [],
-      imageCount: eventRow.imageCount,
-      videoUrl: playableClipIds.has(eventRow.clipId)
-        ? playbackUrl({ kind: "clip", id: eventRow.clipId })
-        : null,
-      // clip stills land with the thumbnail job; no producer yet
-      thumbnailUrl: null,
-    })),
+    events: await Promise.all(
+      (eventRows as PlaybackEventRow[]).map(async (eventRow) => ({
+        eventId: `clip-${eventRow.clipId}`,
+        resultId: eventRow.resultId,
+        clipId: eventRow.clipId,
+        inspectionTypeCode: eventRow.inspectionTypeCode,
+        itemLabel: eventRow.itemLabel,
+        assetName: eventRow.assetName,
+        componentName: eventRow.componentName,
+        startOffsetMs: eventRow.startOffsetMs,
+        endOffsetMs: eventRow.endOffsetMs,
+        remarks: eventRow.remarks,
+        images: imagesByResultId.get(eventRow.resultId) ?? [],
+        imageCount: eventRow.imageCount,
+        videoUrl: playableClipIds.has(eventRow.clipId)
+          ? playbackUrl({ kind: "clip", id: eventRow.clipId })
+          : null,
+        // the clip's own still once its job has run; null until then
+        thumbnailUrl: await mintTimelineThumbnailUrl(eventRow.thumbnailKey),
+      })),
+    ),
   };
 };
 

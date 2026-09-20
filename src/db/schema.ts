@@ -526,6 +526,8 @@ export const videoClip = pgTable(
 
     startOffsetMs: integer("start_offset_ms").notNull(),
     endOffsetMs: integer("end_offset_ms"),
+    // Object key of the clip's own card still; null until the still job runs.
+    thumbnailKey: text("thumbnail_key"),
     lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),

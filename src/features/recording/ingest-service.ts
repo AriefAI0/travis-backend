@@ -29,7 +29,7 @@ import { findResultById } from "../../db/repositories/result.repository";
 import { findItemById } from "../../db/repositories/item.repository";
 import { findSessionItemById } from "../../db/repositories/session-item.repository";
 import { createSession } from "../../db/services/session.service";
-import { enqueueThumbnails } from "./jobs/thumbnails";
+import { enqueueClipStill, enqueueThumbnails } from "./jobs/thumbnails";
 
 // native splitmuxsink target the client aims for; measured durations arrive per segment
 export const SEGMENT_TARGET_MS = 2000;
@@ -391,16 +391,29 @@ const runClose = async (
   };
 };
 
+// Stills are queued after a close commits. Injectable so tests never run the
+// real job: the worker owns MinIO and FFmpeg, and an ingest test should touch
+// neither.
+export type ThumbnailDispatch = {
+  master: (masterVideoId: number) => void;
+  clip: (clipId: number) => void;
+};
+
+export const defaultThumbnailDispatch: ThumbnailDispatch = {
+  master: enqueueThumbnails,
+  clip: enqueueClipStill,
+};
+
 // explicit close from the client: the ticket proves the caller owns the capture
 export const closeIngest = async (
-  input: { ingestId: number; ticket: string },
+  input: { ingestId: number; ticket: string; dispatch?: ThumbnailDispatch },
   database?: DbOrTx,
 ): Promise<IngestCloseResult> => {
   const run = async (tx: DbOrTx) =>
     (await runClose(input.ingestId, { ticket: input.ticket }, tx))!;
   const closed = database ? await run(database) : await db.transaction(run);
   if (closed.thumbnailMasterVideoId !== null) {
-    enqueueThumbnails(closed.thumbnailMasterVideoId);
+    (input.dispatch ?? defaultThumbnailDispatch).master(closed.thumbnailMasterVideoId);
   }
   return closed.result;
 };
@@ -410,13 +423,14 @@ export const closeIdleIngest = async (
   ingestId: number,
   idleCutoff: Date,
   database?: DbOrTx,
+  dispatch: ThumbnailDispatch = defaultThumbnailDispatch,
 ): Promise<IngestCloseResult | null> => {
   const run = (tx: DbOrTx) => runClose(ingestId, { idleCutoff }, tx);
   const closed = database ? await run(database) : await db.transaction(run);
   if (closed === null) return null;
   // A swept close mints the same thumbnails an explicit one does.
   if (closed.thumbnailMasterVideoId !== null) {
-    enqueueThumbnails(closed.thumbnailMasterVideoId);
+    dispatch.master(closed.thumbnailMasterVideoId);
   }
   return closed.result;
 };
@@ -592,6 +606,10 @@ export type SegmentStoreOutcome = {
   // duration of the contiguous prefix after this commit
   durationMs: number;
   replayed: boolean;
+  // The target, so the caller can queue that recording's stills after commit.
+  kind: "master" | "clip";
+  masterVideoId: number | null;
+  clipId: number | null;
 };
 
 // every segment and the close stamp freeze on this lock, so they serialize
@@ -695,6 +713,9 @@ export const storeIngestSegment = async (
         contiguousSequence: ingest.contiguousSequence,
         durationMs: ingest.durationMs ?? 0,
         replayed: true,
+        kind: ingest.kind,
+        masterVideoId: ingest.masterVideoId,
+        clipId: ingest.clipId,
       };
     }
 
@@ -732,6 +753,9 @@ export const storeIngestSegment = async (
       contiguousSequence: summary.contiguousSequence,
       durationMs: summary.durationMs,
       replayed: false,
+      kind: ingest.kind,
+      masterVideoId: ingest.masterVideoId,
+      clipId: ingest.clipId,
     };
   };
 

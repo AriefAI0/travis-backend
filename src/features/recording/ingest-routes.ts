@@ -13,6 +13,7 @@ import { ok } from "../../lib/response";
 import {
   admitIngest,
   closeIngest,
+  defaultThumbnailDispatch,
   getIngestStatus,
   minioSegmentStorage,
   parseBearerToken,
@@ -21,6 +22,7 @@ import {
   SEGMENT_MAX_BYTES,
   storeIngestSegment,
   type SegmentStorage,
+  type ThumbnailDispatch,
 } from "./ingest-service";
 
 const admissionSchema = z.discriminatedUnion("kind", [
@@ -64,8 +66,12 @@ const readCappedBody = async (c: Context, cap: number): Promise<Uint8Array> => {
   return body;
 };
 
-// Factory form: tests inject the test db and a fake storage.
-export const ingestRoutes = (database?: DbOrTx, storage: SegmentStorage = minioSegmentStorage) => {
+// Factory form: tests inject the test db, a fake storage, and a dispatch spy.
+export const ingestRoutes = (
+  database?: DbOrTx,
+  storage: SegmentStorage = minioSegmentStorage,
+  dispatch: ThumbnailDispatch = defaultThumbnailDispatch,
+) => {
   const routes = new Hono();
 
   // admission mints identity, so it alone carries the deployment gate
@@ -101,6 +107,19 @@ export const ingestRoutes = (database?: DbOrTx, storage: SegmentStorage = minioS
       },
       database,
     );
+    // After the commit, never inside it: stills are best effort and must not
+    // hold the segment response. Only a commit that advanced the prefix can
+    // have made a new grid point due.
+    if (!outcome.replayed && outcome.sequence === outcome.contiguousSequence) {
+      if (outcome.kind === "master" && outcome.masterVideoId !== null) {
+        dispatch.master(outcome.masterVideoId);
+      }
+
+      if (outcome.kind === "clip" && outcome.clipId !== null) {
+        dispatch.clip(outcome.clipId);
+      }
+    }
+
     // a byte-identical replay is a 200, a fresh object is a 201
     return ok(c, outcome, outcome.replayed ? 200 : 201);
   });
@@ -108,7 +127,7 @@ export const ingestRoutes = (database?: DbOrTx, storage: SegmentStorage = minioS
   routes.post("/api/v2/ingests/:ingestId/close", async (c) => {
     const ingestId = parseId(c, "ingestId");
     const ticket = parseBearerToken(c.req.header("authorization") ?? null);
-    const result = await closeIngest({ ingestId, ticket }, database);
+    const result = await closeIngest({ ingestId, ticket, dispatch }, database);
     return ok(c, result);
   });
 

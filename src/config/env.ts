@@ -27,8 +27,10 @@ const schema = z.object({
   // One FFmpeg run may not outlive this. A hung encoder is killed, never
   // waited on: thumbnails are best effort and must not pin a worker slot.
   FFMPEG_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
-  // Still frames a filmstrip may produce for one master.
-  THUMBNAIL_MAX_STILLS: z.coerce.number().int().positive().default(20),
+  // Filmstrip grid: one still per interval while the recording is short, the
+  // interval doubling as it grows so the grid never passes the sample budget.
+  THUMBNAIL_SAMPLE_BASE_MS: z.coerce.number().int().positive().default(10_000),
+  THUMBNAIL_MAX_SAMPLES: z.coerce.number().int().positive().default(300),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });

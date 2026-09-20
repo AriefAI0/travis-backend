@@ -95,6 +95,13 @@ const pinIngestClock = async (ingestId: number, openedAt: Date, lastSegmentAt: D
     .where(eq(schema.recordingIngest.ingestId, ingestId));
 };
 
+// Stills are never run here: the worker owns MinIO and FFmpeg, and this file
+// only proves lifecycle facts.
+const noThumbnails = {
+  master: () => undefined,
+  clip: () => undefined,
+};
+
 describe("direct ingest lifecycle", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
@@ -155,7 +162,7 @@ describe("direct ingest lifecycle", () => {
     await storeSegment(admission.ingestId, admission.ticket, 3, 2000);
 
     const closed = await closeIngest(
-      { ingestId: admission.ingestId, ticket: admission.ticket },
+      { ingestId: admission.ingestId, ticket: admission.ticket, dispatch: noThumbnails },
       testDb,
     );
 
@@ -179,11 +186,11 @@ describe("direct ingest lifecycle", () => {
     await storeSegment(admission.ingestId, admission.ticket, 0);
 
     const first = await closeIngest(
-      { ingestId: admission.ingestId, ticket: admission.ticket },
+      { ingestId: admission.ingestId, ticket: admission.ticket, dispatch: noThumbnails },
       testDb,
     );
     const replay = await closeIngest(
-      { ingestId: admission.ingestId, ticket: admission.ticket },
+      { ingestId: admission.ingestId, ticket: admission.ticket, dispatch: noThumbnails },
       testDb,
     );
 
@@ -198,7 +205,8 @@ describe("direct ingest lifecycle", () => {
     const other = await admitMaster();
 
     await expect(
-      closeIngest({ ingestId: admission.ingestId, ticket: other.ticket }, testDb),
+      closeIngest(
+      { ingestId: admission.ingestId, ticket: other.ticket, dispatch: noThumbnails }, testDb),
     ).rejects.toThrow(/does not match this ingest/i);
 
     const [ingest] = await testDb
@@ -211,7 +219,8 @@ describe("direct ingest lifecycle", () => {
   test("later uploads to a closed ingest answer 410", async () => {
     const admission = await admitMaster();
     await storeSegment(admission.ingestId, admission.ticket, 0);
-    await closeIngest({ ingestId: admission.ingestId, ticket: admission.ticket }, testDb);
+    await closeIngest(
+      { ingestId: admission.ingestId, ticket: admission.ticket, dispatch: noThumbnails }, testDb);
 
     await expect(
       storeSegment(admission.ingestId, admission.ticket, 1),
@@ -233,7 +242,8 @@ describe("direct ingest lifecycle", () => {
 
     await storeSegment(clip.ingestId, clip.ticket, 0, 2000);
     await storeSegment(clip.ingestId, clip.ticket, 1, 1500);
-    const closed = await closeIngest({ ingestId: clip.ingestId, ticket: clip.ticket }, testDb);
+    const closed = await closeIngest(
+      { ingestId: clip.ingestId, ticket: clip.ticket, dispatch: noThumbnails }, testDb);
 
     expect(closed.finalSequence).toBe(1);
     expect(closed.durationMs).toBe(3500);
