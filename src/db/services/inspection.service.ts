@@ -12,8 +12,7 @@ import {
 } from "./session.service";
 import { getAssetById, getComponentById, getItemById } from "./structure.service";
 import {
-  RECORDING_PERSISTENCE_STATUS,
-  listMasterVideosBySessionId,
+  findRecordingMasterBySessionId,
   listVideoClipsByResultId,
 } from "./video.service";
 import {
@@ -95,12 +94,9 @@ export const resolveDenormIds = async (sessionItemId: number, database?: DbOrTx)
   };
 };
 
-// the session MUST own a master on 'recording' — no master, no inspection
+// the session MUST have a master capturing now — no open ingest, no inspection
 export const requireRecordingMaster = async (sessionId: number, database?: DbOrTx) => {
-  const masters = await listMasterVideosBySessionId(sessionId, database);
-  const recording = masters.find(
-    (m) => m.recordingStatus === RECORDING_PERSISTENCE_STATUS.recording,
-  );
+  const recording = await findRecordingMasterBySessionId(sessionId, database);
   if (!recording) {
     throw new AppError(
       409,

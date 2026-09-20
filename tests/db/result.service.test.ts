@@ -1490,8 +1490,7 @@ describe("result.service", () => {
       const masterVideo = await createMasterVideo(
         {
           sessionId: session.sessionId,
-          storageStem: `file://video_${result!.resultId}.mkv`,
-          startEpoch: Math.floor(Date.now() / 1000),
+          startEpoch: Math.floor(Date.now() / 1000)
         },
         testDb,
       );
@@ -3214,7 +3213,7 @@ describe("result.service", () => {
       );
 
       const masterVideo = await createMasterVideo(
-        { sessionId: session.sessionId, storageStem: "p1/s1/master_1", startEpoch: 1000 },
+        { sessionId: session.sessionId, startEpoch: 1000 },
         testDb,
       );
       await createVideoClip(

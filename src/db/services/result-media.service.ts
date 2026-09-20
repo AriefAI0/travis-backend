@@ -1,4 +1,5 @@
 import type { ItemResultSidebarImage } from "../../types/api";
+import { env } from "../../config/env";
 import { clipLeaves, snipImages } from "../../lib/minio_storage/paths";
 import { mintGetUrl } from "../../lib/minio_storage/mint";
 import type { DbOrTx } from "../client";
@@ -21,6 +22,11 @@ export const mintImageGetUrl = (row: {
   const leaf = row.hasAnnotated ? leaves.annotated : leaves.raw;
   return mintGetUrl(leaf.bucket, leaf.key);
 };
+
+// Card still for a master list row: the thumbnail job stores the object key
+// itself, so the read mints straight from it. Null until the job has run.
+export const mintTimelineThumbnailUrl = async (thumbnailKey: string | null) =>
+  thumbnailKey ? mintGetUrl(env.BUCKET_MEDIA, thumbnailKey) : null;
 
 // card still for a master or a clip — ffmpeg_finalize writes it beside the mkv.
 // Same gate as the video: the poster is produced by the same finalize run, so

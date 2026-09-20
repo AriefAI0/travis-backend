@@ -297,13 +297,10 @@ export type ProjectRecordingListItem = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
-  storageStem: string | null;
   startEpoch: number; // epoch seconds, as stored
   endEpoch: number | null;
-  recordingStatus: string;
-  fileSize: number | null;
   durationMs: number | null;
-  // presigned card still; null until the master finalizes
+  // presigned card still from the timeline job; null until it has run
   thumbnailUrl: string | null;
 };
 
@@ -374,19 +371,18 @@ export type MasterVideoPlaybackEvent = {
 // session sibling of the opened master video (not a camera-angle source)
 export type MasterVideoSessionRecording = {
   masterVideoId: number;
-  storageStem: string | null;
-  recordingStatus: string;
+  startEpoch: number;
+  endEpoch: number | null;
+  durationMs: number | null;
 };
 
 export type MasterVideoPlaybackData = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
-  storageStem: string | null;
   startEpoch: number;
   endEpoch: number | null;
   durationMs: number | null;
-  recordingStatus: string;
   // relative playback path carrying a scoped token; null until segment zero is
   // committed. Optional by design: the route mints it, the service never mints.
   hlsUrl?: string | null;

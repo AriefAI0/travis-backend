@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, notExists, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, notExists, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { masterVideo, timelineThumbnail } from "../schema";
@@ -36,6 +36,38 @@ export const createMasterVideoTimelineThumbnailRecords = async (
   }
 
   return database.insert(timelineThumbnail).values(data).returning();
+};
+
+// Card face for a master list: the earliest still per master, one batched
+// query. The key column holds the object key the thumbnail job wrote.
+export const listFirstTimelineThumbnailKeysByMasterVideoIds = async (
+  masterVideoIdList: number[],
+  database: DbOrTx = db,
+): Promise<Map<number, string>> => {
+  const keysByMasterVideoId = new Map<number, string>();
+
+  if (masterVideoIdList.length === 0) {
+    return keysByMasterVideoId;
+  }
+
+  const rows = await database
+    .select({
+      masterVideoId: timelineThumbnail.masterVideoId,
+      storageStem: timelineThumbnail.storageStem,
+      timestampMs: timelineThumbnail.timestampMs,
+    })
+    .from(timelineThumbnail)
+    .where(inArray(timelineThumbnail.masterVideoId, masterVideoIdList))
+    .orderBy(asc(timelineThumbnail.masterVideoId), asc(timelineThumbnail.timestampMs));
+
+  for (const row of rows) {
+    // ordered by timestamp, so the first row per master wins
+    if (!keysByMasterVideoId.has(row.masterVideoId)) {
+      keysByMasterVideoId.set(row.masterVideoId, row.storageStem);
+    }
+  }
+
+  return keysByMasterVideoId;
 };
 
 export const listMasterVideoTimelineThumbnailRecordsByMasterVideoId = async (

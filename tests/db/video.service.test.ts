@@ -23,7 +23,6 @@ import {
   listVideoClips,
   listVideoClipsByMasterVideoId,
   listVideoClipsByResultId,
-  markMasterVideoFinalized,
   replaceMasterVideoTimelineThumbnails,
   updateMasterVideo,
   updateVideoClip,
@@ -155,9 +154,8 @@ describe("video.service", () => {
     const createdMasterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        storageStem: " file://inspection-videos/cvi-day-1.mp4 ",
         startEpoch: 1_760_000_000,
-        endEpoch: 1_760_003_600,
+        endEpoch: 1_760_003_600
       },
       testDb,
     );
@@ -165,9 +163,8 @@ describe("video.service", () => {
     const secondMasterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        storageStem: "file://inspection-videos/cvi-day-2.mp4",
         startEpoch: 1_760_086_400,
-        endEpoch: null,
+        endEpoch: null
       },
       testDb,
     );
@@ -175,16 +172,14 @@ describe("video.service", () => {
     const thirdMasterVideo = await createMasterVideo(
       {
         sessionId: 102,
-        storageStem: "file://inspection-videos/cp-day-1.mp4",
         startEpoch: 1_760_172_800,
-        endEpoch: null,
+        endEpoch: null
       },
       testDb,
     );
 
     expect(createdMasterVideo).toMatchObject({
       sessionId: 101,
-      storageStem: "file://inspection-videos/cvi-day-1.mp4",
       startEpoch: 1_760_000_000,
       endEpoch: 1_760_003_600,
     });
@@ -193,7 +188,8 @@ describe("video.service", () => {
     expect(
       await getMasterVideoById(createdMasterVideo!.masterVideoId, testDb),
     ).toMatchObject({
-      storageStem: "file://inspection-videos/cvi-day-1.mp4",
+      sessionId: 101,
+      startEpoch: 1_760_000_000,
     });
 
     const sessionMasterVideos = await listMasterVideosBySessionId(101, testDb);
@@ -233,16 +229,14 @@ describe("video.service", () => {
     });
   });
 
-  it("lists master videos by project id with session names and file names", async () => {
+  it("lists master videos by project id with session names and timing facts", async () => {
     await seedProjectRecordingContext();
 
     const firstProjectOldRecording = await createMasterVideo(
       {
         sessionId: 101,
-        storageStem:
-          "C:\\Users\\arief\\Videos\\Travis\\recordings\\project-1\\session-001_20260508_100000.mkv",
         startEpoch: 1_768_000_000,
-        endEpoch: 1_768_000_500,
+        endEpoch: 1_768_000_500
       },
       testDb,
     );
@@ -250,10 +244,8 @@ describe("video.service", () => {
     const firstProjectNewRecording = await createMasterVideo(
       {
         sessionId: 102,
-        storageStem:
-          "C:\\Users\\arief\\Videos\\Travis\\recordings\\project-1\\session-002_20260508_110000.mkv",
         startEpoch: 1_768_003_600,
-        endEpoch: null,
+        endEpoch: null
       },
       testDb,
     );
@@ -261,10 +253,8 @@ describe("video.service", () => {
     await createMasterVideo(
       {
         sessionId: 201,
-        storageStem:
-          "C:\\Users\\arief\\Videos\\Travis\\recordings\\project-2\\session-001_20260508_120000.mkv",
         startEpoch: 1_768_007_200,
-        endEpoch: null,
+        endEpoch: null
       },
       testDb,
     );
@@ -278,68 +268,49 @@ describe("video.service", () => {
         masterVideoId: firstProjectOldRecording!.masterVideoId,
         sessionId: 101,
         sessionName: "session-001",
-        storageStem:
-          "C:\\Users\\arief\\Videos\\Travis\\recordings\\project-1\\session-001_20260508_100000.mkv",
         startEpoch: 1_768_000_000,
         endEpoch: 1_768_000_500,
-        recordingStatus: "finalized",
-        fileSize: null,
         durationMs: null,
-        // finalized, so the still mints; exact url is a signed, TTL-bearing string
-        thumbnailUrl: expect.any(String),
+        // no timeline still has run, so the card face is absent
+        thumbnailUrl: null,
       },
       {
         masterVideoId: firstProjectNewRecording!.masterVideoId,
         sessionId: 102,
         sessionName: "session-002",
-        storageStem:
-          "C:\\Users\\arief\\Videos\\Travis\\recordings\\project-1\\session-002_20260508_110000.mkv",
         startEpoch: 1_768_003_600,
         endEpoch: null,
-        recordingStatus: "finalized",
-        fileSize: null,
         durationMs: null,
-        // finalized, so the still mints; exact url is a signed, TTL-bearing string
-        thumbnailUrl: expect.any(String),
+        thumbnailUrl: null,
       },
     ]);
   });
 
-  it("master thumbnailUrl gates on finalized and on a present stem", async () => {
+  it("master thumbnailUrl mints the earliest timeline still", async () => {
     await seedVideoContext();
 
-    // still recording: ffmpeg_finalize has not run, so no poster object exists
-    const live = await createMasterVideo(
-      { sessionId: 101, storageStem: "p1/s101/master_50", startEpoch: 1_768_000_000 },
-      testDb,
-    );
-    await updateMasterVideo(
-      live!.masterVideoId,
-      { recordingStatus: "recording" },
+    const still = await createMasterVideo(
+      { sessionId: 101, startEpoch: 1_768_000_000 },
       testDb,
     );
 
-    // finalized but stem-less: nothing was written, so nothing mints
-    const stemless = await createMasterVideo(
-      { sessionId: 102, storageStem: null, startEpoch: 1_768_000_100 },
+    // the thumbnail job has not run: no still, so no card face
+    const before = await listMasterVideosByProjectId(1, testDb);
+    expect(before[0]!.thumbnailUrl).toBeNull();
+
+    // two stills land out of order: the earliest one is the card face
+    await replaceMasterVideoTimelineThumbnails(
+      still!.masterVideoId,
+      [
+        { masterVideoId: still!.masterVideoId, timestampMs: 1_800, width: 640, height: 360, sizeBytes: 1_024, storageStem: "1/1/101/2026/05/08/master/50/timeline/0000001800.jpg" },
+        { masterVideoId: still!.masterVideoId, timestampMs: 1_500, width: 640, height: 360, sizeBytes: 1_024, storageStem: "1/1/101/2026/05/08/master/50/timeline/0000001500.jpg" },
+      ],
       testDb,
     );
 
-    const rows = await listMasterVideosByProjectId(1, testDb);
-    const byId = new Map(rows.map((row) => [row.masterVideoId, row]));
-    expect(byId.get(live!.masterVideoId)!.thumbnailUrl).toBeNull();
-    expect(byId.get(stemless!.masterVideoId)!.thumbnailUrl).toBeNull();
-
-    // finalized with a stem: mints the poster sibling in the thumbs bucket
-    await updateMasterVideo(
-      live!.masterVideoId,
-      { recordingStatus: "finalized" },
-      testDb,
-    );
     const after = await listMasterVideosByProjectId(1, testDb);
-    const minted = after.find((row) => row.masterVideoId === live!.masterVideoId)!;
-    expect(minted.thumbnailUrl).toContain("travis-thumbs");
-    expect(minted.thumbnailUrl).toContain("p1/s101/master_50/poster.jpg");
+    expect(after[0]!.thumbnailUrl).toContain("travis-media");
+    expect(after[0]!.thumbnailUrl).toContain("0000001500.jpg");
   });
 
   it("supports CRUD for video clips and exposes playback metadata", async () => {
@@ -348,9 +319,8 @@ describe("video.service", () => {
     const masterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        storageStem: "file://inspection-videos/cvi-day-1.mp4",
         startEpoch: 1_760_000_000,
-        endEpoch: 1_760_003_600,
+        endEpoch: 1_760_003_600
       },
       testDb,
     );
@@ -476,9 +446,8 @@ describe("video.service", () => {
     const masterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        storageStem: "p1/s101/master_1",
         startEpoch: 1_760_000_000,
-        endEpoch: 1_760_003_600,
+        endEpoch: 1_760_003_600
       },
       testDb,
     );
@@ -537,9 +506,8 @@ describe("video.service", () => {
     const masterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        storageStem: "file://inspection-videos/mgi-day-1.mp4",
         startEpoch: 1_760_000_000,
-        endEpoch: 1_760_003_600,
+        endEpoch: 1_760_003_600
       },
       testDb,
     );
@@ -577,9 +545,8 @@ describe("video.service", () => {
       createMasterVideo(
         {
           sessionId: 101,
-          storageStem: "file://inspection-videos/invalid.mp4",
           startEpoch: 1_760_000_000,
-          endEpoch: 1_759_999_999,
+          endEpoch: 1_759_999_999
         },
         testDb,
       ),
@@ -588,9 +555,8 @@ describe("video.service", () => {
     const masterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        storageStem: "file://inspection-videos/cvi-day-1.mp4",
         startEpoch: 1_760_000_000,
-        endEpoch: 1_760_000_100,
+        endEpoch: 1_760_000_100
       },
       testDb,
     );
@@ -626,9 +592,8 @@ describe("video.service", () => {
     const masterVideo = await createMasterVideo(
       {
         sessionId: 101,
-        storageStem: "p1/s101/master_1",
         startEpoch: 1_760_000_000,
-        endEpoch: 1_760_003_600,
+        endEpoch: 1_760_003_600
       },
       testDb,
     );
@@ -643,53 +608,22 @@ describe("video.service", () => {
       testDb,
     );
 
-    await markMasterVideoFinalized(
-      masterVideo!.masterVideoId,
-      { durationMs: 3_600_000, fileSize: null, endEpoch: 1_760_003_600 },
-      testDb,
-    );
-
     const playback = await getMasterVideoPlaybackData(1, masterVideo!.masterVideoId, testDb);
     expect(playback!.thumbnails.map((t) => t.timestampMs)).toEqual([1_500, 1_800]);
     expect(playback!.thumbnails.every((t) => t.storageStem === "p1/s101/master_1")).toBe(true);
   });
 
-  it("playback no longer gates on recording status or a storage stem", async () => {
+  it("playback answers for a master with no outcome facts at all", async () => {
     await seedVideoContext();
 
-    // still marked recording: the read must answer, not throw
     const masterVideo = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_760_000_000,
-        recordingStatus: "recording",
-      },
+      { sessionId: 101, startEpoch: 1_760_000_000 },
       testDb,
     );
 
     const playback = await getMasterVideoPlaybackData(1, masterVideo!.masterVideoId, testDb);
-    expect(playback!.recordingStatus).toBe("recording");
-    expect(playback!.storageStem).toBeNull();
+    expect(playback!.masterVideoId).toBe(masterVideo!.masterVideoId);
     expect(playback!.events).toEqual([]);
-  });
-
-  it("file_size accepts a value above the 2 GB integer ceiling", async () => {
-    await seedVideoContext();
-
-    const masterVideo = await createMasterVideo(
-      { sessionId: 101, storageStem: "p1/s101/master_2", startEpoch: 1_760_000_000 },
-      testDb,
-    );
-
-    const threePointFiveGB = 3_500_000_000; // int4 caps at 2_147_483_647
-    await markMasterVideoFinalized(
-      masterVideo!.masterVideoId,
-      { durationMs: 1_000, fileSize: threePointFiveGB, endEpoch: 1_760_000_001 },
-      testDb,
-    );
-
-    expect(
-      (await getMasterVideoById(masterVideo!.masterVideoId, testDb))!.fileSize,
-    ).toBe(threePointFiveGB);
+    expect(playback!.thumbnails).toEqual([]);
   });
 });

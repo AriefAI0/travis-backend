@@ -60,16 +60,17 @@ const seedHierarchy = async () => {
   return { sessionId: session.sessionId };
 };
 
-// master on 'recording' — the state an inspection start requires
-const seedRecordingMaster = (sessionId: number) =>
-  createMasterVideo(
-    {
-      sessionId,
-      startEpoch: 1000,
-      recordingStatus: RECORDING_PERSISTENCE_STATUS.recording,
-    },
-    testDb,
-  );
+// master with an open ingest — the state an inspection start requires
+const seedRecordingMaster = async (sessionId: number) => {
+  const master = await createMasterVideo({ sessionId, startEpoch: 1000 }, testDb);
+  await testDb.insert(schema.recordingIngest).values({
+    kind: "master",
+    masterVideoId: master!.masterVideoId,
+    ticketHash: "f".repeat(64),
+    keyDate: "2026-09-20",
+  });
+  return master;
+};
 
 // valid MGI typed-detail payload (writeMgiDetail shape)
 const mgiPayload = {
@@ -135,16 +136,23 @@ describe("inspection.service", () => {
     expect(await listSessionItems(testDb)).toHaveLength(0);
   });
 
-  it("start rejects when the master exists but is not recording", async () => {
+  it("start rejects when the master exists but its ingest is closed", async () => {
     const { sessionId } = await seedHierarchy();
-    await createMasterVideo(
+    const master = await createMasterVideo(
       {
         sessionId,
-        startEpoch: 1000,
-        recordingStatus: RECORDING_PERSISTENCE_STATUS.finalized,
+        startEpoch: 1000
       },
       testDb,
     );
+    await testDb.insert(schema.recordingIngest).values({
+      kind: "master",
+      masterVideoId: master!.masterVideoId,
+      ticketHash: "a".repeat(64),
+      keyDate: "2026-09-20",
+      closedAt: new Date(),
+      finalSequence: -1,
+    });
 
     await expectAppError(
       () => startInspection({ sessionId, itemId: 31, inspectionTypeCode: "CVI" }, testDb),

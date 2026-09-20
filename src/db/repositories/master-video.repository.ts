@@ -1,17 +1,14 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
-import { masterVideo, session } from "../schema";
+import { masterVideo, recordingIngest, session } from "../schema";
 
 export type ProjectMasterVideoRow = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
-  storageStem: string | null;
   startEpoch: number;
   endEpoch: number | null;
-  recordingStatus: string;
-  fileSize: number | null;
   durationMs: number | null;
 };
 
@@ -60,11 +57,8 @@ export const listMasterVideoRecordsByProjectId = async (
       masterVideoId: masterVideo.masterVideoId,
       sessionId: masterVideo.sessionId,
       sessionName: session.name,
-      storageStem: masterVideo.storageStem,
       startEpoch: masterVideo.startEpoch,
       endEpoch: masterVideo.endEpoch,
-      recordingStatus: masterVideo.recordingStatus,
-      fileSize: masterVideo.fileSize,
       durationMs: masterVideo.durationMs,
     })
     .from(masterVideo)
@@ -72,19 +66,59 @@ export const listMasterVideoRecordsByProjectId = async (
     .where(eq(session.projectId, projectId))
     .orderBy(asc(masterVideo.startEpoch), asc(masterVideo.masterVideoId));
 
-export const listMasterVideoRecordsByStatuses = async (
-  statuses: ("recording" | "finalized" | "interrupted" | "finalization_failed" | "canceled")[],
+// Masters still open on the wire: an ingest row that has not closed. This is
+// the whole "unfinished" signal in the direct protocol — no status string.
+export const listMasterVideoRecordsWithOpenIngest = async (
   database: DbOrTx = db,
-) => {
-  if (statuses.length === 0) {
-    return [];
-  }
+): Promise<UnfinishedMasterVideoRow[]> =>
+  database
+    .selectDistinct({
+      masterVideoId: masterVideo.masterVideoId,
+      sessionId: masterVideo.sessionId,
+      startEpoch: masterVideo.startEpoch,
+      endEpoch: masterVideo.endEpoch,
+      durationMs: masterVideo.durationMs,
+    })
+    .from(masterVideo)
+    .innerJoin(
+      recordingIngest,
+      eq(recordingIngest.masterVideoId, masterVideo.masterVideoId),
+    )
+    .where(isNull(recordingIngest.closedAt))
+    .orderBy(asc(masterVideo.masterVideoId));
 
-  return database.query.masterVideo.findMany({
-    where: inArray(masterVideo.recordingStatus, statuses),
-    orderBy: asc(masterVideo.masterVideoId),
-  });
+export type UnfinishedMasterVideoRow = {
+  masterVideoId: number;
+  sessionId: number;
+  startEpoch: number;
+  endEpoch: number | null;
+  durationMs: number | null;
 };
+
+// The master a session is capturing right now: its ingest row is still open.
+// An inspection may only start against a session in this state.
+export const findMasterVideoRecordWithOpenIngestBySessionId = async (
+  sessionId: number,
+  database: DbOrTx = db,
+): Promise<UnfinishedMasterVideoRow | null> =>
+  (await database
+    .select({
+      masterVideoId: masterVideo.masterVideoId,
+      sessionId: masterVideo.sessionId,
+      startEpoch: masterVideo.startEpoch,
+      endEpoch: masterVideo.endEpoch,
+      durationMs: masterVideo.durationMs,
+    })
+    .from(masterVideo)
+    .innerJoin(
+      recordingIngest,
+      eq(recordingIngest.masterVideoId, masterVideo.masterVideoId),
+    )
+    .where(
+      and(eq(masterVideo.sessionId, sessionId), isNull(recordingIngest.closedAt)),
+    )
+    .orderBy(asc(masterVideo.masterVideoId))
+    .limit(1))[0] ?? null;
 
 export const updateMasterVideoById = async (
   masterVideoId: number,

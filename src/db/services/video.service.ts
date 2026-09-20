@@ -1,20 +1,22 @@
 import { db, type DbOrTx } from "../client";
 import type { MasterVideoPlaybackData } from "../../types/api";
-import { mintRecordingThumbnailUrl } from "./result-media.service";
+import { mintTimelineThumbnailUrl } from "./result-media.service";
 import { and, asc, count, eq } from "drizzle-orm";
 import {
   createMasterVideoRecord,
   deleteMasterVideoById,
   findMasterVideoById,
+  findMasterVideoRecordWithOpenIngestBySessionId,
   listMasterVideoRecords,
   listMasterVideoRecordsByProjectId,
   listMasterVideoRecordsBySessionId,
-  listMasterVideoRecordsByStatuses,
+  listMasterVideoRecordsWithOpenIngest,
   updateMasterVideoById,
 } from "../repositories/master-video.repository";
 import {
   createMasterVideoTimelineThumbnailRecords,
   deleteMasterVideoTimelineThumbnailRecordsByMasterVideoId,
+  listFirstTimelineThumbnailKeysByMasterVideoIds,
   listMasterVideoTimelineThumbnailRecordsByMasterVideoId,
 } from "../repositories/timeline-thumbnail.repository";
 import {
@@ -46,12 +48,8 @@ import { listResultImageSummariesByResultIds } from "./result-media.service";
 
 export type CreateMasterVideoInput = {
   sessionId: number;
-  // path prefix without bucket/extension; the ingest path inserts, reads the
-  // assigned PK, then sets the stem in the same transaction
-  storageStem?: string | null;
   startEpoch: number;
   endEpoch?: number | null;
-  recordingStatus?: RecordingPersistenceStatus;
 };
 
 export type CreateVideoClipInput = {
@@ -93,13 +91,10 @@ export type ProjectMasterVideo = {
   masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
-  storageStem: string | null;
   startEpoch: number;
   endEpoch: number | null;
-  recordingStatus: RecordingPersistenceStatus;
-  fileSize: number | null;
   durationMs: number | null;
-  // presigned card still; null until the master finalizes
+  // presigned card still from the timeline job; null until it has run
   thumbnailUrl: string | null;
 };
 
@@ -192,13 +187,6 @@ const normalizeMasterVideoUpdate = (
     nextData.sessionId = data.sessionId;
   }
 
-  if ("storageStem" in data) {
-    nextData.storageStem = normalizeOptionalText(
-      data.storageStem,
-      "Master video storage stem",
-    );
-  }
-
   if ("startEpoch" in data) {
     nextData.startEpoch = data.startEpoch;
   }
@@ -207,23 +195,8 @@ const normalizeMasterVideoUpdate = (
     nextData.endEpoch = data.endEpoch;
   }
 
-  if ("recordingStatus" in data) {
-    if (data.recordingStatus === undefined) {
-      throw new Error("Master video recording status is required");
-    }
-
-    nextData.recordingStatus = normalizeRecordingPersistenceStatus(
-      data.recordingStatus,
-      "Master video recording status",
-    );
-  }
-
   if ("durationMs" in data) {
     nextData.durationMs = data.durationMs;
-  }
-
-  if ("fileSize" in data) {
-    nextData.fileSize = data.fileSize;
   }
 
   nextData.lastUpdatedAt = new Date();
@@ -325,13 +298,8 @@ export const createMasterVideo = async (
   return createMasterVideoRecord(
     {
       sessionId: data.sessionId,
-      storageStem: normalizeOptionalText(
-        data.storageStem,
-        "Master video storage stem",
-      ),
       startEpoch: data.startEpoch,
       endEpoch: data.endEpoch ?? null,
-      recordingStatus: data.recordingStatus ?? RECORDING_PERSISTENCE_STATUS.finalized,
       lastUpdatedAt: new Date(),
     },
     database,
@@ -360,16 +328,18 @@ export const listMasterVideosByProjectId = async (
   }
 
   const rows = await listMasterVideoRecordsByProjectId(projectId, database);
+  const thumbnailKeys = await listFirstTimelineThumbnailKeysByMasterVideoIds(
+    rows.map((row) => row.masterVideoId),
+    database,
+  );
 
   // mint per row: the still is the card face, so the list read carries it
   return Promise.all(
     rows.map(async (row) => ({
       ...row,
-      recordingStatus: normalizeRecordingPersistenceStatus(
-        row.recordingStatus,
-        "Master video recording status",
+      thumbnailUrl: await mintTimelineThumbnailUrl(
+        thumbnailKeys.get(row.masterVideoId) ?? null,
       ),
-      thumbnailUrl: await mintRecordingThumbnailUrl(row),
     })),
   );
 };
@@ -392,11 +362,9 @@ export const getMasterVideoPlaybackData = async (
       masterVideoId: masterVideo.masterVideoId,
       sessionId: masterVideo.sessionId,
       sessionName: session.name,
-      storageStem: masterVideo.storageStem,
       startEpoch: masterVideo.startEpoch,
       endEpoch: masterVideo.endEpoch,
       durationMs: masterVideo.durationMs,
-      recordingStatus: masterVideo.recordingStatus,
     })
     .from(masterVideo)
     .innerJoin(session, eq(session.sessionId, masterVideo.sessionId))
@@ -412,17 +380,13 @@ export const getMasterVideoPlaybackData = async (
     return null;
   }
 
-  const normalizedRecordingStatus = normalizeRecordingPersistenceStatus(
-    selectedMasterVideo.recordingStatus,
-    "Master video recording status",
-  );
   const sessionMasterVideos = await listMasterVideoRecordsBySessionId(
     selectedMasterVideo.sessionId,
     database,
   );
 
   // no recording-status gate: the bundle is a read, and playability comes from
-  // the stored segments. Legacy fields stay until their consumers go.
+  // the stored segments.
 
   const eventRows = await (database ?? db)
     .select({
@@ -476,7 +440,6 @@ export const getMasterVideoPlaybackData = async (
 
   return {
     ...selectedMasterVideo,
-    recordingStatus: normalizedRecordingStatus,
     sessionRecordings: [...sessionMasterVideos]
       // copy first: sort mutates in place
       .sort((firstSource, secondSource) =>
@@ -486,11 +449,9 @@ export const getMasterVideoPlaybackData = async (
       )
       .map((sourceVideo) => ({
         masterVideoId: sourceVideo.masterVideoId,
-        storageStem: sourceVideo.storageStem,
-        recordingStatus: normalizeRecordingPersistenceStatus(
-          sourceVideo.recordingStatus,
-          "Master video recording status",
-        ),
+        startEpoch: sourceVideo.startEpoch,
+        endEpoch: sourceVideo.endEpoch,
+        durationMs: sourceVideo.durationMs,
       })),
     thumbnails: timelineThumbnails.map((thumbnail) => ({
       thumbnailId: thumbnail.thumbnailId,
@@ -618,41 +579,16 @@ export const createVideoClip = async (
   );
 };
 
+// open ingests are the whole signal: a master is unfinished while its ingest
+// row has not closed. The idle sweep closes them, so this drains on its own.
 export const listUnfinishedMasterVideos = async (database?: DbOrTx) =>
-  listMasterVideoRecordsByStatuses(
-    [
-      RECORDING_PERSISTENCE_STATUS.recording,
-      RECORDING_PERSISTENCE_STATUS.finalizationFailed,
-    ],
-    database,
-  );
+  listMasterVideoRecordsWithOpenIngest(database);
 
-export const markMasterVideoFinalized = async (
-  masterVideoId: number,
-  data: {
-    durationMs: number;
-    // Null since the local master file was removed (TS segments are the master).
-    fileSize: number | null;
-    endEpoch: number;
-  },
+// the master a session is capturing now; null when nothing is open
+export const findRecordingMasterBySessionId = async (
+  sessionId: number,
   database?: DbOrTx,
-) =>
-  updateMasterVideo(masterVideoId, {
-    endEpoch: data.endEpoch,
-    recordingStatus: RECORDING_PERSISTENCE_STATUS.finalized,
-    durationMs: data.durationMs,
-    fileSize: data.fileSize,
-  }, database);
-
-// status carries the fact; the log carries the reason
-export const markMasterVideoFinalizationFailed = async (
-  masterVideoId: number,
-  _error: string,
-  database?: DbOrTx,
-) =>
-  updateMasterVideo(masterVideoId, {
-    recordingStatus: RECORDING_PERSISTENCE_STATUS.finalizationFailed,
-  }, database);
+) => findMasterVideoRecordWithOpenIngestBySessionId(sessionId, database);
 
 export const listVideoClips = async (database?: DbOrTx) =>
   listVideoClipRecords(database);

@@ -45,7 +45,13 @@ const seedHierarchy = async (withMaster = true) => {
       masterVideoId: 1,
       sessionId: 101,
       startEpoch: 1000,
-      recordingStatus: "recording",
+    });
+    // an open ingest is what makes the master count as capturing
+    await testDb.insert(schema.recordingIngest).values({
+      kind: "master",
+      masterVideoId: 1,
+      ticketHash: "b".repeat(64),
+      keyDate: "2026-09-20",
     });
   }
 };

@@ -13,7 +13,6 @@ import * as schema from "../../../src/db/schema";
 import {
   createMasterVideo,
   createVideoClip,
-  markMasterVideoFinalized,
   updateVideoClip,
 } from "../../../src/db/services/video.service";
 
@@ -93,47 +92,48 @@ describe("recordings routes", () => {
   afterAll(closeTestDatabase);
   beforeEach(truncateTestDatabase);
 
-  it("master visibility: unfinished lists recording, playback opens after finalize", async () => {
+  it("master visibility: unfinished follows the open ingest, not a status", async () => {
     await seedContext(baseContext);
 
     const master = await createMasterVideo(
       {
         sessionId: 101,
-        storageStem: "p1/s101/master_1",
-        startEpoch: 1_755_684_000,
-        recordingStatus: "recording",
+        startEpoch: 1_755_684_000
       },
       testDb,
     );
     const masterVideoId = master!.masterVideoId;
 
-    // open master shows in the recovery sweep
+    // no ingest yet: nothing to sweep
+    const idle = await app.request("/api/v1/recordings/unfinished");
+    expect((await json(idle)).data).toHaveLength(0);
+
+    // an open ingest makes the master unfinished, whatever its other columns say
+    const [ingest] = await testDb
+      .insert(schema.recordingIngest)
+      .values({
+        kind: "master",
+        masterVideoId,
+        ticketHash: "d".repeat(64),
+        keyDate: "2026-09-20",
+      })
+      .returning({ ingestId: schema.recordingIngest.ingestId });
+
     const unfinished = await app.request("/api/v1/recordings/unfinished");
     expect((await json(unfinished)).data).toHaveLength(1);
 
-    // playback opens before finalize; an empty master has no HLS URL yet
+    // playback answers before any segment lands; an empty master has no HLS URL
     const empty = await app.request(
       `/api/v1/recordings/${masterVideoId}/playback?projectId=1`,
     );
     expect(empty.status).toBe(200);
     expect((await json(empty)).data.hlsUrl).toBeNull();
 
-    // the finalize bridge path flips the row; playback then serves the stem
-    await markMasterVideoFinalized(
-      masterVideoId,
-      {
-        durationMs: 300_000,
-        fileSize: null,
-        endEpoch: 1_755_684_300,
-      },
-      testDb,
-    );
-
-    const playback = await app.request(
-      `/api/v1/recordings/${masterVideoId}/playback?projectId=1`,
-    );
-    expect(playback.status).toBe(200);
-    expect((await json(playback)).data.storageStem).toBe("p1/s101/master_1");
+    // the idle sweep closes the ingest and the master leaves the list
+    await testDb
+      .update(schema.recordingIngest)
+      .set({ closedAt: new Date(), finalSequence: -1 })
+      .where(eq(schema.recordingIngest.ingestId, ingest!.ingestId));
 
     const sweep = await app.request("/api/v1/recordings/unfinished");
     expect((await json(sweep)).data).toHaveLength(0);
@@ -142,7 +142,7 @@ describe("recordings routes", () => {
   it("playback returns a scoped HLS URL as soon as segment zero is committed", async () => {
     await seedContext(baseContext);
     const master = await createMasterVideo(
-      { sessionId: 101, startEpoch: 1_755_684_000, recordingStatus: "recording" },
+      { sessionId: 101, startEpoch: 1_755_684_000},
       testDb,
     );
     const masterVideoId = master!.masterVideoId;
@@ -190,7 +190,7 @@ describe("recordings routes", () => {
   it("playback stays unplayable for a closed master with no segments", async () => {
     await seedContext(baseContext);
     const master = await createMasterVideo(
-      { sessionId: 101, startEpoch: 1_755_684_000, recordingStatus: "recording" },
+      { sessionId: 101, startEpoch: 1_755_684_000},
       testDb,
     );
     await testDb.insert(schema.recordingIngest).values({
@@ -220,15 +220,19 @@ describe("recordings routes", () => {
     });
 
     for (const sessionId of [101, 202]) {
-      await createMasterVideo(
+      const master = await createMasterVideo(
         {
           sessionId,
-          storageStem: `p1/s${sessionId}/master_1`,
-          startEpoch: 1_755_684_000,
-          recordingStatus: "recording",
+          startEpoch: 1_755_684_000
         },
         testDb,
       );
+      await testDb.insert(schema.recordingIngest).values({
+        kind: "master",
+        masterVideoId: master!.masterVideoId,
+        ticketHash: "e".repeat(64),
+        keyDate: "2026-09-20",
+      });
     }
 
     const all = await app.request("/api/v1/recordings/unfinished");
@@ -254,10 +258,8 @@ describe("recordings routes", () => {
     const master = await createMasterVideo(
       {
         sessionId: 101,
-        storageStem: "p1/s101/master_1",
         startEpoch: 1_755_684_000,
-        endEpoch: 1_755_684_300,
-        recordingStatus: "finalized",
+        endEpoch: 1_755_684_300
       },
       testDb,
     );
