@@ -14,7 +14,7 @@ import {
   runFfmpegBounded,
   runThumbnailJob,
   type ThumbnailDeps,
-} from "../../../src/features/recordings-v2/jobs/thumbnails";
+} from "../../../src/features/recording/jobs/thumbnails";
 import type { ThumbnailSource } from "../../../src/db/services/recording-thumbnail.service";
 
 const SCOPE = {

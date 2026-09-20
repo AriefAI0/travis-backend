@@ -8,7 +8,7 @@ import {
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
-import { recordingRoutes } from "../../../src/features/recordings/routes";
+import { recordingRoutes } from "../../../src/features/recording/routes";
 import * as schema from "../../../src/db/schema";
 import {
   createMasterVideo,

@@ -11,8 +11,8 @@ import {
 import * as schema from "../../../src/db/schema";
 import { env } from "../../../src/config/env";
 import { onError } from "../../../src/lib/error";
-import { ingestRoutes } from "../../../src/features/recordings-v2/ingest-routes";
-import { SEGMENT_MAX_BYTES, type SegmentStorage } from "../../../src/features/recordings-v2/ingest-service";
+import { ingestRoutes } from "../../../src/features/recording/ingest-routes";
+import { SEGMENT_MAX_BYTES, type SegmentStorage } from "../../../src/features/recording/ingest-service";
 
 const PROJECT_ID = 9400;
 

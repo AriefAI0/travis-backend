@@ -17,11 +17,11 @@ import {
   parseSegmentHeaders,
   storeIngestSegment,
   type SegmentStorage,
-} from "../../../src/features/recordings-v2/ingest-service";
+} from "../../../src/features/recording/ingest-service";
 import {
   INGEST_SWEEP_INTERVAL_MS,
   sweepInactiveIngests,
-} from "../../../src/features/recordings-v2/ingest-sweep";
+} from "../../../src/features/recording/ingest-sweep";
 
 const START_EPOCH = Math.floor(Date.parse("2026-09-20T10:00:00.000Z") / 1000);
 const CLOCK_START = new Date("2026-09-20T10:00:00.000Z");

@@ -7,7 +7,7 @@ import { PgTable } from "drizzle-orm/pg-core";
 
 import { app } from "../../../src/app";
 import * as schema from "../../../src/db/schema";
-import { exportRoutes } from "../../../src/features/recordings-v2/export-routes";
+import { exportRoutes } from "../../../src/features/media-export/routes";
 
 const post = (path: string, body: unknown) =>
   app.request(path, {

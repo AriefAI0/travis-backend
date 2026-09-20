@@ -18,7 +18,7 @@ import {
   SEGMENT_TARGET_MS,
   storeIngestSegment,
   type SegmentStorage,
-} from "../../../src/features/recordings-v2/ingest-service";
+} from "../../../src/features/recording/ingest-service";
 
 // project > session, plus the chain a result needs
 const seedDomain = async () => {

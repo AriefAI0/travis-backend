@@ -3,8 +3,8 @@ import { app } from "./app";
 import { log } from "./lib/logger";
 import { ensureBuckets } from "./lib/minio_storage/clients";
 import { ensureDefaultOrganization } from "./db/ensure-org";
-import { startIngestSweep } from "./features/recordings-v2/ingest-sweep";
-import { startThumbnailSweep } from "./features/recordings-v2/jobs/thumbnails";
+import { startIngestSweep } from "./features/recording/ingest-sweep";
+import { startThumbnailSweep } from "./features/recording/jobs/thumbnails";
 
 // flow: buckets + org > sweeps > serve.
 // Boot even when MinIO is down — /health/ready is what reports it.
