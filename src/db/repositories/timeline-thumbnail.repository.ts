@@ -1,11 +1,12 @@
-import { and, asc, eq, inArray, isNotNull, isNull, notExists, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, notExists, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { masterVideo, recordingIngest, recordingIngestSegment, timelineThumbnail } from "../schema";
 
-// Masters whose grid may still be short: a recording still running, or one that
-// has never produced a still. The job decides what is due, so a master that is
-// already covered comes back with nothing to do.
+// Every master holding at least one segment, open or closed. The job derives its
+// own due set, so a master already drawn on the current grid costs one source
+// read and reports nothing. Asking the grid rather than the row count is what
+// backfills a recording thumbnailed by an earlier, coarser interval.
 export const listMasterVideoIdsWithThumbnailWork = async (
   database: DbOrTx = db,
 ): Promise<number[]> =>
@@ -17,20 +18,7 @@ export const listMasterVideoIdsWithThumbnailWork = async (
         recordingIngestSegment,
         eq(recordingIngestSegment.ingestId, recordingIngest.ingestId),
       )
-      .where(
-        and(
-          isNotNull(recordingIngest.masterVideoId),
-          or(
-            isNull(recordingIngest.closedAt),
-            notExists(
-              database
-                .select({ present: sql`1` })
-                .from(timelineThumbnail)
-                .where(eq(timelineThumbnail.masterVideoId, recordingIngest.masterVideoId)),
-            ),
-          ),
-        ),
-      )
+      .where(isNotNull(recordingIngest.masterVideoId))
   ).map((row) => row.masterVideoId!);
 
 // The grid points a master already has, for the job's due-set subtraction.

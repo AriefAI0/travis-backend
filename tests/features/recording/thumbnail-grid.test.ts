@@ -15,11 +15,43 @@ const segments = (count: number, durationMs = 2_000): GridSegment[] =>
   Array.from({ length: count }, (_, index) => ({ sequence: index, durationMs }));
 
 describe("thumbnail grid interval", () => {
-  test("a short recording keeps the base interval", () => {
+  test("a mid-length recording keeps the base interval", () => {
     const fiveMinutesMs = 300_000;
 
     expect(sampleIntervalMs(fiveMinutesMs, BASE_MS, MAX_SAMPLES)).toBe(BASE_MS);
     expect(pointCount(fiveMinutesMs, BASE_MS)).toBe(31);
+  });
+
+  // Ten seconds of footage on a ten-second grid is one tile, which reads as a
+  // broken strip: short recordings refine instead.
+  test("a short recording refines below the base interval", () => {
+    const tenSecondsMs = 9_733;
+
+    const intervalMs = sampleIntervalMs(tenSecondsMs, BASE_MS, MAX_SAMPLES);
+
+    expect(intervalMs).toBe(1_250);
+    expect(pointCount(tenSecondsMs, intervalMs)).toBeGreaterThanOrEqual(8);
+  });
+
+  // 10000 halves to 625 and stops: 625 is odd, so another half would be
+  // fractional and would stop dividing the coarser grids.
+  test("refinement stops at the last whole divisor", () => {
+    const oneSecondMs = 1_000;
+
+    const intervalMs = sampleIntervalMs(oneSecondMs, BASE_MS, MAX_SAMPLES);
+
+    expect(intervalMs).toBe(625);
+    expect(Number.isInteger(intervalMs)).toBe(true);
+    expect(pointCount(oneSecondMs, intervalMs)).toBe(2);
+  });
+
+  test("refined grids still nest inside the coarser ones", () => {
+    const intervalMs = sampleIntervalMs(9_733, BASE_MS, MAX_SAMPLES);
+
+    // every 2.5 s point is also a 1.25 s point, so no stored still is orphaned
+    for (let ms = 0; ms <= 10_000; ms += intervalMs * 2) {
+      expect(ms % intervalMs).toBe(0);
+    }
   });
 
   test("the interval doubles until the grid fits the budget", () => {
@@ -49,27 +81,43 @@ describe("due samples", () => {
     expect(dueSamples([], [], BASE_MS, MAX_SAMPLES)).toEqual([]);
   });
 
-  test("a short recording is due one still per base interval", () => {
-    // 5 segments of 2 s = 10 s of footage: a point at zero and at the end
+  // 10 s of footage refines to a 1.25 s grid: eight tiles, not one.
+  test("a short recording is due a still every refined interval", () => {
     const due = dueSamples(segments(5), [], BASE_MS, MAX_SAMPLES);
 
-    expect(due.map((row) => row.timestampMs)).toEqual([0, 10_000]);
+    expect(due.map((row) => row.timestampMs)).toEqual([
+      0, 1_250, 2_500, 3_750, 5_000, 6_250, 7_500, 8_750, 10_000,
+    ]);
     expect(due[0]!.sequence).toBe(0);
+    // 2.5 s falls inside the second segment (2 s to 4 s)
+    expect(due[2]!.sequence).toBe(1);
   });
 
   test("stored stills are not due again", () => {
-    // 60 s of footage, the first two points already stored
+    // 60 s refines to a 5 s grid, with the first two points already stored
     const due = dueSamples(segments(30), [0, 10_000], BASE_MS, MAX_SAMPLES);
 
-    expect(due.map((row) => row.timestampMs)).toEqual([20_000, 30_000, 40_000, 50_000, 60_000]);
+    expect(due.map((row) => row.timestampMs)).toEqual([
+      5_000,
+      15_000,
+      20_000,
+      25_000,
+      30_000,
+      35_000,
+      40_000,
+      45_000,
+      50_000,
+      55_000,
+      60_000,
+    ]);
   });
 
   test("each point names the segment that covers it", () => {
-    // 60 s of footage: point 0 falls in segment 0, 20 s in segment 10
+    // 60 s refines to 5 s: the first due point is 5 s, inside segment 2
     const due = dueSamples(segments(30), [0, 10_000], BASE_MS, MAX_SAMPLES);
 
-    expect(due[0]!.sequence).toBe(10);
-    expect(due[0]!.timestampMs).toBe(20_000);
+    expect(due[0]!.timestampMs).toBe(5_000);
+    expect(due[0]!.sequence).toBe(2);
   });
 
   // Restart resume: only what the current grid is missing comes back.

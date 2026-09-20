@@ -94,59 +94,73 @@ function fakeDeps(
 
 describe("thumbnail job", () => {
   test("writes the poster and the grid stills at dated keys, then the rows", async () => {
-    // 8 s of footage: one grid point at zero, plus the closed master's poster
-    const { deps, stored, rows } = fakeDeps(source(4));
+    // 80 s of footage: nine points on the 10 s grid, plus the closed poster
+    const { deps, stored, rows } = fakeDeps(source(40));
 
     const result = await runThumbnailJob(7, deps);
 
     expect(result).toMatchObject({
       masterVideoId: 7,
       posterStored: true,
-      stills: 1,
+      stills: 9,
       skipped: false,
     });
     // Frozen prefix, then the poster name and the filmstrip's padded ms.
-    expect(stored.map((entry) => entry.key)).toEqual([
-      `${KEY_PREFIX}/thumbnail.jpg`,
-      `${KEY_PREFIX}/timeline/000000000.jpg`,
-    ]);
+    expect(stored[0]!.key).toBe(`${KEY_PREFIX}/thumbnail.jpg`);
+    expect(stored[1]!.key).toBe(`${KEY_PREFIX}/timeline/000000000.jpg`);
+    expect(stored.at(-1)!.key).toBe(`${KEY_PREFIX}/timeline/000080000.jpg`);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toHaveLength(1);
+    expect(rows[0]).toHaveLength(9);
   });
 
-  test("one still per base interval across a longer recording", async () => {
-    // 60 s of footage on a 10 s grid: seven points, zero through sixty
-    const { deps, stored } = fakeDeps(source(30));
+  // Ten seconds of footage on a ten-second grid is one tile, which reads as a
+  // broken strip: short recordings refine instead.
+  test("a short recording refines to a usable strip", async () => {
+    const { deps, stored } = fakeDeps(source(5, { closed: false }));
 
     const result = await runThumbnailJob(7, deps);
 
-    expect(result.stills).toBe(7);
-    expect(stored.slice(1).map((entry) => entry.key)).toEqual([
-      `${KEY_PREFIX}/timeline/000000000.jpg`,
-      `${KEY_PREFIX}/timeline/000010000.jpg`,
-      `${KEY_PREFIX}/timeline/000020000.jpg`,
-      `${KEY_PREFIX}/timeline/000030000.jpg`,
-      `${KEY_PREFIX}/timeline/000040000.jpg`,
-      `${KEY_PREFIX}/timeline/000050000.jpg`,
-      `${KEY_PREFIX}/timeline/000060000.jpg`,
+    expect(result.stills).toBe(9);
+    expect(stored.map((entry) => entry.key.replace(/^.*timeline\//, ""))).toEqual([
+      "000000000.jpg",
+      "000001250.jpg",
+      "000002500.jpg",
+      "000003750.jpg",
+      "000005000.jpg",
+      "000006250.jpg",
+      "000007500.jpg",
+      "000008750.jpg",
+      "000010000.jpg",
     ]);
+  });
+
+  test("one still per interval across the recording", async () => {
+    // 80 s of footage on the base 10 s grid: nine points, zero through eighty
+    const { deps, stored } = fakeDeps(source(40));
+
+    const result = await runThumbnailJob(7, deps);
+
+    expect(result.stills).toBe(9);
+    expect(stored[1]!.key).toBe(`${KEY_PREFIX}/timeline/000000000.jpg`);
+    expect(stored[2]!.key).toBe(`${KEY_PREFIX}/timeline/000010000.jpg`);
+    expect(stored.at(-1)!.key).toBe(`${KEY_PREFIX}/timeline/000080000.jpg`);
   });
 
   // Restart resume and re-runs: only the points the grid is missing come back.
   test("does not repeat a grid point that already has a still", async () => {
-    const { deps, rows } = fakeDeps(source(30, { existingTimestamps: [0, 10_000] }));
+    const { deps, rows } = fakeDeps(source(40, { existingTimestamps: [0, 10_000] }));
 
     const result = await runThumbnailJob(7, deps);
 
-    expect(result.stills).toBe(5);
+    expect(result.stills).toBe(7);
     expect(
       (rows[0] as Array<{ timestampMs: number }>).map((row) => row.timestampMs),
-    ).toEqual([20_000, 30_000, 40_000, 50_000, 60_000]);
+    ).toEqual([20_000, 30_000, 40_000, 50_000, 60_000, 70_000, 80_000]);
   });
 
   // Each row's stem is the key its object landed at, so a read rebuilds it.
   test("stores the filmstrip key as the row's stem", async () => {
-    const { deps, stored, rows } = fakeDeps(source(30));
+    const { deps, stored, rows } = fakeDeps(source(40));
 
     await runThumbnailJob(7, deps);
 
@@ -156,35 +170,35 @@ describe("thumbnail job", () => {
 
   // While a capture runs there is no face to freeze yet: stills only.
   test("an open master gets grid stills and no poster", async () => {
-    const { deps, stored } = fakeDeps(source(30, { closed: false }));
+    const { deps, stored } = fakeDeps(source(40, { closed: false }));
 
     const result = await runThumbnailJob(7, deps);
 
-    expect(result).toMatchObject({ posterStored: false, stills: 7, skipped: false });
+    expect(result).toMatchObject({ posterStored: false, stills: 9, skipped: false });
     expect(stored.map((entry) => entry.key)).not.toContain(`${KEY_PREFIX}/thumbnail.jpg`);
   });
 
   test("reads only the segments its due points land in", async () => {
-    const { deps, fetched } = fakeDeps(source(30));
+    const { deps, fetched } = fakeDeps(source(40));
 
     await runThumbnailJob(7, deps);
 
-    // 0 s > segment 0, 10 s > 5, 20 s > 10, ... 60 s clamps to the last one
+    // 0 s > segment 0, 10 s > 5, 20 s > 10, ... 80 s clamps to the last one
     const sequences = fetched.map((key) => Number(key.match(/(\d{10})\.ts$/)![1]));
-    expect(sequences).toEqual([0, 5, 10, 15, 20, 25, 29]);
+    expect(sequences).toEqual([0, 5, 10, 15, 20, 25, 30, 35, 39]);
   });
 
   // A master recorded before the readable layout keeps writing its old keys.
   test("a backfilled numeric prefix mints the legacy key shape", async () => {
     const legacy = "1/1/214/2023/11/14/master/364";
-    const { deps, stored } = fakeDeps({ ...source(2), keyPrefix: legacy });
+    const { deps, stored } = fakeDeps({ ...source(40), keyPrefix: legacy });
 
     await runThumbnailJob(7, deps);
 
-    expect(stored.map((entry) => entry.key)).toEqual([
-      `${legacy}/thumbnail.jpg`,
-      `${legacy}/timeline/000000000.jpg`,
-    ]);
+    expect(stored[0]!.key).toBe(`${legacy}/thumbnail.jpg`);
+    expect(stored[1]!.key).toBe(`${legacy}/timeline/000000000.jpg`);
+    // poster plus nine stills, all under the legacy prefix
+    expect(stored).toHaveLength(10);
   });
 
   test("skips a master with nothing to read", async () => {
@@ -201,7 +215,7 @@ describe("thumbnail job", () => {
   // rows, so the job only has to stop quietly and keep what did land.
   test("keeps the stills a failing frame did not cost", async () => {
     let calls = 0;
-    const { deps, stored, rows } = fakeDeps(source(30), {
+    const { deps, stored, rows } = fakeDeps(source(40), {
       runFfmpeg: async (_command, args) => {
         calls += 1;
         if (calls === 1) throw new Error("ffmpeg exited 1: bad frame");
@@ -213,13 +227,13 @@ describe("thumbnail job", () => {
     const result = await runThumbnailJob(7, deps);
 
     // The first still failed, the rest landed, and nothing threw.
-    expect(result).toMatchObject({ stills: 6, posterStored: true });
+    expect(result).toMatchObject({ stills: 8, posterStored: true });
     expect(stored.map((entry) => entry.key)).toContain(`${KEY_PREFIX}/thumbnail.jpg`);
-    expect(rows[0]).toHaveLength(6);
+    expect(rows[0]).toHaveLength(8);
   });
 
   test("survives every frame failing", async () => {
-    const { deps, stored, rows } = fakeDeps(source(30), {
+    const { deps, stored, rows } = fakeDeps(source(40), {
       runFfmpeg: async () => {
         throw new Error("ffmpeg exited 1: no video stream");
       },
@@ -234,7 +248,7 @@ describe("thumbnail job", () => {
   });
 
   test("survives an upload that refuses", async () => {
-    const { deps, rows } = fakeDeps(source(30), {
+    const { deps, rows } = fakeDeps(source(40), {
       putObject: async () => {
         throw new Error("storage unavailable");
       },
