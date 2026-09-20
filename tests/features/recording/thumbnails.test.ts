@@ -259,6 +259,36 @@ describe("thumbnail job", () => {
     expect(rows).toEqual([]);
   });
 
+  // A segment stopped mid-write reports more duration than it holds, so the
+  // offset the grid asks for can sit past the last frame. The still must fall
+  // back to the segment's first frame instead of leaving a hole in the strip.
+  test("falls back to the first frame when the offset has none", async () => {
+    const calls: string[][] = [];
+    // a refined grid, so most points sit inside a segment rather than on its edge
+    const { deps, rows } = fakeDeps(source(5, { closed: false }), {
+      runFfmpeg: async (_command, args) => {
+        calls.push(args);
+        const hasOffset = args.includes("-ss");
+        const file = args.at(-1)!;
+
+        // a seeked pass yields nothing; an unseeked pass writes the frame
+        if (hasOffset) {
+          throw new Error("ffmpeg exited 234: no frames at this offset");
+        }
+
+        await Bun.write(file, new Uint8Array([0xff, 0xd8, 0xff]));
+      },
+    });
+
+    const result = await runThumbnailJob(7, deps);
+
+    expect(result.stills).toBe(9);
+    expect(rows[0]).toHaveLength(9);
+    // eight points carry an offset (the ninth sits at zero), each retried bare
+    expect(calls.filter((args) => args.includes("-ss"))).toHaveLength(8);
+    expect(calls.filter((args) => !args.includes("-ss"))).toHaveLength(9);
+  });
+
   test("removes its temporary directory", async () => {
     let directory = "";
     const { deps } = fakeDeps(source(1), {

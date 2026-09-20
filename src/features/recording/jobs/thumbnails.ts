@@ -128,8 +128,17 @@ export type ClipStillJobResult = {
   skipped: boolean;
 };
 
-// One still from one segment, scaled to `width`. Returns null when the frame
-// could not be read, which is a skip and never an error.
+// One still from one segment, scaled to `width`. Returns null when no frame
+// could be read, which is a skip and never an error.
+//
+// Two rules, both learned from real segments:
+// - The offset seeks on the OUTPUT side (`-i` first). An input seek into a TS
+//   segment can land past the last frame and produce nothing at all, which
+//   fails the encoder rather than returning a frame.
+// - A segment that yields no frame at the offset falls back to its first frame.
+//   A segment stopped mid-write reports a duration its frames do not reach
+//   (measured: 1733 ms reported, 1233 ms of video), so the offset the grid asks
+//   for can sit beyond the content.
 const writeStill = async (
   deps: ThumbnailDeps,
   directory: string,
@@ -140,27 +149,41 @@ const writeStill = async (
 ): Promise<Uint8Array | null> => {
   const file = stillPath(directory, label);
 
-  try {
-    await deps.runFfmpeg(
-      env.FFMPEG_PATH,
-      [
-        "-y",
-        ...(atMs > 0 ? ["-ss", String(atMs / 1000)] : []),
-        "-i", segmentFile,
-        "-frames:v", "1",
-        "-vf", `scale=${width}:-2`,
-        file,
-      ],
-      env.FFMPEG_TIMEOUT_MS,
-    );
-    return new Uint8Array(await readFile(file));
-  } catch (error) {
-    log.warn("thumbnail still failed", {
-      label,
-      err: String(error).slice(0, 200),
-    });
-    return null;
+  for (const offsetMs of atMs > 0 ? [atMs, 0] : [0]) {
+    try {
+      await deps.runFfmpeg(
+        env.FFMPEG_PATH,
+        [
+          "-y",
+          "-i", segmentFile,
+          ...(offsetMs > 0 ? ["-ss", String(offsetMs / 1000)] : []),
+          "-frames:v", "1",
+          // one image, not a sequence: a strict build refuses the write without it
+          "-update", "1",
+          "-vf", `scale=${width}:-2`,
+          file,
+        ],
+        env.FFMPEG_TIMEOUT_MS,
+      );
+
+      const body = await readFile(file).catch(() => null);
+
+      if (body !== null && body.byteLength > 0) {
+        return new Uint8Array(body);
+      }
+    } catch (error) {
+      // Only worth reporting when the fallback does not save it; a short tail
+      // segment failing its offset is routine.
+      if (offsetMs === 0) {
+        log.warn("thumbnail still failed", {
+          label,
+          err: String(error).slice(0, 200),
+        });
+      }
+    }
   }
+
+  return null;
 };
 
 // flow: source > due points > fetch those segments > stills > dated keys > rows
