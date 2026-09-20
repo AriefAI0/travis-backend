@@ -41,24 +41,35 @@ a bad value.
 ## CORS for playback
 
 The desktop renderer plays HLS from another origin, so both hops of a segment
-request must answer CORS:
+request must answer CORS. Only the backend half needs configuring:
 
-- The HLS routes (`/api/v2/hls/*`) echo `Access-Control-Allow-Origin` for
+- **Backend route** (`/api/v2/hls/*`): echoes `Access-Control-Allow-Origin` for
   origins listed in `CORS_ALLOWED_ORIGINS` (default
   `http://localhost:5173,null`; `null` is the packaged `file://` renderer).
-- The MinIO media bucket needs a CORS rule of its own, because a segment
-  request redirects the browser to a presigned MinIO URL. The `minio@8.0.7`
-  client cannot set it, so apply it once per deployment:
+- **MinIO hop**: a segment request redirects the browser to a presigned MinIO
+  URL, and MinIO answers CORS for every origin by default. Nothing to set up.
 
-```sh
-mc alias set travis http://127.0.0.1:9000 "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
-mc cors set travis/travis-media --config /dev/stdin <<'JSON'
-{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","null"],"AllowedMethods":["GET"],"AllowedHeaders":["*"],"ExposeHeaders":["Content-Length","Content-Range"],"MaxAgeSeconds":3600}]}
-JSON
+MinIO has no per-bucket CORS rule: it does not implement the S3 CORS API
+(`PutBucketCors` answers "not implemented"), and `mc cors set` fails against it
+for that reason. CORS is a server-wide setting instead:
+
+```
+MINIO_API_CORS_ALLOW_ORIGIN   default "*"; comma-separated origins to restrict
 ```
 
-Verify the whole chain in the app: open a recording and press Play. A blocked
-hop surfaces as a CORS error in the renderer console, not as a 4xx.
+Leave it at the default for development. Restricting it is a hardening step for
+a deployment where the media host is reachable from a browser you do not
+control, and it must then include the renderer's origin (plus `null` for the
+packaged `file://` build) or playback breaks at the segment hop.
+
+To confirm the chain by hand, ask MinIO for a header on any origin:
+
+```sh
+curl -s -i -H 'Origin: http://localhost:5173' http://localhost:9002/travis-media/anything | grep -i access-control
+```
+
+In the app, open a recording and press Play. A blocked hop surfaces as a CORS
+error in the renderer console, not as a 4xx.
 
 ## Object layout
 
