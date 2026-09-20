@@ -12,7 +12,6 @@ import { sessionRoutes } from "./features/sessions/routes";
 import { structureRoutes } from "./features/structure/routes";
 import { env } from "./config/env";
 import { pingDb } from "./db/client";
-import { trackerReady } from "./lib/db/minio_tracker";
 import { onError } from "./lib/error";
 import { minio } from "./lib/minio_storage/clients";
 
@@ -24,7 +23,7 @@ if (env.NODE_ENV !== "test") {
 }
 
 app.onError(onError);
-app.route("/", healthRoutesFor(minio, [{ name: "db", check: pingDb }, { name: "tracker", check: trackerReady }]));
+app.route("/", healthRoutesFor(minio, [{ name: "db", check: pingDb }]));
 app.route("/", projectRoutes());
 app.route("/", structureRoutes());
 app.route("/", sessionRoutes());

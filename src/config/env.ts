@@ -15,11 +15,6 @@ const schema = z.object({
   BUCKET_MEDIA: z.string().min(1).default("travis-media"),
   BUCKET_THUMBNAILS: z.string().min(1).default("travis-thumbs"),
   BUCKET_IMAGES: z.string().min(1).default("travis-images"),
-  PART_SIZE_BYTES: z.coerce.number().int().positive().default(16_777_216),
-  BUFFER_CAP_BYTES: z.coerce.number().int().positive().default(67_108_864),
-  MAX_ACTIVE_SESSIONS: z.coerce.number().int().positive().default(4),
-  SEGMENT_STALE_SECONDS: z.coerce.number().int().positive().default(30),
-  RESUME_GRACE_MINUTES: z.coerce.number().positive().default(10),
   PRESIGN_GET_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
   RECORDING_V2_ENABLED: z.stringbool().default(false),
   RECORDING_V2_TOKEN: z.string().min(1).optional(),
@@ -27,7 +22,6 @@ const schema = z.object({
   PLAYBACK_TOKEN_SECRET: z
     .string()
     .min(32, { message: "must be at least 32 characters" }),
-  DATA_DIR: z.string().min(1).default("./data"),
   FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
   FFMPEG_CONCURRENCY: z.coerce.number().int().positive().default(1),
   // One FFmpeg run may not outlive this. A hung encoder is killed, never
