@@ -17,20 +17,16 @@ import {
 } from "../../../src/features/recording/jobs/thumbnails";
 import type { ThumbnailSource } from "../../../src/db/services/recording-thumbnail.service";
 
-const SCOPE = {
-  organizationId: 1,
-  projectId: 2,
-  sessionId: 3,
-  startedAt: new Date("2026-09-20T00:00:00.000Z"),
-};
+// the readable directory admission freezes on the ingest row
+const KEY_PREFIX = "2-platform-north-2026-09-20/session-3-2026-09-20-0000/master-video";
 
 const source = (segmentCount: number): ThumbnailSource => ({
   masterVideoId: 7,
-  scope: SCOPE,
+  keyPrefix: KEY_PREFIX,
   durationMs: segmentCount * 2_000,
   segments: Array.from({ length: segmentCount }, (_, index) => ({
     sequence: index,
-    objectKey: `1/2/3/2026/09/20/master/7/segments/${String(index).padStart(10, "0")}.ts`,
+    objectKey: `${KEY_PREFIX}/segments/${String(index).padStart(10, "0")}.ts`,
     durationMs: 2_000,
   })),
 });
@@ -86,17 +82,41 @@ describe("thumbnail job", () => {
     const result = await runThumbnailJob(7, deps);
 
     expect(result).toMatchObject({ masterVideoId: 7, posterStored: true, stills: 4, skipped: false });
-    // Dated keys: the scope's date, the target, and the filmstrip's padded ms.
-    expect(stored[0]!.key).toBe("1/2/3/2026/09/20/master/7/poster.jpg");
+    // Frozen prefix, then the poster name and the filmstrip's padded ms.
+    expect(stored[0]!.key).toBe(`${KEY_PREFIX}/thumbnail.jpg`);
     expect(stored.slice(1).map((entry) => entry.key)).toEqual([
-      "1/2/3/2026/09/20/master/7/timeline/000000000.jpg",
-      "1/2/3/2026/09/20/master/7/timeline/000002000.jpg",
-      "1/2/3/2026/09/20/master/7/timeline/000004000.jpg",
-      "1/2/3/2026/09/20/master/7/timeline/000006000.jpg",
+      `${KEY_PREFIX}/timeline/000000000.jpg`,
+      `${KEY_PREFIX}/timeline/000002000.jpg`,
+      `${KEY_PREFIX}/timeline/000004000.jpg`,
+      `${KEY_PREFIX}/timeline/000006000.jpg`,
     ]);
     // The stills' timestamps come from the segments' measured lengths.
     expect(rows).toHaveLength(1);
     expect(rows[0]).toHaveLength(4);
+  });
+
+  // Each row's stem is the key its object landed at, so a read rebuilds it.
+  test("stores the filmstrip key as the row's stem", async () => {
+    const { deps, stored, rows } = fakeDeps(source(4));
+
+    await runThumbnailJob(7, deps);
+
+    const stillKeys = stored.slice(1).map((entry) => entry.key);
+    expect(rows[0]!.map((row) => (row as { storageStem: string }).storageStem)).toEqual(stillKeys);
+  });
+
+  // A master recorded before the readable layout keeps writing its old keys.
+  test("a backfilled numeric prefix mints the legacy key shape", async () => {
+    const legacy = "1/1/214/2023/11/14/master/364";
+    const { deps, stored } = fakeDeps({ ...source(2), keyPrefix: legacy });
+
+    await runThumbnailJob(7, deps);
+
+    expect(stored.map((entry) => entry.key)).toEqual([
+      `${legacy}/thumbnail.jpg`,
+      `${legacy}/timeline/000000000.jpg`,
+      `${legacy}/timeline/000002000.jpg`,
+    ]);
   });
 
   test("reads only the sampled segments", async () => {
@@ -139,7 +159,7 @@ describe("thumbnail job", () => {
 
     // The first still failed, the rest landed, and nothing threw.
     expect(result).toMatchObject({ stills: 2, posterStored: true });
-    expect(stored.map((entry) => entry.key)).toContain("1/2/3/2026/09/20/master/7/poster.jpg");
+    expect(stored.map((entry) => entry.key)).toContain(`${KEY_PREFIX}/thumbnail.jpg`);
     expect(rows[0]).toHaveLength(2);
   });
 

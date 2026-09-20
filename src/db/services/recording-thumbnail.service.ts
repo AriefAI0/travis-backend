@@ -3,10 +3,7 @@
 
 import type { DbOrTx } from "../client";
 import { db } from "../client";
-import { resolveOrganizationId, type MediaScope } from "../../lib/minio_storage/paths";
 import { findMasterVideoById } from "../repositories/master-video.repository";
-import { findProjectById } from "../repositories/project.repository";
-import { findSessionById } from "../repositories/session.repository";
 import {
   listIngestSegmentRecords,
   findPlayableIngestRecord,
@@ -30,7 +27,8 @@ export type TimelineThumbnailInsert = typeof timelineThumbnail.$inferInsert;
 
 export type ThumbnailSource = {
   masterVideoId: number;
-  scope: MediaScope;
+  // Frozen at admission: a rename never moves a still to a second directory.
+  keyPrefix: string;
   durationMs: number;
   // Sealed segments in sequence order, contiguous prefix only.
   segments: ThumbnailSegment[];
@@ -40,7 +38,7 @@ export type ThumbnailSource = {
 export const listMastersNeedingThumbnails = (database?: DbOrTx): Promise<number[]> =>
   listMasterVideoIdsMissingTimelineThumbnails(database ?? db);
 
-// flow: master > session > project > org > key date > sealed segments
+// flow: master > closed ingest > frozen key prefix > sealed segments
 export const loadThumbnailSource = async (
   masterVideoId: number,
   database?: DbOrTx,
@@ -50,13 +48,7 @@ export const loadThumbnailSource = async (
   const master = await findMasterVideoById(masterVideoId, handle);
   if (!master) return null;
 
-  const session = await findSessionById(master.sessionId, handle);
-  if (!session) return null;
-
-  const project = await findProjectById(session.projectId, handle);
-  if (!project) return null;
-
-  // The closed ingest holds the key date and the segments this master owns.
+  // The closed ingest holds the key prefix and the segments this master owns.
   const ingest = await findPlayableIngestRecord({ kind: "master", id: masterVideoId }, handle);
   if (!ingest) return null;
 
@@ -65,13 +57,8 @@ export const loadThumbnailSource = async (
 
   return {
     masterVideoId,
-    scope: {
-      organizationId: await resolveOrganizationId(project.organizationId, handle),
-      projectId: project.projectId,
-      sessionId: session.sessionId,
-      // the ingest row froze the key date at admission
-      startedAt: new Date(`${ingest.keyDate}T00:00:00.000Z`),
-    },
+    // read, never re-derived: the live project title may have changed since
+    keyPrefix: ingest.keyPrefix,
     durationMs: rows.reduce((total, row) => total + row.durationMs, 0),
     segments: rows.map((row) => ({
       sequence: row.sequence,

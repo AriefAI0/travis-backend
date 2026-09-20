@@ -14,7 +14,7 @@ import path from "node:path";
 import { env } from "../../../config/env";
 import { log } from "../../../lib/logger";
 import { minio } from "../../../lib/minio_storage/clients";
-import { filmstripLeaf, posterLeaf } from "../../../lib/minio_storage/paths";
+import { filmstripLeafV2, posterLeafV2 } from "../../../lib/minio_storage/paths";
 import {
   listMastersNeedingThumbnails,
   loadThumbnailSource,
@@ -183,7 +183,7 @@ export const runThumbnailJob = async (
           ],
           env.FFMPEG_TIMEOUT_MS,
         );
-        const leaf = posterLeaf(source.scope, masterVideoId);
+        const leaf = posterLeafV2(source.keyPrefix);
         await deps.putObject(leaf.key, new Uint8Array(await readFile(posterFile)));
         posterStored = true;
       } catch (error) {
@@ -192,7 +192,7 @@ export const runThumbnailJob = async (
     }
 
     for (const still of stored) {
-      const leaf = filmstripLeaf(source.scope, masterVideoId, still.timestampMs);
+      const leaf = filmstripLeafV2(source.keyPrefix, still.timestampMs);
       await deps.putObject(leaf.key, still.body);
     }
 
@@ -201,7 +201,7 @@ export const runThumbnailJob = async (
     const rows = stored.map((still) => ({
       masterVideoId,
       timestampMs: still.timestampMs,
-      storageStem: filmstripLeaf(source.scope, masterVideoId, still.timestampMs).key,
+      storageStem: filmstripLeafV2(source.keyPrefix, still.timestampMs).key,
       width: STILL_WIDTH,
       height: 0,
       sizeBytes: still.body.byteLength,
