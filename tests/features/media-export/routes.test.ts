@@ -36,7 +36,8 @@ describe("export stubs", () => {
       kind: "master | clip",
       targetId: expect.any(String),
     });
-    expect(String(body.artifactKey)).toContain("/exports/export_");
+    // the artifact hangs off the recorded range's frozen key prefix
+    expect(String(body.artifactKey)).toBe("<frozen key_prefix>/exports/<exportId>.mkv");
   });
 
   test("status answers the documented 501", async () => {

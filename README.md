@@ -38,6 +38,38 @@ All configuration is env-only; `.env.example` documents every variable with
 its default. Validated at boot by `src/config/env.ts` — the app fails fast on
 a bad value.
 
+## Object layout
+
+Every direct-media object lives in one bucket (`BUCKET_MEDIA`). A recording's
+directory is frozen on its ingest row at admission, so a later project rename
+never splits one recording across two trees.
+
+```
+travis-media/
+  1-platform-north-2026-02-19/                 projectId + title slug + UTC date
+    session-1-2026-02-19-1307/                 session-<displayNumber>-<date>-<HHMM>
+      master-video/                            one master per session
+        segments/0000000003.ts
+        thumbnail.jpg                          written by the thumbnails job
+        timeline/000012000.jpg                 filmstrip, 9-digit ms
+      clips/
+        455-anode-14-gvi/                      clipId + itemLabel slug + inspection
+          segments/0000000001.ts
+          evidence-img/
+            55.png                             imageId; annotated twin 55-annotated.png
+      results/                                 results with images but no clip
+        231-anode-14/
+          evidence-img/61.png
+```
+
+- The project folder carries the recording date. One project recorded on two
+  days owns two top folders.
+- Results images land under `clips/` when the result has a clip, and under
+  `results/` when it does not. Both homes freeze per image row.
+- Recordings predating this layout keep their old numeric directories
+  (`<orgId>/<projectId>/<sessionId>/<YYYY>/<MM>/<DD>/<kind>/<targetId>`), written
+  by a backfill onto `recording_ingest.key_prefix`. One minter family serves both.
+
 ## API surface
 
 ```

@@ -23,9 +23,9 @@ const EXPORT_REQUEST_SHAPE = {
 } as const;
 
 // The key the finished artifact will occupy, named so the shape is fixed
-// before the work exists. See exportLeaf in lib/minio_storage/paths.
-const EXPORT_ARTIFACT_KEY =
-  "<orgId>/<projectId>/<sessionId>/<YYYY>/<MM>/<DD>/<master|clips>/<targetId>/exports/export_<exportId>.mkv";
+// before the work exists: the recorded range's frozen key_prefix, then a
+// fixed tail. No leaf minter exists yet, so no builder lives in paths.ts.
+const EXPORT_ARTIFACT_KEY = "<frozen key_prefix>/exports/<exportId>.mkv";
 
 // The status answer GET /api/v2/exports/:exportId will carry.
 const EXPORT_STATUS_SHAPE = {
