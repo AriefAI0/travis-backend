@@ -17,6 +17,7 @@ import {
   listResultRecordsBySessionId,
   listResultRecordsBySessionItemId,
   listResultRecordsBySessionItemIds,
+  maxResultDisplayNumberBySessionId,
   updateResultById,
 } from "../repositories/result.repository";
 import {
@@ -369,23 +370,44 @@ const writeCviDetail = async (
   return database ? run(database) : db.transaction(run);
 };
 
+// Ordinal assignment mirrors createSession. startInspection passes its own
+// transaction, so that path gets a single attempt and the uniq
+// (session_id, display_number) index is the backstop.
 export const createResult = async (
   data: CreateResultInput,
   database?: DbOrTx,
-) =>
-  createResultRecord(
-    {
-      sessionItemId: data.sessionItemId,
-      inspectionTypeCode: data.inspectionTypeCode,
-      projectId: data.projectId,
-      assetId: data.assetId,
-      componentId: data.componentId,
-      itemId: data.itemId,
-      sessionId: data.sessionId,
-      remarks: normalizeOptionalText(data.remarks),
-    },
-    database,
-  );
+) => {
+  const insertOnce = async (dbOrTx?: DbOrTx) => {
+    const max = await maxResultDisplayNumberBySessionId(data.sessionId, dbOrTx);
+    return createResultRecord(
+      {
+        sessionItemId: data.sessionItemId,
+        inspectionTypeCode: data.inspectionTypeCode,
+        projectId: data.projectId,
+        assetId: data.assetId,
+        componentId: data.componentId,
+        itemId: data.itemId,
+        sessionId: data.sessionId,
+        displayNumber: (max ?? 0) + 1,
+        remarks: normalizeOptionalText(data.remarks),
+      },
+      dbOrTx,
+    );
+  };
+
+  if (database) {
+    return insertOnce(database);
+  }
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await insertOnce();
+    } catch (err) {
+      const lostRace = attempt < 2 && String(err).includes("uq_result_session_display");
+      if (!lostRace) throw err;
+    }
+  }
+};
 
 export const listResults = async (database?: DbOrTx) =>
   listResultRecords(database);

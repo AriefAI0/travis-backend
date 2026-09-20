@@ -6,6 +6,7 @@ import {
   deleteProjectById,
   listProjectRecords,
   listProjectDashboardRows,
+  maxProjectDisplayNumber,
   updateProjectById,
 } from "../repositories/project.repository";
 import { project } from "../schema";
@@ -69,6 +70,9 @@ const normalizeProjectUpdate = (
   return nextData;
 };
 
+// Ordinal assignment mirrors createSession: max+1 over the org's live rows,
+// with the uniq index as the race guard. A caller-supplied transaction gets a
+// single attempt — a failed statement aborts that transaction.
 export const createProject = async (
   data: CreateProjectInput,
   database?: DbOrTx,
@@ -79,14 +83,34 @@ export const createProject = async (
     throw new Error("Project title is required");
   }
 
-  return createProjectRecord(
-    {
-      title,
-      description: normalizeOptionalText(data.description),
-      documentId: normalizeOptionalText(data.documentId),
-    },
-    database,
-  );
+  const insertOnce = async (dbOrTx?: DbOrTx) => {
+    // every project is org-null until better-auth lands, so the ordinal is
+    // global today and per-org later
+    const max = await maxProjectDisplayNumber(null, dbOrTx);
+    return createProjectRecord(
+      {
+        title,
+        description: normalizeOptionalText(data.description),
+        documentId: normalizeOptionalText(data.documentId),
+        displayNumber: (max ?? 0) + 1,
+      },
+      dbOrTx,
+    );
+  };
+
+  if (database) {
+    return insertOnce(database);
+  }
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await insertOnce();
+    } catch (err) {
+      // covers both partial indexes: uq_project_display_org and _noorg
+      const lostRace = attempt < 2 && String(err).includes("uq_project_display");
+      if (!lostRace) throw err;
+    }
+  }
 };
 
 export const listProjects = async (database?: DbOrTx) =>

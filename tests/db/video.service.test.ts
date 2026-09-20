@@ -30,6 +30,7 @@ import {
 
 const seedVideoContext = async () => {
   await testDb.insert(schema.project).values({
+    displayNumber: 1,
     projectId: 1,
     title: "Project Alpha",
   });
@@ -77,6 +78,7 @@ const seedVideoContext = async () => {
 
   await testDb.insert(schema.result).values([
     {
+      displayNumber: 1,
       resultId: 5001,
       sessionItemId: 1000,
       inspectionTypeCode: "GVI",
@@ -87,6 +89,7 @@ const seedVideoContext = async () => {
       sessionId: 101,
     },
     {
+      displayNumber: 2,
       resultId: 5002,
       sessionItemId: 1000,
       inspectionTypeCode: "GVI",
@@ -97,6 +100,7 @@ const seedVideoContext = async () => {
       sessionId: 101,
     },
     {
+      displayNumber: 3,
       resultId: 5003,
       sessionItemId: 1000,
       inspectionTypeCode: "GVI",
@@ -112,10 +116,12 @@ const seedVideoContext = async () => {
 const seedProjectRecordingContext = async () => {
   await testDb.insert(schema.project).values([
     {
+      displayNumber: 1,
       projectId: 1,
       title: "Project Alpha",
     },
     {
+      displayNumber: 2,
       projectId: 2,
       title: "Project Beta",
     },

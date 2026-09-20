@@ -75,16 +75,18 @@ const utcClock = (startEpoch: number): string => {
 };
 
 export interface KeyPrefixInput {
-  projectId: number;
+  // the project's per-org ordinal, never its primary key: folders read 1, 2, 3
+  projectNumber: number;
   projectTitle: string;
+  // the session's per-project ordinal
   displayNumber: number;
   // recording start, epoch SECONDS, frozen at admission
   startEpoch: number;
 }
 
-// <projectId>-<titleSlug>-<YYYY-MM-DD>: the project folder carries the date
+// <projectNumber>-<titleSlug>-<YYYY-MM-DD>: the project folder carries the date
 const projectFolder = (input: KeyPrefixInput): string =>
-  joinParts([String(input.projectId), slugify(input.projectTitle), utcDay(input.startEpoch)]);
+  joinParts([String(input.projectNumber), slugify(input.projectTitle), utcDay(input.startEpoch)]);
 
 // session-<displayNumber>-<YYYY-MM-DD>-<HHMM>
 const sessionFolder = (input: KeyPrefixInput): string =>
@@ -101,14 +103,16 @@ export function buildMasterKeyPrefix(input: KeyPrefixInput): string {
 }
 
 export interface ClipFolderInput {
-  clipId: number;
+  // the RESULT's per-session ordinal: a clip is 1:1 with a result, so one
+  // number names both this folder and the result's evidence folder
+  resultNumber: number;
   itemLabel: string;
   inspectionType: string;
 }
 
-// <clipId>-<itemSlug>-<inspection>: the folder names its own inspection
+// <resultNumber>-<itemSlug>-<inspection>: the folder names its own inspection
 const clipFolder = (clip: ClipFolderInput): string =>
-  joinParts([String(clip.clipId), slugify(clip.itemLabel), clip.inspectionType.toLowerCase()]);
+  joinParts([String(clip.resultNumber), slugify(clip.itemLabel), clip.inspectionType.toLowerCase()]);
 
 export interface ClipKeyPrefixInput extends KeyPrefixInput, ClipFolderInput {}
 
@@ -121,7 +125,7 @@ export function buildClipKeyPrefix(input: ClipKeyPrefixInput): string {
 export const EVIDENCE_FOLDER = "evidence-img";
 
 export interface ResultEvidenceStemInput extends KeyPrefixInput {
-  resultId: number;
+  resultNumber: number;
   itemLabel: string;
   // present when the result has a clip: the image then sits beside it
   clip?: ClipFolderInput;
@@ -134,7 +138,7 @@ export function resultEvidenceStem(input: ResultEvidenceStemInput): string {
   if (input.clip) {
     return `${root}/clips/${clipFolder(input.clip)}/${EVIDENCE_FOLDER}`;
   }
-  const results = joinParts([String(input.resultId), slugify(input.itemLabel)]);
+  const results = joinParts([String(input.resultNumber), slugify(input.itemLabel)]);
   return `${root}/results/${results}/${EVIDENCE_FOLDER}`;
 }
 

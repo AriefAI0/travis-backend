@@ -46,6 +46,47 @@ describe("project.service", () => {
     expect(createdProject!.documentId).toBe("DOC-001");
   });
 
+  // The ordinal a user reads and every media key carries: 1, 2, 3 — never the
+  // identity column, which is global and never reused.
+  it("numbers projects sequentially from one", async () => {
+    const first = await createProject({ title: "Alpha" }, testDb);
+    const second = await createProject({ title: "Beta" }, testDb);
+    const third = await createProject({ title: "Gamma" }, testDb);
+
+    expect([first!.displayNumber, second!.displayNumber, third!.displayNumber]).toEqual([1, 2, 3]);
+  });
+
+  // Deleting the newest frees its number for the next create: the operator's
+  // expectation. Delete a middle one and the gap stays, because renumbering
+  // would break every frozen media key and stored reference.
+  it("reuses the number of the newest deleted project, and keeps a middle gap", async () => {
+    const first = await createProject({ title: "Alpha" }, testDb);
+    const second = await createProject({ title: "Beta" }, testDb);
+
+    await deleteProject(second!.projectId, testDb);
+    const reused = await createProject({ title: "Gamma" }, testDb);
+    expect(reused!.displayNumber).toBe(second!.displayNumber);
+
+    // now delete the FIRST one: its number is stranded, so the next is max+1
+    await deleteProject(first!.projectId, testDb);
+    const afterGap = await createProject({ title: "Delta" }, testDb);
+    expect(afterGap!.displayNumber).toBe(3);
+  });
+
+  // The original bug: a deleted project left the next one numbered 57.
+  it("numbers the next project by count, not by the identity column", async () => {
+    const first = await createProject({ title: "Alpha" }, testDb);
+    await createProject({ title: "Beta" }, testDb);
+    await deleteProject(first!.projectId, testDb);
+
+    const replacement = await createProject({ title: "Gamma" }, testDb);
+
+    expect(replacement!.displayNumber).toBe(3);
+    // the ordinal is not the identity: the two diverge as soon as anything is
+    // deleted, which is the whole reason the folders stopped showing PKs
+    expect(replacement!.projectId).not.toBe(replacement!.displayNumber);
+  });
+
   it("lists projects", async () => {
     await createProject(
       {
@@ -140,6 +181,7 @@ describe("project.service", () => {
         componentId: componentRecord!.componentId,
         itemId: itemB!.itemId,
         sessionId: sessionRecord!.sessionId,
+        displayNumber: 1,
       },
       testDb,
     );
@@ -276,6 +318,7 @@ describe("project.service", () => {
       const result = await testDb
         .insert(schema.result)
         .values({
+          displayNumber: 8001,
           resultId: 8001,
           sessionItemId: sessionItem.sessionItemId,
           inspectionTypeCode: "GVI",

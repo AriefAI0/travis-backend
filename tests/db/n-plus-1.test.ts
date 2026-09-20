@@ -26,7 +26,7 @@ const seedStructureTree = async (
 ) => {
   await db
     .insert(schema.project)
-    .values({ projectId, title: `Project ${projectId}` });
+    .values({ displayNumber: projectId, projectId, title: `Project ${projectId}` });
 
   let componentId = projectId * 10_000;
   let itemId = projectId * 1_000_000;
@@ -66,7 +66,7 @@ const seedItemResultSidebar = async (
 ) => {
   const projectId = 1;
 
-  await db.insert(schema.project).values({ projectId, title: "P" });
+  await db.insert(schema.project).values({ displayNumber: projectId, projectId, title: "P" });
   await db.insert(schema.asset).values({ assetId: 1, projectId, name: "A" });
   await db
     .insert(schema.component)
@@ -106,6 +106,7 @@ const seedItemResultSidebar = async (
     for (let r = 0; r < resultsPerSession; r += 1) {
       resultId += 1;
       await db.insert(schema.result).values({
+        displayNumber: resultId,
         resultId,
         sessionItemId,
         inspectionTypeCode: "GVI",
@@ -138,7 +139,7 @@ const seedItemResultSidebar = async (
 const seedMasterVideoPlayback = async (resultsWithClips: number) => {
   const projectId = 1;
 
-  await db.insert(schema.project).values({ projectId, title: "P" });
+  await db.insert(schema.project).values({ displayNumber: projectId, projectId, title: "P" });
   await db.insert(schema.session).values({ sessionId: 1, projectId, name: "S" });
   await db.insert(schema.masterVideo).values({
     masterVideoId: 1,
@@ -163,6 +164,7 @@ const seedMasterVideoPlayback = async (resultsWithClips: number) => {
 
   for (let r = 1; r <= resultsWithClips; r += 1) {
     await db.insert(schema.result).values({
+      displayNumber: r,
       resultId: r,
       sessionItemId: 1,
       inspectionTypeCode: "GVI",
@@ -190,7 +192,7 @@ const seedMasterVideoPlayback = async (resultsWithClips: number) => {
 const seedProjectSummary = async (resultCount: number) => {
   const projectId = 1;
 
-  await db.insert(schema.project).values({ projectId, title: "P" });
+  await db.insert(schema.project).values({ displayNumber: projectId, projectId, title: "P" });
   await db.insert(schema.session).values({ sessionId: 1, projectId, name: "S" });
   await db.insert(schema.masterVideo).values({
     masterVideoId: 1,
@@ -218,6 +220,7 @@ const seedProjectSummary = async (resultCount: number) => {
     const resultId = i + 1;
     const code = codes[i % codes.length]!;
     await db.insert(schema.result).values({
+      displayNumber: resultId,
       resultId,
       sessionItemId: 1,
       inspectionTypeCode: code,

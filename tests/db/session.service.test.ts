@@ -35,8 +35,8 @@ describe("session.service", () => {
   });
 
   it("assigns display numbers as per-project max + 1", async () => {
-    await testDb.insert(schema.project).values({ projectId: 1, title: "Project One" });
-    await testDb.insert(schema.project).values({ projectId: 2, title: "Project Two" });
+    await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Project One" });
+    await testDb.insert(schema.project).values({ displayNumber: 2, projectId: 2, title: "Project Two" });
 
     const first = await createSession({ projectId: 1, name: "Run 1" }, testDb);
     const second = await createSession({ projectId: 1, name: "Run 2" }, testDb);
@@ -50,6 +50,7 @@ describe("session.service", () => {
 
   it("supports CRUD for session and session item", async () => {
     await testDb.insert(schema.project).values({
+      displayNumber: 1,
       projectId: 1,
       title: "Project Alpha",
     });

@@ -38,7 +38,7 @@ const seedContext = async (p: {
   item: number;
   sessionItem: number;
 }) => {
-  await testDb.insert(schema.project).values({ projectId: p.project, title: `P${p.project}` });
+  await testDb.insert(schema.project).values({ displayNumber: p.project, projectId: p.project, title: `P${p.project}` });
   await testDb.insert(schema.session).values({
     sessionId: p.session,
     projectId: p.project,
@@ -68,6 +68,7 @@ const seedContext = async (p: {
     itemId: p.item,
   });
   await testDb.insert(schema.result).values({
+    displayNumber: p.sessionItem,
     resultId: p.sessionItem + 1, // unique per context
     sessionItemId: p.sessionItem,
     inspectionTypeCode: "GVI",

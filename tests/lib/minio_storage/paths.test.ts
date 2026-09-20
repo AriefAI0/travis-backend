@@ -39,7 +39,7 @@ describe("readable key prefixes", () => {
   // 2026-02-19T13:07:42Z
   const START_EPOCH = Math.floor(Date.parse("2026-02-19T13:07:42.000Z") / 1000);
   const PROJECT = {
-    projectId: 1,
+    projectNumber: 1,
     projectTitle: "Platform North",
     displayNumber: 1,
     startEpoch: START_EPOCH,
@@ -69,7 +69,7 @@ describe("readable key prefixes", () => {
     expect(
       buildClipKeyPrefix({
         ...PROJECT,
-        clipId: 455,
+        resultNumber: 455,
         itemLabel: "Anode 14",
         inspectionType: "GVI",
       }),
@@ -83,7 +83,7 @@ describe("readable key prefixes", () => {
     expect(
       buildClipKeyPrefix({
         ...PROJECT,
-        clipId: 455,
+        resultNumber: 455,
         itemLabel: "",
         inspectionType: "GVI",
       }),
@@ -141,38 +141,40 @@ describe("evidence image homes", () => {
   const START_EPOCH = Math.floor(Date.parse("2026-02-19T13:07:42.000Z") / 1000);
   const ROOT = "1-platform-north-2026-02-19/session-1-2026-02-19-1307";
   const PROJECT = {
-    projectId: 1,
+    projectNumber: 1,
     projectTitle: "Platform North",
     displayNumber: 1,
     startEpoch: START_EPOCH,
   };
+  // one ordinal names both homes: a clip is 1:1 with its result
+  const RESULT_NUMBER = 231;
 
   test("a result with no clip lands under results/<id>-<itemSlug>", () => {
     expect(
-      resultEvidenceStem({ ...PROJECT, resultId: 231, itemLabel: "Anode 14" }),
+      resultEvidenceStem({ ...PROJECT, resultNumber: RESULT_NUMBER, itemLabel: "Anode 14" }),
     ).toBe(`${ROOT}/results/231-anode-14/${EVIDENCE_FOLDER}`);
   });
 
-  test("a result with a clip lands beside that clip", () => {
+  test("a result with a clip lands beside that clip, under the same number", () => {
     expect(
       resultEvidenceStem({
         ...PROJECT,
-        resultId: 231,
+        resultNumber: RESULT_NUMBER,
         itemLabel: "Anode 14",
-        clip: { clipId: 455, itemLabel: "Anode 14", inspectionType: "GVI" },
+        clip: { resultNumber: RESULT_NUMBER, itemLabel: "Anode 14", inspectionType: "GVI" },
       }),
-    ).toBe(`${ROOT}/clips/455-anode-14-gvi/${EVIDENCE_FOLDER}`);
+    ).toBe(`${ROOT}/clips/231-anode-14-gvi/${EVIDENCE_FOLDER}`);
   });
 
   // an item label that slugifies empty still leaves a usable folder
   test("an empty item slug drops out of the results folder", () => {
-    expect(resultEvidenceStem({ ...PROJECT, resultId: 231, itemLabel: "!!!" })).toBe(
-      `${ROOT}/results/231/${EVIDENCE_FOLDER}`,
-    );
+    expect(
+      resultEvidenceStem({ ...PROJECT, resultNumber: RESULT_NUMBER, itemLabel: "!!!" }),
+    ).toBe(`${ROOT}/results/231/${EVIDENCE_FOLDER}`);
   });
 
   test("a readable stem names the file by its id", () => {
-    const stem = `${ROOT}/clips/455-anode-14-gvi/${EVIDENCE_FOLDER}`;
+    const stem = `${ROOT}/clips/231-anode-14-gvi/${EVIDENCE_FOLDER}`;
     expect(imageEvidenceLeaves(stem, 55, "image/png")).toEqual({
       raw: { bucket: "travis-media", key: `${stem}/55.png` },
       annotated: { bucket: "travis-media", key: `${stem}/55-annotated.png` },

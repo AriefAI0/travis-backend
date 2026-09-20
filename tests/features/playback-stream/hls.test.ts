@@ -169,7 +169,7 @@ describe("playlist snapshot", () => {
 
   beforeEach(async () => {
     await truncateTestDatabase();
-    await testDb.insert(schema.project).values({ projectId: PROJECT_ID, title: "P" });
+    await testDb.insert(schema.project).values({ displayNumber: PROJECT_ID, projectId: PROJECT_ID, title: "P" });
     await testDb
       .insert(schema.session)
       .values({ sessionId: PROJECT_ID, projectId: PROJECT_ID, name: "S" });

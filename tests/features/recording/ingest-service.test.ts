@@ -22,7 +22,7 @@ import {
 
 // project > session, plus the chain a result needs
 const seedDomain = async () => {
-  await testDb.insert(schema.project).values({ projectId: 9200, title: "P" });
+  await testDb.insert(schema.project).values({ displayNumber: 9200, projectId: 9200, title: "P" });
   await testDb.insert(schema.session).values({ sessionId: 9200, projectId: 9200, name: "S" });
   await testDb.insert(schema.asset).values({ assetId: 9200, projectId: 9200, name: "A" });
   await testDb
@@ -39,6 +39,7 @@ const seedDomain = async () => {
     .insert(schema.sessionItem)
     .values({ sessionItemId: 9200, sessionId: 9200, itemId: 9200 });
   await testDb.insert(schema.result).values({
+    displayNumber: 9200,
     resultId: 9200,
     sessionItemId: 9200,
     inspectionTypeCode: "GVI",
@@ -183,10 +184,12 @@ describe("direct ingest admission", () => {
     expect(ingest!.masterVideoId).toBeNull();
     // the clip inherits the master's key date, not its own wall clock
     expect(ingest!.keyDate).toBe("2026-09-20");
-    // and its folder nests under the same session root, naming the item
+    // and its folder nests under the same session root, naming the item. The
+    // number is the RESULT's ordinal (9200 here), never the clip's own id.
     expect(ingest!.keyPrefix).toBe(
-      `9200-p-2026-09-20/session-1-2026-09-20-2359/clips/${clip.domain.clipId}-i-gvi`,
+      "9200-p-2026-09-20/session-1-2026-09-20-2359/clips/9200-i-gvi",
     );
+    expect(ingest!.keyPrefix).not.toContain(`/${clip.domain.clipId}-i-gvi`);
   });
 
   test("a second clip admission is refused while the first ingest stays open", async () => {

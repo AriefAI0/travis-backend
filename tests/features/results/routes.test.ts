@@ -14,7 +14,7 @@ const app = appFor(testDb, resultRoutes);
 
 // full chain: project > session > asset > component > item > sessionItem > result
 const seedResultContext = async () => {
-  await testDb.insert(schema.project).values({ projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.session).values({
     sessionId: 101,
     projectId: 1,
@@ -40,6 +40,7 @@ const seedResultContext = async () => {
     itemId: 100,
   });
   await testDb.insert(schema.result).values({
+    displayNumber: 5001,
     resultId: 5001,
     sessionItemId: 1000,
     inspectionTypeCode: "GVI",

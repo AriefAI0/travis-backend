@@ -26,7 +26,7 @@ const startBody = (code: string, extra: Record<string, unknown> = {}) => ({
 
 // project > asset > component > item > session, master on 'recording'
 const seedHierarchy = async (withMaster = true) => {
-  await testDb.insert(schema.project).values({ projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.asset).values({ assetId: 11, projectId: 1, name: "Platform A" });
   await testDb.insert(schema.component).values({
     componentId: 21,

@@ -1,4 +1,4 @@
-import { asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { asset, component, item, project } from "../schema";
@@ -21,6 +21,29 @@ export const createProjectRecord = async (
   const createdProjects = await database.insert(project).values(data).returning();
 
   return createdProjects[0] ?? null;
+};
+
+// highest assigned ordinal in one org; archived rows keep their number, so
+// they count. Races on max+1 are caught by the uniq index and retried.
+export const maxProjectDisplayNumber = async (
+  organizationId: number | null,
+  database: DbOrTx = db,
+) => {
+  const rows = await database
+    .select({ displayNumber: project.displayNumber })
+    .from(project)
+    .where(
+      and(
+        isNotNull(project.displayNumber),
+        organizationId === null
+          ? isNull(project.organizationId)
+          : eq(project.organizationId, organizationId),
+      ),
+    )
+    .orderBy(desc(project.displayNumber))
+    .limit(1);
+
+  return rows[0]?.displayNumber ?? null;
 };
 
 export const listProjectRecords = async (database: DbOrTx = db) =>

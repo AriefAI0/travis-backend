@@ -54,6 +54,7 @@ const resolveImageStem = async (
     sessionId: number;
     sessionItemId: number;
     resultId: number;
+    displayNumber: number;
     inspectionTypeCode: string;
   },
   database?: DbOrTx,
@@ -84,17 +85,17 @@ const resolveImageStem = async (
   const [clip] = await listVideoClipRecordsByResultId(resultRow.resultId, database);
 
   return resultEvidenceStem({
-    projectId: project.projectId,
+    projectNumber: project.displayNumber,
     projectTitle: project.title,
     displayNumber: session.displayNumber ?? session.sessionId,
     startEpoch: master
       ? master.startEpoch
       : Math.floor(session.createdAt.getTime() / 1000),
-    resultId: resultRow.resultId,
+    resultNumber: resultRow.displayNumber,
     itemLabel: item.itemLabel,
     clip: clip
       ? {
-          clipId: clip.clipId,
+          resultNumber: resultRow.displayNumber,
           itemLabel: item.itemLabel,
           inspectionType: resultRow.inspectionTypeCode,
         }

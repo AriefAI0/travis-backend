@@ -44,6 +44,7 @@ describe("structure.service", () => {
 
   it("supports CRUD for asset, component, and item", async () => {
     await testDb.insert(schema.project).values({
+      displayNumber: 1,
       projectId: 1,
       title: "Project Alpha",
     });
@@ -201,6 +202,7 @@ describe("structure.service", () => {
 
   it("builds the project structure tree for workspace navigation", async () => {
     await testDb.insert(schema.project).values({
+      displayNumber: 7,
       projectId: 7,
       title: "Platform Petronas",
     });

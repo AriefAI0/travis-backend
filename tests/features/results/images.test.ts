@@ -16,7 +16,7 @@ const app = appFor(testDb, resultRoutes);
 
 // project > session > asset > component > item > sessionItem > result (GVI)
 const seedResultContext = async () => {
-  await testDb.insert(schema.project).values({ projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.session).values({
     sessionId: 101,
     projectId: 1,
@@ -42,6 +42,7 @@ const seedResultContext = async () => {
     itemId: 100,
   });
   await testDb.insert(schema.result).values({
+    displayNumber: 5001,
     resultId: 5001,
     sessionItemId: 1000,
     inspectionTypeCode: "GVI",
@@ -129,13 +130,14 @@ describe("evidence image routes", () => {
   });
 
   // With a clip the image sits beside it, and the date comes from the master.
+  // The folder leads with the RESULT's ordinal (5001 here), not the clip id.
   it("create nests under the clip folder once a clip exists", async () => {
     await seedResultContext();
     await seedMasterAndClip(1000);
 
     const { data } = await json<{ data: Ticket }>(await createImage({ contentType: "image/png" }));
 
-    const stem = "1-alpha-1970-01-01/session-101-1970-01-01-0016/clips/7-jl-01-gvi/evidence-img";
+    const stem = "1-alpha-1970-01-01/session-101-1970-01-01-0016/clips/5001-jl-01-gvi/evidence-img";
     expect(data.storageStem).toBe(stem);
     expect(data.url).toContain(`${stem}/${data.imageId}.png`);
   });

@@ -1,8 +1,11 @@
 ALTER TABLE "recording_ingest" ADD COLUMN "key_prefix" text;--> statement-breakpoint
--- abort when the default org is missing: every row would mislabel as dead/
+-- abort when there are rows to convert and no default org to convert them
+-- with: every one would mislabel as dead/. A fresh database has no rows yet
+-- (the default org is seeded at boot, not by a migration), so it passes.
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM organization WHERE name = 'default') THEN
+  IF EXISTS (SELECT 1 FROM recording_ingest)
+     AND NOT EXISTS (SELECT 1 FROM organization WHERE name = 'default') THEN
     RAISE EXCEPTION 'no organization named default; key_prefix backfill aborted';
   END IF;
 END $$;--> statement-breakpoint

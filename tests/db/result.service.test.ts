@@ -46,6 +46,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -132,6 +133,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -206,6 +208,73 @@ describe("result.service", () => {
       expect(result!.inspectionTypeCode).toBe("MGI");
       expect(result!.remarks).toBeNull();
     });
+
+    // The ordinal that names the clip folder and the results folder. It is
+    // scoped to the SESSION: a clip is 1:1 with its result, so one number
+    // serves both, and a second session starts again at 1.
+    it("numbers results per session, starting at one", async () => {
+      const project = await testDb
+        .insert(schema.project)
+        .values({ displayNumber: 1, title: "Test Project" })
+        .returning()
+        .then((rows) => rows[0]!);
+      const asset = await testDb
+        .insert(schema.asset)
+        .values({ projectId: project.projectId, name: "Asset 1" })
+        .returning()
+        .then((rows) => rows[0]!);
+      const component = await testDb
+        .insert(schema.component)
+        .values({ projectId: project.projectId, assetId: asset.assetId, name: "Component 1" })
+        .returning()
+        .then((rows) => rows[0]!);
+      const item = await testDb
+        .insert(schema.item)
+        .values({
+          projectId: project.projectId,
+          assetId: asset.assetId,
+          componentId: component.componentId,
+          itemLabel: "Item 1",
+        })
+        .returning()
+        .then((rows) => rows[0]!);
+
+      const seedSession = async (name: string) => {
+        const session = await testDb
+          .insert(schema.session)
+          .values({ projectId: project.projectId, name })
+          .returning()
+          .then((rows) => rows[0]!);
+        const sessionItem = await testDb
+          .insert(schema.sessionItem)
+          .values({ sessionId: session.sessionId, itemId: item.itemId })
+          .returning()
+          .then((rows) => rows[0]!);
+        return {
+          sessionItemId: sessionItem.sessionItemId,
+          inspectionTypeCode: "GVI" as const,
+          projectId: project.projectId,
+          assetId: asset.assetId,
+          componentId: component.componentId,
+          itemId: item.itemId,
+          sessionId: session.sessionId,
+        };
+      };
+
+      const firstSession = await seedSession("Run 1");
+      const results = [
+        await createResult(firstSession, testDb),
+        await createResult(firstSession, testDb),
+        await createResult(firstSession, testDb),
+      ];
+
+      expect(results.map((row) => row!.displayNumber)).toEqual([1, 2, 3]);
+
+      // a different session is a different sequence
+      const secondSession = await seedSession("Run 2");
+      const firstOfSecond = await createResult(secondSession, testDb);
+      expect(firstOfSecond!.displayNumber).toBe(1);
+    });
   });
 
   describe("getResultById", () => {
@@ -218,6 +287,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -305,6 +375,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -391,6 +462,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -472,6 +544,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -560,6 +633,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -645,6 +719,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -739,6 +814,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -833,6 +909,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -921,6 +998,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -999,6 +1077,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -1095,6 +1174,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -1189,6 +1269,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -1282,6 +1363,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -1330,6 +1412,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -1417,6 +1500,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -1517,6 +1601,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -1643,6 +1728,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -1741,6 +1827,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -1854,6 +1941,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -1950,6 +2038,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -2044,6 +2133,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -2146,6 +2236,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -2244,6 +2335,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -2340,6 +2432,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -2444,6 +2537,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -2538,6 +2632,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -2630,6 +2725,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -2730,6 +2826,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -2831,6 +2928,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -2927,6 +3025,7 @@ describe("result.service", () => {
       const project = await testDb
         .insert(schema.project)
         .values({
+          displayNumber: 1,
           title: "Test Project",
         })
         .returning()
@@ -3028,7 +3127,7 @@ describe("result.service", () => {
   describe("listProjectSummary / getResultEvidence (event recorder)", () => {
     // Compact skeleton seed for one project (project/session/asset/component/item/session_item).
     const seedSkeleton = async (projectId: number, label: string) => {
-      await testDb.insert(schema.project).values({ projectId, title: label });
+      await testDb.insert(schema.project).values({ displayNumber: projectId, projectId, title: label });
       const session = await testDb
         .insert(schema.session)
         .values({ projectId, name: `${label}-S` })

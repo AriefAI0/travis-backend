@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { result } from "../schema";
@@ -10,6 +10,22 @@ export const createResultRecord = async (
   const createdResults = await database.insert(result).values(data).returning();
 
   return createdResults[0] ?? null;
+};
+
+// highest assigned ordinal in one session; archived rows keep their number, so
+// they count. Races on max+1 are caught by the uniq index and retried.
+export const maxResultDisplayNumberBySessionId = async (
+  sessionId: number,
+  database: DbOrTx = db,
+) => {
+  const rows = await database
+    .select({ displayNumber: result.displayNumber })
+    .from(result)
+    .where(and(eq(result.sessionId, sessionId), isNotNull(result.displayNumber)))
+    .orderBy(desc(result.displayNumber))
+    .limit(1);
+
+  return rows[0]?.displayNumber ?? null;
 };
 
 export const listResultRecords = async (database: DbOrTx = db) =>

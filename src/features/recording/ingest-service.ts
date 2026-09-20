@@ -111,9 +111,9 @@ const admitMaster = async (
     tx,
   ))!;
 
-  // frozen here: the display number exists only once createSession returned
+  // frozen here: the display numbers exist only once the rows returned
   const keyPrefix = buildMasterKeyPrefix({
-    projectId: project.projectId,
+    projectNumber: project.displayNumber,
     projectTitle: project.title,
     displayNumber: session.displayNumber ?? session.sessionId,
     startEpoch: input.startEpoch,
@@ -176,11 +176,11 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
 
   // frozen here, from the master's start: never the clip's own wall clock
   const keyPrefix = buildClipKeyPrefix({
-    projectId: project.projectId,
+    projectNumber: project.displayNumber,
     projectTitle: project.title,
     displayNumber: session.displayNumber ?? session.sessionId,
     startEpoch: master.startEpoch,
-    clipId: clip.clipId,
+    resultNumber: result.displayNumber,
     itemLabel: item.itemLabel,
     inspectionType: result.inspectionTypeCode,
   });

@@ -17,7 +17,7 @@ import { SEGMENT_MAX_BYTES, type SegmentStorage } from "../../../src/features/re
 const PROJECT_ID = 9400;
 
 const seedDomain = async () => {
-  await testDb.insert(schema.project).values({ projectId: PROJECT_ID, title: "P" });
+  await testDb.insert(schema.project).values({ displayNumber: PROJECT_ID, projectId: PROJECT_ID, title: "P" });
   await testDb
     .insert(schema.session)
     .values({ sessionId: PROJECT_ID, projectId: PROJECT_ID, name: "S" });
@@ -36,6 +36,7 @@ const seedDomain = async () => {
     .insert(schema.sessionItem)
     .values({ sessionItemId: PROJECT_ID, sessionId: PROJECT_ID, itemId: PROJECT_ID });
   await testDb.insert(schema.result).values({
+    displayNumber: PROJECT_ID,
     resultId: PROJECT_ID,
     sessionItemId: PROJECT_ID,
     inspectionTypeCode: "GVI",

@@ -45,7 +45,7 @@ const expectAppError = async (fn: () => Promise<unknown>, code: string) => {
 
 // project > asset > component > item chain the denorm walk reads
 const seedHierarchy = async () => {
-  await testDb.insert(schema.project).values({ projectId: 1, title: "Project One" });
+  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Project One" });
   await testDb.insert(schema.asset).values({ assetId: 11, projectId: 1, name: "Platform A" });
   await testDb
     .insert(schema.component)

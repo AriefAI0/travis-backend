@@ -30,7 +30,7 @@ const CLOCK_START = new Date("2026-09-20T10:00:00.000Z");
 const quietStorage: SegmentStorage = { put: async () => {} };
 
 const seedDomain = async () => {
-  await testDb.insert(schema.project).values({ projectId: 9300, title: "P" });
+  await testDb.insert(schema.project).values({ displayNumber: 9300, projectId: 9300, title: "P" });
   await testDb.insert(schema.session).values({ sessionId: 9300, projectId: 9300, name: "S" });
   await testDb.insert(schema.asset).values({ assetId: 9300, projectId: 9300, name: "A" });
   await testDb
@@ -47,6 +47,7 @@ const seedDomain = async () => {
     .insert(schema.sessionItem)
     .values({ sessionItemId: 9300, sessionId: 9300, itemId: 9300 });
   await testDb.insert(schema.result).values({
+    displayNumber: 9300,
     resultId: 9300,
     sessionItemId: 9300,
     inspectionTypeCode: "GVI",

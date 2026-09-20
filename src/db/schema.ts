@@ -66,12 +66,24 @@ export const project = pgTable(
     // nullable until better-auth lands, then NOT NULL
     organizationId: integer("organization_id").references(() => organization.organizationId),
 
+    // per-org ordinal, assigned max+1 at creation; the number a user reads and
+    // the number every media key for this project carries
+    displayNumber: integer("display_number").notNull(),
+
     ...createdAt,
     ...updatedAt,
     ...archivedAt,
   },
   (table) => ({
     idxProjectTitle: index("idx_project_title").on(table.title),
+    // split by org: unique indexes treat NULLs as distinct, so the org-null
+    // rows (every project until better-auth lands) need their own guard
+    uqProjectDisplayOrg: uniqueIndex("uq_project_display_org")
+      .on(table.organizationId, table.displayNumber)
+      .where(sql`${table.organizationId} IS NOT NULL`),
+    uqProjectDisplayNoOrg: uniqueIndex("uq_project_display_noorg")
+      .on(table.displayNumber)
+      .where(sql`${table.organizationId} IS NULL`),
   })
 );
 
@@ -240,6 +252,9 @@ export const result = pgTable(
     itemId: integer("item_id").notNull(),
     sessionId: integer("session_id").notNull(),
 
+    // per-session ordinal, assigned max+1 at creation
+    displayNumber: integer("display_number").notNull(),
+
     remarks: text("remarks"),
 
     ...createdAt,
@@ -255,6 +270,12 @@ export const result = pgTable(
     idxResultSessionId: index("idx_result_session_id").on(table.sessionId),
     idxResultInspectionTypeCode: index("idx_result_inspection_type_code").on(
       table.inspectionTypeCode
+    ),
+    // per-session ordinal, assigned max+1 at creation. A clip is 1:1 with a
+    // result, so one number names both the clip and the results folder.
+    uqResultSessionDisplay: uniqueIndex("uq_result_session_display").on(
+      table.sessionId,
+      table.displayNumber
     ),
   })
 );

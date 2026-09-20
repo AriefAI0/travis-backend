@@ -52,7 +52,7 @@ describe("enum constraints (pg port of CHECK suite)", () => {
   });
 
   it("item.status rejects values outside the enum", async () => {
-    await testDb.insert(schema.project).values({ projectId: 9001, title: "P" });
+    await testDb.insert(schema.project).values({ displayNumber: 9001, projectId: 9001, title: "P" });
     await testDb.insert(schema.asset).values({ assetId: 9001, projectId: 9001, name: "A" });
     await testDb
       .insert(schema.component)
@@ -78,7 +78,7 @@ describe("enum constraints (pg port of CHECK suite)", () => {
   });
 
   it("result.inspection_type_code rejects values outside the enum", async () => {
-    await testDb.insert(schema.project).values({ projectId: 9002, title: "P" });
+    await testDb.insert(schema.project).values({ displayNumber: 9002, projectId: 9002, title: "P" });
     await testDb.insert(schema.session).values({ sessionId: 9002, projectId: 9002, name: "S" });
     await testDb.insert(schema.asset).values({ assetId: 9002, projectId: 9002, name: "A" });
     await testDb
@@ -97,6 +97,7 @@ describe("enum constraints (pg port of CHECK suite)", () => {
 
     // Valid code accepted.
     await testDb.insert(schema.result).values({
+      displayNumber: 9002,
       resultId: 9002,
       sessionItemId: 9002,
       inspectionTypeCode: "GVI",
@@ -107,11 +108,12 @@ describe("enum constraints (pg port of CHECK suite)", () => {
       sessionId: 9002,
     });
 
-    // Invalid code rejected by the enum.
+    // Invalid code rejected by the enum. display_number is supplied so the
+    // NOT NULL error never masks the enum error this test exists to prove.
     await expectEnumRejection(
       testDb.execute(
-        sql`INSERT INTO result (result_id, session_item_id, inspection_type_code, project_id, asset_id, component_id, item_id, session_id)
-            VALUES (9003, 9002, 'BOGUS', 9002, 9002, 9002, 9002, 9002)`,
+        sql`INSERT INTO result (result_id, session_item_id, inspection_type_code, project_id, asset_id, component_id, item_id, session_id, display_number)
+            VALUES (9003, 9002, 'BOGUS', 9002, 9002, 9002, 9002, 9002, 9003)`,
       ),
     );
   });
@@ -130,7 +132,7 @@ describe("direct recording ingest constraints", () => {
 
   // project > session > master_video, plus the chain a video_clip needs
   const seedTargets = async () => {
-    await testDb.insert(schema.project).values({ projectId: 9100, title: "P" });
+    await testDb.insert(schema.project).values({ displayNumber: 9100, projectId: 9100, title: "P" });
     await testDb.insert(schema.session).values({ sessionId: 9100, projectId: 9100, name: "S" });
     await testDb
       .insert(schema.masterVideo)
@@ -150,6 +152,7 @@ describe("direct recording ingest constraints", () => {
       .insert(schema.sessionItem)
       .values({ sessionItemId: 9100, sessionId: 9100, itemId: 9100 });
     await testDb.insert(schema.result).values({
+      displayNumber: 9100,
       resultId: 9100,
       sessionItemId: 9100,
       inspectionTypeCode: "GVI",
