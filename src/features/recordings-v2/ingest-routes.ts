@@ -70,9 +70,6 @@ export const ingestRoutes = (database?: DbOrTx, storage: SegmentStorage = minioS
 
   // admission mints identity, so it alone carries the deployment gate
   routes.post("/api/v2/ingests", async (c) => {
-    if (!env.RECORDING_V2_ENABLED) {
-      throw new AppError(404, "feature_disabled", "Recording v2 is disabled");
-    }
     if (
       env.RECORDING_V2_TOKEN &&
       c.req.header("x-travis-deployment-token") !== env.RECORDING_V2_TOKEN

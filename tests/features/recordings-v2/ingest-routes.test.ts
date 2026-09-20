@@ -75,11 +75,9 @@ describe("direct ingest routes", () => {
 
   beforeAll(async () => {
     await ensureTestDatabase();
-    env.RECORDING_V2_ENABLED = true;
   });
 
   afterAll(() => {
-    env.RECORDING_V2_ENABLED = false;
     env.RECORDING_V2_TOKEN = undefined;
     closeTestDatabase();
   });
@@ -121,12 +119,12 @@ describe("direct ingest routes", () => {
     expect(typeof res.body.ticket).toBe("string");
   });
 
-  test("admission is the only gated route", async () => {
-    env.RECORDING_V2_ENABLED = false;
+  test("admission rejects a wrong deployment token; a recording route stays open", async () => {
+    env.RECORDING_V2_TOKEN = "deployment-secret";
     const blocked = await admit();
-    env.RECORDING_V2_ENABLED = true;
+    env.RECORDING_V2_TOKEN = undefined;
 
-    expect(blocked.status).toBe(404);
+    expect(blocked.status).toBe(401);
 
     // a recording route stays open: the ticket is its gate
     const admission = await admit();

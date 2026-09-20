@@ -11,12 +11,9 @@ const schema = z.object({
   MINIO_ENDPOINT: z.string().url(),
   MINIO_ACCESS_KEY: z.string().min(1),
   MINIO_SECRET_KEY: z.string().min(1),
-  BUCKET_RAW: z.string().min(1).default("travis-raw"),
+  // One bucket holds every media object: raw segments, stills, exports, images.
   BUCKET_MEDIA: z.string().min(1).default("travis-media"),
-  BUCKET_THUMBNAILS: z.string().min(1).default("travis-thumbs"),
-  BUCKET_IMAGES: z.string().min(1).default("travis-images"),
   PRESIGN_GET_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
-  RECORDING_V2_ENABLED: z.stringbool().default(false),
   RECORDING_V2_TOKEN: z.string().min(1).optional(),
   // signing key for scoped playback tokens; required, separate from ingest tickets
   PLAYBACK_TOKEN_SECRET: z
@@ -46,9 +43,4 @@ if (!parsed.success) {
 export const env = parsed.data;
 
 // Every bucket the server owns. All are ensured to exist at boot.
-export const buckets = [
-  env.BUCKET_RAW,
-  env.BUCKET_MEDIA,
-  env.BUCKET_THUMBNAILS,
-  env.BUCKET_IMAGES,
-] as const;
+export const buckets = [env.BUCKET_MEDIA] as const;

@@ -16,8 +16,8 @@ import { buckets } from "../src/config/env";
 // MinIO caps bulk delete at 1000 keys per request
 const DELETE_BATCH = 1000;
 
-// exit cleanly when any prompt is cancelled (ESC / Ctrl-C)
-function bail(value: unknown): asserts value {
+// exit cleanly when any prompt is cancelled (ESC / Ctrl-C); narrows the value
+function bail<T>(value: T | symbol): asserts value is T {
   if (isCancel(value)) {
     cancel("aborted, nothing was deleted");
     process.exit(0);
@@ -65,7 +65,7 @@ async function deleteBucket(bucket: string): Promise<"deleted" | "skipped"> {
     count = await countObjects(bucket);
     spin.stop(`${bucket}: ${count} object(s)`);
   } catch (err) {
-    spin.stop(`failed to scan ${bucket}`, 1);
+    spin.stop(`failed to scan ${bucket}`);
     throw err;
   }
 
