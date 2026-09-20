@@ -89,7 +89,6 @@ const seedItemResultSidebar = async (
   await db.insert(schema.masterVideo).values({
     masterVideoId: 1,
     sessionId: 1,
-    storageStem: "file://master.mkv",
     startEpoch: 1_000,
     endEpoch: 2_000,
   });
@@ -144,10 +143,8 @@ const seedMasterVideoPlayback = async (resultsWithClips: number) => {
   await db.insert(schema.masterVideo).values({
     masterVideoId: 1,
     sessionId: 1,
-    storageStem: "C:/rec/session.mkv",
     startEpoch: 1_000,
     endEpoch: 2_000,
-    recordingStatus: "finalized",
   });
   await db.insert(schema.asset).values({ assetId: 1, projectId, name: "A" });
   await db
@@ -198,7 +195,6 @@ const seedProjectSummary = async (resultCount: number) => {
   await db.insert(schema.masterVideo).values({
     masterVideoId: 1,
     sessionId: 1,
-    storageStem: "file://master.mkv",
     startEpoch: 1_000,
     endEpoch: 2_000,
   });

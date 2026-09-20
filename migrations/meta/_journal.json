@@ -64,6 +64,13 @@
       "when": 1789876728813,
       "tag": "0008_icy_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789879112954,
+      "tag": "0009_hot_rick_jones",
+      "breakpoints": true
     }
   ]
 }

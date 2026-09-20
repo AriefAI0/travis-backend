@@ -102,7 +102,7 @@ const admitMaster = async (
 
   const session = (await createSession({ projectId: input.projectId }, tx))!;
   const master = (await createMasterVideoRecord(
-    { sessionId: session.sessionId, startEpoch: input.startEpoch, recordingStatus: "recording" },
+    { sessionId: session.sessionId, startEpoch: input.startEpoch },
     tx,
   ))!;
 
@@ -137,7 +137,6 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
         resultId: input.resultId,
         masterVideoId: input.masterVideoId,
         startOffsetMs: input.startOffsetMs,
-        recordingStatus: "recording",
       },
       tx,
     ))!;

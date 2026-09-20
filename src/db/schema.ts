@@ -22,14 +22,6 @@ export const gviCondition = pgEnum("gvi_condition", ["ok", "not_ok"]);
 
 export const cviMemberType = pgEnum("cvi_member_type", ["chord", "brace"]);
 
-export const recordingStatus = pgEnum("recording_status", [
-  "recording",
-  "finalized",
-  "interrupted",
-  "finalization_failed",
-  "canceled",
-]);
-
 /* =========================================================
    TIMESTAMPS (JS Date both sides; JSON gives ISO strings)
 ========================================================= */
@@ -453,15 +445,9 @@ export const masterVideo = pgTable(
       .notNull()
       .references(() => session.sessionId, { onDelete: "cascade" }),
 
-    // nullable by design: the stem embeds the row's own PK, so ingest inserts
-    // and sets it in the same transaction (insert > returning > update)
-    storageStem: text("storage_stem"),
-
     startEpoch: bigint("start_epoch", { mode: "number" }).notNull(), // epoch SECONDS; bigint clears 2038
     endEpoch: bigint("end_epoch", { mode: "number" }),
-    recordingStatus: recordingStatus("recording_status").notNull().default("finalized"),
     durationMs: integer("duration_ms"),
-    fileSize: bigint("file_size", { mode: "number" }), // bigint: long takes pass 2 GB
     lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -519,10 +505,6 @@ export const videoClip = pgTable(
 
     startOffsetMs: integer("start_offset_ms").notNull(),
     endOffsetMs: integer("end_offset_ms"),
-    // nullable by design: same PK-embedded-stem insert flow as master_video
-    storageStem: text("storage_stem"),
-    recordingStatus: recordingStatus("recording_status").notNull().default("finalized"),
-    fileSize: bigint("file_size", { mode: "number" }), // bigint: long takes pass 2 GB
     lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),

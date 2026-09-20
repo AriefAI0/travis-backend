@@ -113,38 +113,6 @@ describe("enum constraints (pg port of CHECK suite)", () => {
     );
   });
 
-  it("master_video.recording_status accepts the live values and rejects others", async () => {
-    await testDb.insert(schema.project).values({ projectId: 9003, title: "P" });
-    await testDb.insert(schema.session).values({ sessionId: 9003, projectId: 9003, name: "S" });
-
-    // Every value the app actually writes (RECORDING_PERSISTENCE_STATUS) must be
-    // accepted — the enum is bound to the live set, NOT the locked design's
-    // stale (recording/finalized/failed/recovering) set.
-    const liveStatuses = [
-      "recording",
-      "finalized",
-      "interrupted",
-      "finalization_failed",
-      "canceled",
-    ] as const;
-    for (const [index, status] of liveStatuses.entries()) {
-      await testDb.insert(schema.masterVideo).values({
-        masterVideoId: 9003 + index,
-        sessionId: 9003,
-        storageStem: `file://${status}.mp4`,
-        startEpoch: 0,
-        recordingStatus: status,
-      });
-    }
-
-    // A value that is NOT in the live set is rejected.
-    await expectEnumRejection(
-      testDb.execute(
-        sql`INSERT INTO master_video (master_video_id, session_id, storage_stem, start_epoch, recording_status)
-            VALUES (9999, 9003, 'p9003/s9003/master_9999', 0, 'recovering')`,
-      ),
-    );
-  });
 });
 
 // Direct ingest ledger: one target per row, one open clip ingest per clip,

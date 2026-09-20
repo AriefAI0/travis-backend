@@ -206,8 +206,6 @@ describe("evidence image routes", () => {
       masterVideoId: 1,
       startOffsetMs: 10_000,
       endOffsetMs: 40_000,
-      recordingStatus: "recording",
-      storageStem: "p1/s101/master_1/GVI/clip_7",
     });
 
     const empty = await json(await app.request("/api/v1/items/100/results"));
@@ -257,7 +255,6 @@ describe("evidence image routes", () => {
       masterVideoId: 1,
       sessionId: 101,
       startEpoch: 1000,
-      recordingStatus: "finalized",
     });
     // finalized but stem-less: nothing was ever written, so nothing mints
     await testDb.insert(schema.videoClip).values({
@@ -266,8 +263,6 @@ describe("evidence image routes", () => {
       masterVideoId: 1,
       startOffsetMs: 0,
       endOffsetMs: 5_000,
-      recordingStatus: "finalized",
-      storageStem: null,
     });
     // no segments either, so the clip has no playback URL
 

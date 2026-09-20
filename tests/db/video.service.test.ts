@@ -410,7 +410,6 @@ describe("video.service", () => {
       {
         startOffsetMs: 321_000,
         endOffsetMs: 351_000,
-        storageStem: "clips/clip-5001-gvi-updated.mp4",
       },
       testDb,
     );
@@ -419,7 +418,6 @@ describe("video.service", () => {
       clipId: createdVideoClip!.clipId,
       startOffsetMs: 321_000,
       endOffsetMs: 351_000,
-      storageStem: "clips/clip-5001-gvi-updated.mp4",
     });
 
     const deletedVideoClip = await deleteVideoClip(thirdVideoClip!.clipId, testDb);
