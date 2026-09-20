@@ -282,7 +282,7 @@ describe("hls routes", () => {
     expect(playbackTokenExpiry()).toBeGreaterThan(nowSeconds);
   });
 
-  test("the old v2 recording routes still mount beside the hls routes", async () => {
+  test('a playlist request with a non-integer id is a handler 400, not a router miss', async () => {
     const notHls = await app.request("/api/v2/hls/master/abc/index.m3u8");
     expect(notHls.status).toBe(400); // id must be an integer, not a router miss
   });

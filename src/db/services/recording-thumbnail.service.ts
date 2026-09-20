@@ -24,6 +24,10 @@ export type ThumbnailSegment = {
   durationMs: number;
 };
 
+// The row shape a thumbnail run writes. Exported so the job never reaches for
+// the schema itself: features read services, not tables.
+export type TimelineThumbnailInsert = typeof timelineThumbnail.$inferInsert;
+
 export type ThumbnailSource = {
   masterVideoId: number;
   scope: MediaScope;
@@ -80,7 +84,7 @@ export const loadThumbnailSource = async (
 // Rows land in one insert, after every still is stored. A run that dies early
 // therefore leaves no rows, which is exactly what the boot scan looks for.
 export const recordTimelineThumbnails = async (
-  rows: (typeof timelineThumbnail.$inferInsert)[],
+  rows: TimelineThumbnailInsert[],
   database?: DbOrTx,
 ): Promise<number> => {
   if (rows.length === 0) return 0;

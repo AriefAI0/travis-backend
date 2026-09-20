@@ -6,7 +6,6 @@ import { inspectionRoutes } from "./features/inspections/routes";
 import { projectRoutes } from "./features/projects/routes";
 import { recordingRoutes } from "./features/recordings/routes";
 import { resultRoutes } from "./features/results/routes";
-import { recordingV2Routes } from "./features/recordings-v2/routes";
 import { ingestRoutes } from "./features/recordings-v2/ingest-routes";
 import { hlsRoutes } from "./features/recordings-v2/hls-routes";
 import { exportRoutes } from "./features/recordings-v2/export-routes";
@@ -34,7 +33,6 @@ app.route("/", sessionRoutes());
 app.route("/", inspectionRoutes());
 app.route("/", recordingRoutes());
 app.route("/", resultRoutes());
-app.route("/", recordingV2Routes());
 app.route("/", ingestRoutes());
 app.route("/", hlsRoutes());
 // Stub only: both routes answer 501 until the export work lands.

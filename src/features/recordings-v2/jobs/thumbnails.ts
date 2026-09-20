@@ -19,6 +19,7 @@ import {
   listMastersNeedingThumbnails,
   loadThumbnailSource,
   recordTimelineThumbnails,
+  type TimelineThumbnailInsert,
   type ThumbnailSource,
 } from "../../../db/services/recording-thumbnail.service";
 
@@ -34,7 +35,7 @@ export type ThumbnailDeps = {
   runFfmpeg: (command: string, args: string[], timeoutMs: number) => Promise<void>;
   fetchSegment: (objectKey: string, destination: string) => Promise<void>;
   putObject: (key: string, body: Uint8Array) => Promise<void>;
-  recordRows: (rows: (typeof timelineThumbnail.$inferInsert)[]) => Promise<number>;
+  recordRows: (rows: TimelineThumbnailInsert[]) => Promise<number>;
 };
 
 // flow: spawn > collect stderr > kill at the deadline > settle once
