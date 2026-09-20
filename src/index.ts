@@ -10,6 +10,7 @@ import { startStaleTimer } from "./features/minio_handler/stale";
 import { finalizeExhausted, finalizeJob } from "./features/minio_handler/jobs/ffmpeg_finalize";
 import { startRecordingFinalizeWorker } from "./features/recordings-v2/jobs/finalize";
 import { startIngestSweep } from "./features/recordings-v2/ingest-sweep";
+import { startThumbnailSweep } from "./features/recordings-v2/jobs/thumbnails";
 
 // flow: buckets + org > orphan sweep > recover sessions > stale timer + job runner > serve.
 // Boot even when MinIO is down — /health/ready is what reports it.
@@ -22,6 +23,9 @@ registerJobHandler("finalize", finalizeJob, finalizeExhausted);
 startQueueWorker();
 startRecordingFinalizeWorker();
 startIngestSweep();
+// Closed masters without timeline rows: no job table, so the scan is the
+// whole retry signal. Best effort, never blocks serving.
+startThumbnailSweep();
 
 Bun.serve({ port: env.PORT, fetch: app.fetch });
 log.info("travis-backend listening", { port: env.PORT, minio: env.MINIO_ENDPOINT });

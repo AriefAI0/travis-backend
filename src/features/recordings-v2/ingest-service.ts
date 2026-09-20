@@ -28,6 +28,7 @@ import {
 } from "../../db/repositories/video-clip.repository";
 import { findResultById } from "../../db/repositories/result.repository";
 import { createSession } from "../../db/services/session.service";
+import { enqueueThumbnails } from "./jobs/thumbnails";
 
 // native splitmuxsink target the client aims for; measured durations arrive per segment
 export const SEGMENT_TARGET_MS = 2000;
@@ -293,12 +294,14 @@ const stampDomainClose = async (
     .where(eq(videoClip.clipId, clip.clipId));
 };
 
-// shared close path: explicit close and the sweep differ only in their guard
+// shared close path: explicit close and the sweep differ only in their guard.
+// The thumbnail target rides the return so the caller can queue it after the
+// transaction commits: a job must never read an uncommitted close.
 const runClose = async (
   ingestId: number,
   guard: { ticket?: string; idleCutoff?: Date },
   tx: DbOrTx,
-): Promise<IngestCloseResult | null> => {
+): Promise<{ result: IngestCloseResult; thumbnailMasterVideoId: number | null } | null> => {
   const ingest = await lockIngest(ingestId, tx);
   if (!ingest) throw notFound("Ingest");
   if (guard.ticket !== undefined && !ticketMatches(guard.ticket, ingest.ticketHash)) {
@@ -308,11 +311,14 @@ const runClose = async (
   // an equivalent close replays the frozen result instead of re-stamping it
   if (ingest.closedAt !== null) {
     return {
-      ingestId,
-      finalSequence: ingest.finalSequence ?? -1,
-      durationMs: ingest.durationMs ?? 0,
-      closedAt: ingest.closedAt,
-      replayed: true,
+      result: {
+        ingestId,
+        finalSequence: ingest.finalSequence ?? -1,
+        durationMs: ingest.durationMs ?? 0,
+        closedAt: ingest.closedAt,
+        replayed: true,
+      },
+      thumbnailMasterVideoId: null,
     };
   }
 
@@ -333,11 +339,15 @@ const runClose = async (
   await stampDomainClose(ingest, summary, tx);
 
   return {
-    ingestId,
-    finalSequence: summary.contiguousSequence,
-    durationMs: summary.durationMs,
-    closedAt,
-    replayed: false,
+    result: {
+      ingestId,
+      finalSequence: summary.contiguousSequence,
+      durationMs: summary.durationMs,
+      closedAt,
+      replayed: false,
+    },
+    // one master close is one thumbnail job; a clip has no filmstrip
+    thumbnailMasterVideoId: ingest.kind === "master" ? ingest.masterVideoId : null,
   };
 };
 
@@ -346,8 +356,13 @@ export const closeIngest = async (
   input: { ingestId: number; ticket: string },
   database?: DbOrTx,
 ): Promise<IngestCloseResult> => {
-  const run = async (tx: DbOrTx) => (await runClose(input.ingestId, { ticket: input.ticket }, tx))!;
-  return database ? run(database) : db.transaction(run);
+  const run = async (tx: DbOrTx) =>
+    (await runClose(input.ingestId, { ticket: input.ticket }, tx))!;
+  const closed = database ? await run(database) : await db.transaction(run);
+  if (closed.thumbnailMasterVideoId !== null) {
+    enqueueThumbnails(closed.thumbnailMasterVideoId);
+  }
+  return closed.result;
 };
 
 // sweep close: no ticket, and a stale row simply loses the race
@@ -357,7 +372,13 @@ export const closeIdleIngest = async (
   database?: DbOrTx,
 ): Promise<IngestCloseResult | null> => {
   const run = (tx: DbOrTx) => runClose(ingestId, { idleCutoff }, tx);
-  return database ? run(database) : db.transaction(run);
+  const closed = database ? await run(database) : await db.transaction(run);
+  if (closed === null) return null;
+  // A swept close mints the same thumbnails an explicit one does.
+  if (closed.thumbnailMasterVideoId !== null) {
+    enqueueThumbnails(closed.thumbnailMasterVideoId);
+  }
+  return closed.result;
 };
 
 /* =========================================================

@@ -30,6 +30,11 @@ const schema = z.object({
   DATA_DIR: z.string().min(1).default("./data"),
   FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
   FFMPEG_CONCURRENCY: z.coerce.number().int().positive().default(1),
+  // One FFmpeg run may not outlive this. A hung encoder is killed, never
+  // waited on: thumbnails are best effort and must not pin a worker slot.
+  FFMPEG_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // Still frames a filmstrip may produce for one master.
+  THUMBNAIL_MAX_STILLS: z.coerce.number().int().positive().default(20),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });
