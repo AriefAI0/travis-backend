@@ -379,13 +379,20 @@ describe("inspections routes", () => {
     const cviId = await startInspection("CVI");
     const gviId = await startInspection("GVI");
 
-    // CVI gets a clip row (as MinIO create would), GVI stays bare
-    await testDb.insert(schema.videoClip).values({
-      resultId: cviId,
-      masterVideoId: 1,
-      startOffsetMs: 0,
-      storageStem: "p1/s101/master_1/CVI/clip_1",
-      recordingStatus: "recording",
+    // CVI gets a clip row with an open ingest (as the recorder would), GVI stays bare
+    const [cviClip] = await testDb
+      .insert(schema.videoClip)
+      .values({
+        resultId: cviId,
+        masterVideoId: 1,
+        startOffsetMs: 0,
+      })
+      .returning({ clipId: schema.videoClip.clipId });
+    await testDb.insert(schema.recordingIngest).values({
+      kind: "clip",
+      clipId: cviClip!.clipId,
+      ticketHash: "c".repeat(64),
+      keyDate: "2026-09-20",
     });
 
     const res = await app.request("/api/v1/sessions/101/open-inspections");
@@ -396,7 +403,7 @@ describe("inspections routes", () => {
       resultId: cviId,
       itemId: 100,
       inspectionTypeCode: "CVI",
-      clip: { clipId: expect.any(Number), recordingStatus: "recording" },
+      clip: { clipId: cviClip!.clipId, capturing: true },
     });
     expect(body.data[1]).toMatchObject({ resultId: gviId, clip: null });
 

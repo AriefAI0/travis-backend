@@ -4,6 +4,7 @@
 import type { InspectionTypeCode } from "../../types/api";
 import { db, type DbOrTx } from "../client";
 import { AppError, notFound } from "../../lib/error";
+import { listIngestRecordsByClipIds } from "../repositories/recording-ingest.repository";
 import {
   createSessionItem,
   getSessionById,
@@ -149,7 +150,25 @@ export type OpenInspection = {
   inspectionTypeCode: InspectionTypeCode;
   remarks: string | null;
   createdAt: Date;
-  clip: { clipId: number; recordingStatus: string; storageStem: string | null } | null;
+  // capturing = the clip's ingest has not closed; the direct-protocol fact that
+  // replaces the old recording-status string
+  clip: { clipId: number; capturing: boolean } | null;
+};
+
+// clips still on the wire, in one read for any number of clips
+const listCapturingClipIds = async (
+  clipIds: number[],
+  database?: DbOrTx,
+): Promise<Set<number>> => {
+  if (clipIds.length === 0) return new Set();
+
+  const ingestRows = await listIngestRecordsByClipIds(clipIds, database);
+  return new Set(
+    ingestRows
+      .filter((row) => row.closedAt === null)
+      .map((row) => row.clipId!)
+      .filter((clipId) => clipId !== null),
+  );
 };
 
 // open results of a session with clip state — the app's stop-master dialog
@@ -160,27 +179,39 @@ export const listOpenInspectionsBySessionId = async (
   const sessionRecord = await getSessionById(sessionId, database);
   if (!sessionRecord) throw notFound(`session ${sessionId}`);
 
-  const open: OpenInspection[] = [];
+  // flow: open results > first clip per result > one capturing read > project
+  const openResults = [];
   for (const result of await listResultsBySessionId(sessionId, database)) {
     if (await hasTypedDetail(result.inspectionTypeCode, result.resultId, database)) continue;
-    const clip = (await listVideoClipsByResultId(result.resultId, database))[0] ?? null;
-    open.push({
+    openResults.push(result);
+  }
+
+  const clipIdByResultId = new Map<number, number>();
+  for (const result of openResults) {
+    const clip = (await listVideoClipsByResultId(result.resultId, database))[0];
+    if (clip) clipIdByResultId.set(result.resultId, clip.clipId);
+  }
+
+  const capturingClipIds = await listCapturingClipIds(
+    [...clipIdByResultId.values()],
+    database,
+  );
+
+  return openResults.map((result) => {
+    const clipId = clipIdByResultId.get(result.resultId);
+    return {
       resultId: result.resultId,
       sessionItemId: result.sessionItemId,
       itemId: result.itemId,
       inspectionTypeCode: result.inspectionTypeCode,
       remarks: result.remarks,
       createdAt: result.createdAt,
-      clip: clip
-        ? {
-            clipId: clip.clipId,
-            recordingStatus: clip.recordingStatus,
-            storageStem: clip.storageStem,
-          }
-        : null,
-    });
-  }
-  return open;
+      clip:
+        clipId === undefined
+          ? null
+          : { clipId, capturing: capturingClipIds.has(clipId) },
+    };
+  });
 };
 
 // flow: master check > duplicate check > resolve ids > create result — one tx

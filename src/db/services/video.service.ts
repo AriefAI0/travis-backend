@@ -103,7 +103,6 @@ type PlaybackEventRow = {
   startOffsetMs: number;
   endOffsetMs: number | null;
   remarks: string | null;
-  storageStem: string | null;
   imageCount: number;
 };
 
@@ -355,7 +354,6 @@ export const getMasterVideoPlaybackData = async (
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
       remarks: result.remarks,
-      storageStem: videoClip.storageStem,
       imageCount: count(resultImage.imageId),
     })
     .from(videoClip)
@@ -376,7 +374,6 @@ export const getMasterVideoPlaybackData = async (
       videoClip.startOffsetMs,
       videoClip.endOffsetMs,
       result.remarks,
-      videoClip.storageStem,
     )
     .orderBy(asc(videoClip.startOffsetMs), asc(videoClip.clipId));
 
@@ -429,7 +426,6 @@ export const getMasterVideoPlaybackData = async (
       startOffsetMs: eventRow.startOffsetMs,
       endOffsetMs: eventRow.endOffsetMs,
       remarks: eventRow.remarks,
-      storageStem: eventRow.storageStem,
       images: imagesByResultId.get(eventRow.resultId) ?? [],
       imageCount: eventRow.imageCount,
     })),
