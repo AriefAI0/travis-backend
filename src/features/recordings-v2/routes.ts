@@ -96,8 +96,11 @@ export const recordingV2Routes = (database?: DbOrTx, storage: Client = minio) =>
     return identityPromise;
   };
 
-  // gate + deployment scope: v2 off by default; token binds the deployment
-  routes.use("*", async (c, next) => {
+  // Gate + deployment scope: v2 off by default; token binds the deployment.
+  // Scoped to this surface on purpose. A bare "*" here would leak onto every
+  // route mounted after this one, because the sub-app mounts at the root —
+  // so turning v2 off would refuse unrelated features too.
+  const gate = async (c: Context, next: () => Promise<void>) => {
     if (!env.RECORDING_V2_ENABLED) {
       throw new AppError(404, "feature_disabled", "Recording v2 is disabled");
     }
@@ -108,7 +111,9 @@ export const recordingV2Routes = (database?: DbOrTx, storage: Client = minio) =>
       throw new AppError(401, "deployment_unauthorized", "Missing or invalid deployment token");
     }
     await next();
-  });
+  };
+  routes.use("/api/v2/recordings", gate);
+  routes.use("/api/v2/recordings/*", gate);
 
   // every v2 response carries the protocol version + deployment identity
   const respond = async (c: Context, data: Record<string, unknown>, status: 200 | 201 = 200) =>
