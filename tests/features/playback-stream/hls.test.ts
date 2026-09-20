@@ -11,8 +11,6 @@ import * as schema from "../../../src/db/schema";
 import {
   buildPlaylist,
   contiguousPrefix,
-  HLS_OPEN_WINDOW_ENTRIES,
-  openWindow,
   readPlaylistSource,
   targetDurationSeconds,
   type PlaylistSegment,
@@ -62,13 +60,14 @@ describe("playlist rendering", () => {
     );
   });
 
-  test("an open playlist carries no ENDLIST and keeps the media sequence", () => {
+  test("an open playlist is an EVENT range that keeps its media sequence at zero", () => {
     const playlist = buildPlaylist(
-      { segments: rows(2), closed: false, mediaSequence: 40, targetDurationSeconds: 2 },
+      { segments: rows(2), closed: false, mediaSequence: 0, targetDurationSeconds: 2 },
       uri,
     );
 
-    expect(playlist).toContain("#EXT-X-MEDIA-SEQUENCE:40");
+    expect(playlist).toContain("#EXT-X-PLAYLIST-TYPE:EVENT");
+    expect(playlist).toContain("#EXT-X-MEDIA-SEQUENCE:0");
     expect(playlist).not.toContain("#EXT-X-PLAYLIST-TYPE:VOD");
     expect(playlist).not.toContain("#EXT-X-ENDLIST");
   });
@@ -128,36 +127,32 @@ describe("prefix and window", () => {
     expect(contiguousPrefix([])).toEqual([]);
   });
 
-  // the locked window: at most 540 newest entries, whatever the recording length
-  test("539 rows stay whole", () => {
-    const window = openWindow(rows(539));
-    expect(window.segments).toHaveLength(539);
-    expect(window.mediaSequence).toBe(0);
-  });
-
-  test("540 rows stay whole", () => {
-    const window = openWindow(rows(540));
-    expect(window.segments).toHaveLength(540);
-    expect(window.mediaSequence).toBe(0);
-  });
-
-  test("541 rows drop the oldest and move the media sequence", () => {
-    const window = openWindow(rows(541));
-    expect(window.segments).toHaveLength(HLS_OPEN_WINDOW_ENTRIES);
-    expect(window.mediaSequence).toBe(1);
-    expect(window.segments[0]!.sequence).toBe(1);
-    expect(window.segments.at(-1)!.sequence).toBe(540);
-  });
-
-  test("a window that starts mid-recording never renumbers the children", () => {
-    const window = openWindow(rows(900));
+  // The whole recording stays addressable while it records: no live window.
+  test("an open playlist lists every committed segment", () => {
+    const segments = contiguousPrefix(rows(900));
     const playlist = buildPlaylist(
-      { ...window, closed: false, targetDurationSeconds: 2 },
+      { segments, closed: false, mediaSequence: 0, targetDurationSeconds: 2 },
       uri,
     );
-    const firstUri = playlist.split("\n").find((line) => line.startsWith("seg/"));
-    expect(firstUri).toBe(`seg/${String(360).padStart(10, "0")}.ts?t=TOKEN`);
-    expect(playlist).toContain("#EXT-X-MEDIA-SEQUENCE:360");
+
+    const children = playlist.split("\n").filter((line) => line.startsWith("seg/"));
+    expect(children).toHaveLength(900);
+    // day one is still reachable on day four
+    expect(children[0]).toBe(`seg/${String(0).padStart(10, "0")}.ts?t=TOKEN`);
+    expect(children.at(-1)).toBe(`seg/${String(899).padStart(10, "0")}.ts?t=TOKEN`);
+    expect(playlist).toContain("#EXT-X-MEDIA-SEQUENCE:0");
+  });
+
+  test("a gapless open prefix reaches the newest committed segment", () => {
+    const segments = contiguousPrefix([segment(0), segment(1), segment(3)]);
+    const playlist = buildPlaylist(
+      { segments, closed: false, mediaSequence: 0, targetDurationSeconds: 2 },
+      uri,
+    );
+
+    const children = playlist.split("\n").filter((line) => line.startsWith("seg/"));
+    expect(children).toHaveLength(2);
+    expect(playlist).not.toContain(`seg/${String(3).padStart(10, "0")}.ts`);
   });
 });
 

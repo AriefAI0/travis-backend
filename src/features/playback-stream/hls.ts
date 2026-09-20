@@ -1,8 +1,9 @@
 // Dynamic HLS from stored segment rows: no stored manifest, no FFmpeg.
-// flow: read snapshot > walk the contiguous prefix > window the open case > render
+// flow: read snapshot > walk the contiguous prefix > render
 //
-// The playlist is rebuilt on every request, so a capture that is still running
-// serves a live window and a closed recording serves its full VOD range.
+// The playlist is rebuilt on every request. A closed recording is a VOD range;
+// a capture that is still running is an EVENT playlist that keeps growing, so
+// earlier footage stays seekable for as long as the recording lasts.
 
 import type { DbOrTx } from "../../db/client";
 import { notFound } from "../../lib/error";
@@ -14,9 +15,6 @@ import {
 } from "../../db/repositories/recording-ingest.repository";
 import { lastPlayableSequence } from "../../db/services/recording-playback.service";
 
-// locked window: a live playlist never carries more than this many entries
-export const HLS_OPEN_WINDOW_ENTRIES = 540;
-
 export type PlaylistSegment = {
   sequence: number;
   durationMs: number;
@@ -24,7 +22,7 @@ export type PlaylistSegment = {
 };
 
 export type PlaylistSource = {
-  // the entries to render, ascending, already windowed and gapless
+  // every entry to render, ascending, already gapless from sequence zero
   segments: PlaylistSegment[];
   closed: boolean;
   mediaSequence: number;
@@ -43,15 +41,6 @@ export function contiguousPrefix(rows: PlaylistSegment[]): PlaylistSegment[] {
   return prefix;
 }
 
-// the newest entries of an open playlist, with the media sequence they start at
-export function openWindow(
-  prefix: PlaylistSegment[],
-  size: number = HLS_OPEN_WINDOW_ENTRIES,
-): { segments: PlaylistSegment[]; mediaSequence: number } {
-  const start = Math.max(0, prefix.length - size);
-  return { segments: prefix.slice(start), mediaSequence: prefix[start]?.sequence ?? 0 };
-}
-
 // ceil to whole seconds: the spec wants the longest entry, rounded up
 export function targetDurationSeconds(segments: PlaylistSegment[]): number {
   const longest = segments.reduce((max, row) => Math.max(max, row.durationMs), 0);
@@ -67,8 +56,10 @@ export function buildPlaylist(source: PlaylistSource, segmentUri: (sequence: num
     "#EXT-X-VERSION:3",
     `#EXT-X-TARGETDURATION:${source.targetDurationSeconds}`,
     `#EXT-X-MEDIA-SEQUENCE:${source.mediaSequence}`,
+    // EVENT: append-only, so a player keeps every listed segment seekable and
+    // holds the media sequence at zero for the whole capture.
+    source.closed ? "#EXT-X-PLAYLIST-TYPE:VOD" : "#EXT-X-PLAYLIST-TYPE:EVENT",
   ];
-  if (source.closed) lines.push("#EXT-X-PLAYLIST-TYPE:VOD");
 
   for (const segment of source.segments) {
     if (segment.discontinuity) lines.push("#EXT-X-DISCONTINUITY");
@@ -79,7 +70,7 @@ export function buildPlaylist(source: PlaylistSource, segmentUri: (sequence: num
   return `${lines.join("\n")}\n`;
 }
 
-// read the pointer and the rows, then derive the window from the rows alone
+// read the pointer and the rows, then derive the range from the rows alone
 export const readPlaylistSource = async (
   scope: PlaybackScope,
   database?: DbOrTx,
@@ -91,15 +82,15 @@ export const readPlaylistSource = async (
   const visibleEnd = ingest.closedAt === null ? null : (ingest.finalSequence ?? -1);
   const rows = await listIngestSegmentRecords(ingest.ingestId, visibleEnd, database);
 
-  const prefix = contiguousPrefix(rows);
+  const segments = contiguousPrefix(rows);
   const closed = ingest.closedAt !== null;
-  const window = closed ? { segments: prefix, mediaSequence: 0 } : openWindow(prefix);
 
   return {
-    segments: window.segments,
+    segments,
     closed,
-    mediaSequence: window.mediaSequence,
-    targetDurationSeconds: targetDurationSeconds(window.segments),
+    // fixed at zero: an EVENT playlist never renumbers what it already served
+    mediaSequence: 0,
+    targetDurationSeconds: targetDurationSeconds(segments),
   };
 };
 

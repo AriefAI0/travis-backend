@@ -164,7 +164,7 @@ describe("hls routes", () => {
     ]);
   });
 
-  test("an open master playlist is live and unbounded by the frozen range", async () => {
+  test("an open master playlist is an EVENT range unbounded by the frozen range", async () => {
     const { masterVideoId } = await seedMaster({ count: 2, closed: false });
     const token = mintPlaybackToken({ kind: "master", id: masterVideoId });
 
@@ -172,9 +172,13 @@ describe("hls routes", () => {
       await app.request(`/api/v2/hls/master/${masterVideoId}/index.m3u8?t=${token}`)
     ).text();
 
+    expect(body).toContain("#EXT-X-PLAYLIST-TYPE:EVENT");
     expect(body).not.toContain("#EXT-X-PLAYLIST-TYPE:VOD");
     expect(body).not.toContain("#EXT-X-ENDLIST");
+    // every committed segment, from sequence zero
+    expect(body).toContain("./0000000000.ts");
     expect(body).toContain("./0000000001.ts");
+    expect(body).toContain("#EXT-X-MEDIA-SEQUENCE:0");
   });
 
   test("a clip playlist serves under the clip scope", async () => {
@@ -345,5 +349,6 @@ describe("hls routes", () => {
     expect(res.status).toBe(204);
     expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
     expect(res.headers.get("access-control-allow-methods")).toContain("GET");
+    expect(res.headers.get("access-control-max-age")).toBe("600");
   });
 });
