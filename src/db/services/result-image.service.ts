@@ -1,8 +1,7 @@
 import {
+  imageEvidenceLeaves,
   imageExtension,
-  imageLeavesUnder,
-  resultImageStem,
-  resolveOrganizationId,
+  resultEvidenceStem,
 } from "../../lib/minio_storage/paths";
 import { AppError } from "../../lib/error";
 import { mintPutUrl } from "../../lib/minio_storage/mint";
@@ -14,6 +13,11 @@ import {
   updateResultImageById,
 } from "../repositories/result-image.repository";
 import { findProjectById } from "../repositories/project.repository";
+import { findSessionById } from "../repositories/session.repository";
+import { listMasterVideoRecordsBySessionId } from "../repositories/master-video.repository";
+import { listVideoClipRecordsByResultId } from "../repositories/video-clip.repository";
+import { findItemById } from "../repositories/item.repository";
+import { findSessionItemById } from "../repositories/session-item.repository";
 import { getResultById, touchResult } from "./result.service";
 
 export type ImageUploadTicket = {
@@ -40,11 +44,18 @@ const requireImage = async (imageId: number, database?: DbOrTx) => {
   return imageRow;
 };
 
-// flow: result row > project > org > key date > results stem. The date is the
-// result's own creation date, read from Postgres: one result keeps one
-// directory, and a stored stem never moves.
+// flow: result row > project + session + master + item > evidence stem. The
+// date is the master's start, or the session's creation for a session with no
+// master (a photo-only inspection). The stem freezes on the image row, so a
+// later rename cannot split one result's images across two directories.
 const resolveImageStem = async (
-  resultRow: { projectId: number; sessionId: number; resultId: number; createdAt: Date },
+  resultRow: {
+    projectId: number;
+    sessionId: number;
+    sessionItemId: number;
+    resultId: number;
+    inspectionTypeCode: string;
+  },
   database?: DbOrTx,
 ) => {
   const project = await findProjectById(resultRow.projectId, database);
@@ -52,15 +63,43 @@ const resolveImageStem = async (
     throw new AppError(404, "not_found", `project ${resultRow.projectId} not found`);
   }
 
-  return resultImageStem(
-    {
-      organizationId: await resolveOrganizationId(project.organizationId, database),
-      projectId: project.projectId,
-      sessionId: resultRow.sessionId,
-      startedAt: resultRow.createdAt,
-    },
-    resultRow.resultId,
-  );
+  const session = await findSessionById(resultRow.sessionId, database);
+  if (!session) {
+    throw new AppError(404, "not_found", `session ${resultRow.sessionId} not found`);
+  }
+
+  const sessionItem = await findSessionItemById(resultRow.sessionItemId, database);
+  if (!sessionItem) {
+    throw new AppError(404, "not_found", `session item ${resultRow.sessionItemId} not found`);
+  }
+
+  const item = await findItemById(sessionItem.itemId, database);
+  if (!item) {
+    throw new AppError(404, "not_found", `item ${sessionItem.itemId} not found`);
+  }
+
+  // A session holds one master in practice. The repo pins the pick by
+  // (startEpoch, masterVideoId) when it somehow holds more.
+  const [master] = await listMasterVideoRecordsBySessionId(resultRow.sessionId, database);
+  const [clip] = await listVideoClipRecordsByResultId(resultRow.resultId, database);
+
+  return resultEvidenceStem({
+    projectId: project.projectId,
+    projectTitle: project.title,
+    displayNumber: session.displayNumber ?? session.sessionId,
+    startEpoch: master
+      ? master.startEpoch
+      : Math.floor(session.createdAt.getTime() / 1000),
+    resultId: resultRow.resultId,
+    itemLabel: item.itemLabel,
+    clip: clip
+      ? {
+          clipId: clip.clipId,
+          itemLabel: item.itemLabel,
+          inspectionType: resultRow.inspectionTypeCode,
+        }
+      : undefined,
+  });
 };
 
 // flow: result row > results stem > insert row > leaf from assigned imageId > PUT url
@@ -91,7 +130,7 @@ export const createImageUploadTicket = async (
   // report staleness keys on result.updatedAt — a new image must move it
   await touchResult(resultRow.resultId, database);
 
-  const leaf = imageLeavesUnder(stem, imageRow.imageId, input.contentType).raw;
+  const leaf = imageEvidenceLeaves(stem, imageRow.imageId, input.contentType).raw;
   return {
     imageId: imageRow.imageId,
     storageStem: stem,
@@ -115,7 +154,11 @@ export const createAnnotatedUploadTicket = async (
   await updateResultImageById(imageId, { hasAnnotated: true }, database);
   await touchResult(imageRow.resultId, database);
 
-  const leaf = imageLeavesUnder(imageRow.storageStem, imageId, imageRow.contentType).annotated;
+  const leaf = imageEvidenceLeaves(
+    imageRow.storageStem,
+    imageId,
+    imageRow.contentType,
+  ).annotated;
   return {
     imageId,
     storageStem: imageRow.storageStem,

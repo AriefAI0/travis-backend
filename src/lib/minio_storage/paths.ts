@@ -204,19 +204,66 @@ export function buildMasterKeyPrefix(input: KeyPrefixInput): string {
   return `${projectFolder(input)}/${sessionFolder(input)}/master-video`;
 }
 
-export interface ClipKeyPrefixInput extends KeyPrefixInput {
+export interface ClipFolderInput {
   clipId: number;
   itemLabel: string;
   inspectionType: string;
 }
 
 // <clipId>-<itemSlug>-<inspection>: the folder names its own inspection
-const clipFolder = (input: ClipKeyPrefixInput): string =>
-  joinParts([String(input.clipId), slugify(input.itemLabel), input.inspectionType.toLowerCase()]);
+const clipFolder = (clip: ClipFolderInput): string =>
+  joinParts([String(clip.clipId), slugify(clip.itemLabel), clip.inspectionType.toLowerCase()]);
+
+export interface ClipKeyPrefixInput extends KeyPrefixInput, ClipFolderInput {}
 
 // same session root as the master, then the clip's own folder
 export function buildClipKeyPrefix(input: ClipKeyPrefixInput): string {
   return `${projectFolder(input)}/${sessionFolder(input)}/clips/${clipFolder(input)}`;
+}
+
+// where an evidence image lives, frozen on its own row at ticket time
+export const EVIDENCE_FOLDER = "evidence-img";
+
+export interface ResultEvidenceStemInput extends KeyPrefixInput {
+  resultId: number;
+  itemLabel: string;
+  // present when the result has a clip: the image then sits beside it
+  clip?: ClipFolderInput;
+}
+
+// flow: project + session root > clip folder when a clip exists, else a results
+// folder. The two homes are both valid and both frozen, so a read never breaks.
+export function resultEvidenceStem(input: ResultEvidenceStemInput): string {
+  const root = `${projectFolder(input)}/${sessionFolder(input)}`;
+  if (input.clip) {
+    return `${root}/clips/${clipFolder(input.clip)}/${EVIDENCE_FOLDER}`;
+  }
+  const results = joinParts([String(input.resultId), slugify(input.itemLabel)]);
+  return `${root}/results/${results}/${EVIDENCE_FOLDER}`;
+}
+
+// raw and annotated twins of one image, minted from a stored stem.
+// A readable stem names the file by its id. A legacy numeric stem keeps the
+// names already on disk, so every image uploaded before this change resolves.
+export function imageEvidenceLeaves(
+  stem: string,
+  imageId: number,
+  contentType: string,
+): { raw: Leaf; annotated: Leaf } {
+  const ext = imageExtension(contentType) ?? "png";
+  const readable = stem.endsWith(`/${EVIDENCE_FOLDER}`);
+  return {
+    raw: {
+      bucket: env.BUCKET_MEDIA,
+      key: readable ? `${stem}/${imageId}.${ext}` : `${stem}/img_${imageId}_raw.${ext}`,
+    },
+    annotated: {
+      bucket: env.BUCKET_MEDIA,
+      key: readable
+        ? `${stem}/${imageId}-annotated.${ext}`
+        : `${stem}/img_${imageId}_annotated.${ext}`,
+    },
+  };
 }
 
 // one leaf under a frozen prefix; every direct-media object lives in the media bucket

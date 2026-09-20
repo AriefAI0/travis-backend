@@ -69,6 +69,32 @@ const createImage = async (body: unknown) =>
     body: JSON.stringify(body),
   });
 
+// The seeded session has no master, so the stem dates from the session row.
+// Reading it back keeps the assertion off the wall clock.
+const sessionStem = async (resultId: number, label: string) => {
+  const [row] = await testDb.select().from(schema.session);
+  const iso = row!.createdAt.toISOString();
+  const day = iso.slice(0, 10);
+  const clock = iso.slice(11, 16).replace(":", "");
+  return `1-alpha-${day}/session-101-${day}-${clock}/results/${resultId}-${label}/evidence-img`;
+};
+
+// One master and one clip on the seeded result: the home an evidence image
+// takes once the clip exists.
+const seedMasterAndClip = async (startEpoch: number) => {
+  await testDb.insert(schema.masterVideo).values({
+    masterVideoId: 1,
+    sessionId: 101,
+    startEpoch,
+  });
+  await testDb.insert(schema.videoClip).values({
+    clipId: 7,
+    resultId: 5001,
+    masterVideoId: 1,
+    startOffsetMs: 0,
+  });
+};
+
 describe("evidence image routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
@@ -83,11 +109,11 @@ describe("evidence image routes", () => {
     expect(data.imageId).toBeGreaterThan(0);
     expect(data.variant).toBe("raw");
     expect(data.contentType).toBe("image/png");
-    // stem is the dated results directory in the media bucket; the org id
-    // depends on the seeded default, so assert the scoped tail only
-    expect(data.storageStem).toMatch(/^[0-9]+\/1\/101\/\d{4}\/\d{2}\/\d{2}\/results\/5001$/);
+    // a result with no clip lands under results/<resultId>-<itemSlug>
+    const stem = await sessionStem(5001, "jl-01");
+    expect(data.storageStem).toBe(stem);
     expect(data.url).toContain("travis-media");
-    expect(data.url).toContain(`/results/5001/img_${data.imageId}_raw.png`);
+    expect(data.url).toContain(`${stem}/${data.imageId}.png`);
     expect(data.expiresInSeconds).toBe(900);
 
     // row persists the format and the un-annotated flag
@@ -100,6 +126,18 @@ describe("evidence image routes", () => {
       contentType: "image/png",
       hasAnnotated: false,
     });
+  });
+
+  // With a clip the image sits beside it, and the date comes from the master.
+  it("create nests under the clip folder once a clip exists", async () => {
+    await seedResultContext();
+    await seedMasterAndClip(1000);
+
+    const { data } = await json<{ data: Ticket }>(await createImage({ contentType: "image/png" }));
+
+    const stem = "1-alpha-1970-01-01/session-101-1970-01-01-0016/clips/7-jl-01-gvi/evidence-img";
+    expect(data.storageStem).toBe(stem);
+    expect(data.url).toContain(`${stem}/${data.imageId}.png`);
   });
 
   it("create rejects an unsupported contentType with 400", async () => {
@@ -140,7 +178,7 @@ describe("evidence image routes", () => {
     const body = await json<{ data: Ticket }>(res);
     expect(body.data.imageId).toBe(data.imageId);
     expect(body.data.variant).toBe("annotated");
-    expect(body.data.url).toContain(`img_${data.imageId}_annotated.png`);
+    expect(body.data.url).toContain(`${data.storageStem}/${data.imageId}-annotated.png`);
 
     const row = (await testDb.select().from(schema.resultImage))[0]!;
     expect(row.hasAnnotated).toBe(true);
@@ -168,7 +206,7 @@ describe("evidence image routes", () => {
   it("sidebar images carry minted URLs and the poster is the first snip", async () => {
     await seedResultContext();
     const first = await json<{ data: Ticket }>(await createImage({ contentType: "image/png" }));
-    await createImage({ contentType: "image/jpeg" });
+    const second = await json<{ data: Ticket }>(await createImage({ contentType: "image/jpeg" }));
 
     const res = await app.request("/api/v1/items/100/results");
     expect(res.status).toBe(200);
@@ -177,8 +215,8 @@ describe("evidence image routes", () => {
 
     expect(entry.images).toHaveLength(2);
     // first image is png raw; second is jpeg raw (no annotated twin yet)
-    expect(entry.images[0].url).toContain(`img_${first.data.imageId}_raw.png`);
-    expect(entry.images[1].url).toContain("_raw.jpg");
+    expect(entry.images[0].url).toContain(`/${first.data.imageId}.png`);
+    expect(entry.images[1].url).toContain(`/${second.data.imageId}.jpg`);
     // poster = lowest imageId = the first snip taken
     expect(entry.posterUrl).toBe(entry.images[0].url);
 
@@ -186,9 +224,28 @@ describe("evidence image routes", () => {
     await app.request(`/api/v1/images/${first.data.imageId}/annotated`, { method: "POST" });
     const after = await json(await app.request("/api/v1/items/100/results"));
     const entryAfter = after.data.sessions[0].results[0];
-    expect(entryAfter.images[0].url).toContain("_annotated.png");
-    expect(entryAfter.images[1].url).toContain("_raw.jpg");
+    expect(entryAfter.images[0].url).toContain(`/${first.data.imageId}-annotated.png`);
+    expect(entryAfter.images[1].url).toContain(`/${second.data.imageId}.jpg`);
     expect(entryAfter.posterUrl).toBe(entryAfter.images[0].url);
+  });
+
+  // Images uploaded before the readable layout keep resolving: a legacy stem
+  // still mints the names already on disk.
+  it("a legacy numeric stem still mints its legacy leaf names", async () => {
+    await seedResultContext();
+    await testDb.insert(schema.resultImage).values({
+      imageId: 61,
+      resultId: 5001,
+      storageStem: "1/1/101/2026/09/20/results/5001",
+      contentType: "image/png",
+      hasAnnotated: true,
+    });
+
+    const { data } = await json(await app.request("/api/v1/items/100/results"));
+    const entry = data.sessions[0].results[0];
+
+    expect(entry.images[0].url).toContain("img_61_annotated.png");
+    expect(entry.images[0].url).not.toContain("evidence-img");
   });
 
   it("sidebar clip videoUrl follows stored segments, never the outcome status", async () => {
