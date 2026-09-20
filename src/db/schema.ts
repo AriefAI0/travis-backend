@@ -572,6 +572,8 @@ export const recordingIngest = pgTable(
     ticketHash: text("ticket_hash").notNull(),
     // recording start UTC, frozen at admission: a midnight rollover never moves keys
     keyDate: date("key_date", { mode: "string" }).notNull(),
+    // readable key directory, frozen at admission; nullable until phase 2 writes it
+    keyPrefix: text("key_prefix"),
     openedAt: timestamp("opened_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     // null until the first committed segment; the sweep falls back to openedAt
     lastSegmentAt: timestamp("last_segment_at", { withTimezone: true, mode: "date" }),
