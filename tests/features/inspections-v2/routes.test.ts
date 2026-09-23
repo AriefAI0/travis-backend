@@ -208,6 +208,30 @@ describe("inspections v2 routes", () => {
     expect(active.map((row) => row.layer).sort()).toEqual([1, 2]);
   });
 
+  it("lets an open inspection adopt a form version saved mid-inspection", async () => {
+    await seedWorld();
+    const started = await startV2({});
+    const resultId = (await json(started)).data.resultId as number;
+
+    // operator edits the form while the inspection is open
+    const saved = (await json(
+      await post("/api/v1/projects/1/inspection-forms/GVI/versions", {
+        customFields: [{ label: "Mid-flight note", dataType: "text", displayOrder: 0 }]
+      })
+    )).data as Record<string, any>;
+    const midField = saved.fields.find((f: Record<string, any>) => f.label === "Mid-flight note");
+
+    const stopped = await post(`/api/v1/inspections/v2/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: { [midField.inspectionFormFieldId]: "added mid-inspection" },
+      masterEndMs: 7000
+    });
+    expect(stopped.status).toBe(200);
+    const row = (await json(stopped)).data as Record<string, any>;
+    expect(row.inspectionFormId).toBe(saved.inspectionFormId);
+    expect(row.customValues[midField.inspectionFormFieldId]).toBe("added mid-inspection");
+  });
+
   // regression: RESTRICT target FKs deadlocked project deletion once results existed
   it("deletes a project that has v2 results and tree data", async () => {
     await seedWorld();

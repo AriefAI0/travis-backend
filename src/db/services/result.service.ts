@@ -99,6 +99,11 @@ const normalizeResultUpdate = (
     nextData.customValues = data.customValues;
   }
 
+  // completed results re-pin to the form version live at stop time
+  if ("inspectionFormId" in data) {
+    nextData.inspectionFormId = data.inspectionFormId;
+  }
+
   return nextData;
 };
 

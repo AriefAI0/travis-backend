@@ -494,15 +494,20 @@ export const stopInspectionV2 = async (
       throw new AppError(409, "inspection_already_stopped", `inspection ${resultId} is already stopped`);
     }
 
-    const values = await validateCustomValues(
-      result.inspectionFormId ?? 0,
-      input.customValues ?? {},
+    // An active inspection adopts the CURRENT form version: an operator who
+    // edits the form mid-inspection can fill the new fields. The completed
+    // result lands on that version, so its labels stay frozen afterwards.
+    const form = await getCurrentInspectionForm(
+      result.projectId,
+      result.inspectionTypeCode,
       tx,
     );
+    const values = await validateCustomValues(form.inspectionFormId, input.customValues ?? {}, tx);
 
     const update: Record<string, unknown> = {
       masterEndMs: input.masterEndMs,
       customValues: values,
+      inspectionFormId: form.inspectionFormId,
     };
     if (input.remarks !== undefined) update.remarks = input.remarks;
     const updated = await updateResult(resultId, update, tx);
