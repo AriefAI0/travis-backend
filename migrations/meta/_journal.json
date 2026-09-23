@@ -110,22 +110,8 @@
     {
       "idx": 15,
       "version": "7",
-      "when": 1790351399751,
-      "tag": "0015_inspection_redesign",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "7",
-      "when": 1790354999751,
-      "tag": "0016_fix_inspection_fk_actions",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "7",
-      "when": 1790358599751,
-      "tag": "0017_drop_legacy_structure",
+      "when": 1790202435480,
+      "tag": "0018_furry_fabian_cortez",
       "breakpoints": true
     }
   ]
