@@ -75,6 +75,26 @@ export const listResultRecordsBySessionId = async (
     orderBy: asc(result.resultId),
   });
 
+/** v2 target reads: results pointing at one main component. */
+export const listResultRecordsByMainComponentId = async (
+  mainComponentId: number,
+  database: DbOrTx = db,
+) =>
+  database.query.result.findMany({
+    where: and(eq(result.mainComponentId, mainComponentId), isNull(result.archivedAt)),
+    orderBy: asc(result.resultId),
+  });
+
+/** v2 target reads: results pointing at one component code. */
+export const listResultRecordsByComponentCodeId = async (
+  componentCodeId: number,
+  database: DbOrTx = db,
+) =>
+  database.query.result.findMany({
+    where: and(eq(result.componentCodeId, componentCodeId), isNull(result.archivedAt)),
+    orderBy: asc(result.resultId),
+  });
+
 /** Batched active-result fetch across many session_items (kills the sidebar N+1). */
 export const listResultRecordsBySessionItemIds = async (
   sessionItemIds: number[],

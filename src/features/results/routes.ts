@@ -18,6 +18,7 @@ import {
   removeResultImage,
 } from "../../db/services/result-image.service";
 import { listMasterVideosByProjectId } from "../../db/services/video.service";
+import { getTargetResultSidebar } from "../../db/services/target-results.service";
 import { parseBody, parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
 import { createResultImageSchema, resultIdsSchema } from "../../types/api";
@@ -32,6 +33,12 @@ export const resultRoutes = (database?: DbOrTx) => {
     const itemId = parseId(c, "itemId");
     return ok(c, await getItemResultSidebar(itemId, database));
   });
+
+  // v2 target sidebars: results grouped by session for either target kind
+  routes.get("/api/v1/main-components/:id/results", async (c) =>
+    ok(c, await getTargetResultSidebar({ mainComponentId: parseId(c, "id") }, database)));
+  routes.get("/api/v1/component-codes/:id/results", async (c) =>
+    ok(c, await getTargetResultSidebar({ componentCodeId: parseId(c, "id") }, database)));
 
   // mirrors the app's result:listProjectRecordings channel
   routes.get("/api/v1/projects/:projectId/recordings", async (c) => {

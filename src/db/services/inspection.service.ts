@@ -39,6 +39,7 @@ import {
 import { getCurrentInspectionForm } from "./inspection-form.service";
 import {
   getComponentCodeById,
+  getComponentTypeById,
   getMainComponentById,
   getMainComponentTypeById,
   getTaskCodeById,
@@ -595,4 +596,133 @@ export const listActiveV2BySessionId = async (
           : { clipId, capturing: capturingClipIds.has(clipId) },
     };
   });
+};
+
+/* ---------- session timeline: rows for the event table, markers for playback ---------- */
+export type SessionInspectionBreadcrumb = {
+  taskGroup: { code: string; label: string };
+  taskCode: { code: string; label: string };
+  mainComponent: { description: string };
+  componentType: { code: string; label: string } | null;
+  componentCode: { code: string; label: string | null } | null;
+};
+
+export type SessionInspectionRow = {
+  resultId: number;
+  inspectionTypeCode: InspectionTypeCode;
+  layer: number;
+  displayNumber: number;
+  remarks: string | null;
+  masterStartMs: number | null;
+  masterEndMs: number | null;
+  createdAt: Date;
+  target: {
+    kind: "main_component" | "component_code";
+    mainComponentId: number | null;
+    componentCodeId: number | null;
+    label: string;
+  };
+  breadcrumb: SessionInspectionBreadcrumb | null;
+};
+
+// walk a v2 result's target to the full breadcrumb; labels follow renames
+const buildBreadcrumb = async (
+  mainComponentId: number | null,
+  componentCodeId: number | null,
+  database?: DbOrTx,
+): Promise<{ breadcrumb: SessionInspectionBreadcrumb; label: string }> => {
+  type ComponentCodeRow = Awaited<ReturnType<typeof getComponentCodeById>>;
+  type BranchRow = Awaited<ReturnType<typeof getMainComponentTypeById>>;
+
+  let componentCode: ComponentCodeRow = null;
+  let branch: BranchRow = null;
+  if (componentCodeId !== null) {
+    componentCode = await getComponentCodeById(componentCodeId, database);
+    branch = componentCode
+      ? await getMainComponentTypeById(componentCode.mainComponentTypeId, database)
+      : null;
+  }
+  const mainComponentIdResolved =
+    mainComponentId ?? (branch ? branch.mainComponentId : null);
+  const comp = mainComponentIdResolved
+    ? await getMainComponentById(mainComponentIdResolved, database)
+    : null;
+  const taskCode = comp ? await getTaskCodeById(comp.taskCodeId, database) : null;
+  const group = taskCode ? await getTaskGroupById(taskCode.taskGroupId, database) : null;
+  if (!comp || !taskCode || !group) throw notFound(`target of result`);
+
+  const catalog = branch ? await getComponentTypeById(branch.componentTypeId, database) : null;
+
+  return {
+    breadcrumb: {
+      taskGroup: { code: group.groupCode, label: group.label },
+      taskCode: { code: taskCode.code, label: taskCode.label },
+      mainComponent: { description: comp.description },
+      componentType: catalog ? { code: catalog.typeCode, label: catalog.label } : null,
+      componentCode: componentCode
+        ? { code: componentCode.code, label: componentCode.label }
+        : null,
+    },
+    label: componentCode ? componentCode.code : comp.description,
+  };
+};
+
+// all v2 rows of a session, open and finished — the workspace event table
+export const listSessionInspectionRows = async (
+  sessionId: number,
+  database?: DbOrTx,
+): Promise<SessionInspectionRow[]> => {
+  const sessionRecord = await getSessionById(sessionId, database);
+  if (!sessionRecord) throw notFound(`session ${sessionId}`);
+
+  const rows = (await listResultsBySessionId(sessionId, database)).filter(
+    (row) => row.layer !== null,
+  );
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const { breadcrumb, label } = await buildBreadcrumb(
+        row.mainComponentId,
+        row.componentCodeId,
+        database,
+      );
+      return {
+        resultId: row.resultId,
+        inspectionTypeCode: row.inspectionTypeCode,
+        layer: row.layer!,
+        displayNumber: row.displayNumber,
+        remarks: row.remarks,
+        masterStartMs: row.masterStartMs,
+        masterEndMs: row.masterEndMs,
+        createdAt: row.createdAt,
+        target: {
+          kind: row.componentCodeId !== null ? "component_code" : "main_component",
+          mainComponentId: row.mainComponentId,
+          componentCodeId: row.componentCodeId,
+          label,
+        },
+        breadcrumb,
+      };
+    }),
+  );
+};
+
+// finished rows only, ordered by master start — the playback layer markers
+export const listSessionInspectionMarkers = async (
+  sessionId: number,
+  database?: DbOrTx,
+) => {
+  const rows = await listSessionInspectionRows(sessionId, database);
+  return rows
+    .filter((row) => row.masterEndMs !== null)
+    .sort((a, b) => (a.masterStartMs ?? 0) - (b.masterStartMs ?? 0))
+    .map((row) => ({
+      resultId: row.resultId,
+      inspectionTypeCode: row.inspectionTypeCode,
+      layer: row.layer,
+      masterStartMs: row.masterStartMs,
+      masterEndMs: row.masterEndMs,
+      targetLabel: row.target.label,
+      breadcrumb: row.breadcrumb,
+    }));
 };

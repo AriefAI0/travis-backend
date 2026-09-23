@@ -340,6 +340,9 @@ export const listComponentTypes = (
   database?: DbOrTx,
 ) => listComponentTypeRecordsByProjectId(projectId, query, database);
 
+export const getComponentTypeById = (componentTypeId: number, database?: DbOrTx) =>
+  findComponentTypeById(componentTypeId, database);
+
 export const createComponentType = async (
   projectId: number,
   data: { typeCode: string; label: string },

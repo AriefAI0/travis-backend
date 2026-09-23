@@ -12,6 +12,8 @@ import { sessionRoutes } from "./features/sessions/routes";
 import { structureRoutes } from "./features/structure/routes";
 import { taskStructureRoutes } from "./features/task-structure/routes";
 import { inspectionFormRoutes } from "./features/inspection-forms/routes";
+import { sessionTimelineRoutes } from "./features/session-timeline/routes";
+import { reportRoutes } from "./features/reports/routes";
 import { env } from "./config/env";
 import { pingDb } from "./db/client";
 import { onError } from "./lib/error";
@@ -30,6 +32,9 @@ app.route("/", projectRoutes());
 app.route("/", structureRoutes());
 app.route("/", taskStructureRoutes());
 app.route("/", inspectionFormRoutes());
+app.route("/", sessionTimelineRoutes());
+// Stub only: report surface answers 501 until the report work lands.
+app.route("/", reportRoutes());
 app.route("/", sessionRoutes());
 app.route("/", inspectionRoutes());
 app.route("/", recordingRoutes());
