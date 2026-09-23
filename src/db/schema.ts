@@ -1,4 +1,4 @@
-import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, timestamp, uuid, date, primaryKey, index, unique, uniqueIndex, check,} from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, timestamp, uuid, date, primaryKey, index, unique, uniqueIndex, check, jsonb,} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /* =================== CHANGABLE ENUMRATIONS =================== */
@@ -232,6 +232,238 @@ export const sessionItem = pgTable(
 );
 
 /* =========================================================
+   TASK TREE (inspection structure)
+   Task Group > Task Code > Main Component > Type > Component Code
+========================================================= */
+export const taskGroup = pgTable(
+  "task_group",
+  {
+    taskGroupId: integer("task_group_id").primaryKey().generatedByDefaultAsIdentity(),
+
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => project.projectId, { onDelete: "cascade" }),
+
+    groupCode: text("group_code").notNull(),
+    label: text("label").notNull(),
+    displayOrder: integer("display_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+    ...archivedAt,
+  },
+  (table) => ({
+    idxTaskGroupProjectId: index("idx_task_group_project_id").on(table.projectId),
+    uqTaskGroupProjectCode: uniqueIndex("uq_task_group_project_code").on(
+      table.projectId,
+      table.groupCode
+    ),
+  })
+);
+
+export const taskCode = pgTable(
+  "task_code",
+  {
+    taskCodeId: integer("task_code_id").primaryKey().generatedByDefaultAsIdentity(),
+
+    taskGroupId: integer("task_group_id")
+      .notNull()
+      .references(() => taskGroup.taskGroupId, { onDelete: "cascade" }),
+
+    code: text("code").notNull(),
+    label: text("label").notNull(),
+    displayOrder: integer("display_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+    ...archivedAt,
+  },
+  (table) => ({
+    idxTaskCodeTaskGroupId: index("idx_task_code_task_group_id").on(table.taskGroupId),
+    uqTaskCodeGroupCode: uniqueIndex("uq_task_code_group_code").on(table.taskGroupId, table.code),
+  })
+);
+
+export const mainComponent = pgTable(
+  "main_component",
+  {
+    mainComponentId: integer("main_component_id").primaryKey().generatedByDefaultAsIdentity(),
+
+    taskCodeId: integer("task_code_id")
+      .notNull()
+      .references(() => taskCode.taskCodeId, { onDelete: "cascade" }),
+
+    // the "Description" field in the UI names the main component
+    description: text("description").notNull(),
+    displayOrder: integer("display_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+    ...archivedAt,
+  },
+  (table) => ({
+    idxMainComponentTaskCodeId: index("idx_main_component_task_code_id").on(table.taskCodeId),
+    uqMainComponentTaskCodeDescription: uniqueIndex(
+      "uq_main_component_task_code_description"
+    ).on(table.taskCodeId, table.description),
+  })
+);
+
+/* project-scoped reusable type catalog (VDM, VHM, Valve, ...);
+   rename keeps the id so branches and results follow */
+export const componentType = pgTable(
+  "component_type",
+  {
+    componentTypeId: integer("component_type_id").primaryKey().generatedByDefaultAsIdentity(),
+
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => project.projectId, { onDelete: "cascade" }),
+
+    typeCode: text("type_code").notNull(),
+    label: text("label").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+    ...archivedAt,
+  },
+  (table) => ({
+    idxComponentTypeProjectId: index("idx_component_type_project_id").on(table.projectId),
+    uqComponentTypeProjectCode: uniqueIndex("uq_component_type_project_code").on(
+      table.projectId,
+      table.typeCode
+    ),
+  })
+);
+
+/* one type branch per main component; same type cannot repeat under one main component */
+export const mainComponentType = pgTable(
+  "main_component_type",
+  {
+    mainComponentTypeId: integer("main_component_type_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+
+    mainComponentId: integer("main_component_id")
+      .notNull()
+      .references(() => mainComponent.mainComponentId, { onDelete: "cascade" }),
+
+    // restrict: a catalog value in use cannot be deleted, only renamed in place
+    componentTypeId: integer("component_type_id")
+      .notNull()
+      .references(() => componentType.componentTypeId, { onDelete: "restrict" }),
+
+    displayOrder: integer("display_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+    ...archivedAt,
+  },
+  (table) => ({
+    idxMainComponentTypeMainComponentId: index("idx_main_component_type_main_component_id").on(
+      table.mainComponentId
+    ),
+    idxMainComponentTypeComponentTypeId: index(
+      "idx_main_component_type_component_type_id"
+    ).on(table.componentTypeId),
+    uqMainComponentTypePair: uniqueIndex("uq_main_component_type_pair").on(
+      table.mainComponentId,
+      table.componentTypeId
+    ),
+  })
+);
+
+export const componentCode = pgTable(
+  "component_code",
+  {
+    componentCodeId: integer("component_code_id").primaryKey().generatedByDefaultAsIdentity(),
+
+    mainComponentTypeId: integer("main_component_type_id")
+      .notNull()
+      .references(() => mainComponentType.mainComponentTypeId, { onDelete: "cascade" }),
+
+    code: text("code").notNull(),
+    label: text("label"),
+    displayOrder: integer("display_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+    ...archivedAt,
+  },
+  (table) => ({
+    idxComponentCodeMainComponentTypeId: index(
+      "idx_component_code_main_component_type_id"
+    ).on(table.mainComponentTypeId),
+    uqComponentCodeBranchCode: uniqueIndex("uq_component_code_branch_code").on(
+      table.mainComponentTypeId,
+      table.code
+    ),
+  })
+);
+
+/* =========================================================
+   INSPECTION FORM (versioned, per project per inspection type)
+========================================================= */
+export const inspectionForm = pgTable(
+  "inspection_form",
+  {
+    inspectionFormId: integer("inspection_form_id").primaryKey().generatedByDefaultAsIdentity(),
+
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => project.projectId, { onDelete: "cascade" }),
+
+    inspectionTypeCode: inspectionType("inspection_type_code").notNull(),
+    version: integer("version").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxInspectionFormProjectId: index("idx_inspection_form_project_id").on(table.projectId),
+    uqInspectionFormProjectTypeVersion: uniqueIndex(
+      "uq_inspection_form_project_type_version"
+    ).on(table.projectId, table.inspectionTypeCode, table.version),
+  })
+);
+
+export const inspectionFormField = pgTable(
+  "inspection_form_field",
+  {
+    inspectionFormFieldId: integer("inspection_form_field_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+
+    inspectionFormId: integer("inspection_form_id")
+      .notNull()
+      .references(() => inspectionForm.inspectionFormId, { onDelete: "cascade" }),
+
+    label: text("label").notNull(),
+    // integer | decimal | text | boolean (check below)
+    dataType: text("data_type").notNull(),
+    required: boolean("required").notNull().default(false),
+    isBuiltin: boolean("is_builtin").notNull().default(false),
+    displayOrder: integer("display_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxInspectionFormFieldFormId: index("idx_inspection_form_field_form_id").on(
+      table.inspectionFormId
+    ),
+    uqInspectionFormFieldLabel: uniqueIndex("uq_inspection_form_field_label").on(
+      table.inspectionFormId,
+      table.label
+    ),
+    inspectionFormFieldDataTypeCheck: check(
+      "inspection_form_field_data_type_check",
+      sql`${table.dataType} IN ('integer', 'decimal', 'text', 'boolean')`,
+    ),
+  })
+);
+
+/* =========================================================
    RESULT (CORE FACT TABLE)
 ========================================================= */
 export const result = pgTable(
@@ -239,18 +471,45 @@ export const result = pgTable(
   {
     resultId: integer("result_id").primaryKey().generatedByDefaultAsIdentity(),
 
-    sessionItemId: integer("session_item_id")
-      .notNull()
-      .references(() => sessionItem.sessionItemId, { onDelete: "cascade" }),
+    // nullable since the v2 target model: legacy rows keep the session_item path
+    sessionItemId: integer("session_item_id").references(() => sessionItem.sessionItemId, {
+      onDelete: "cascade",
+    }),
 
     inspectionTypeCode: inspectionType("inspection_type_code").notNull(),
 
-    // denormalized hierarchy ids (indexed ints, NOT FKs) — query perf + mediaEngine paths
+    // denormalized hierarchy ids (indexed ints, NOT FKs) — query perf + mediaEngine paths;
+    // null on v2 rows, which carry the XOR target pair below instead
     projectId: integer("project_id").notNull(),
-    assetId: integer("asset_id").notNull(),
-    componentId: integer("component_id").notNull(),
-    itemId: integer("item_id").notNull(),
+    assetId: integer("asset_id"),
+    componentId: integer("component_id"),
+    itemId: integer("item_id"),
     sessionId: integer("session_id").notNull(),
+
+    // v2 target: main component XOR component code (check below)
+    mainComponentId: integer("main_component_id").references(() => mainComponent.mainComponentId, {
+      onDelete: "restrict",
+    }),
+    componentCodeId: integer("component_code_id").references(
+      () => componentCode.componentCodeId,
+      { onDelete: "restrict" }
+    ),
+
+    // master-video timeline anchors for playback layer markers
+    masterStartMs: bigint("master_start_ms", { mode: "number" }),
+    masterEndMs: bigint("master_end_ms", { mode: "number" }),
+
+    // runtime stack layer 1-3 (check below); null on legacy rows
+    layer: integer("layer"),
+
+    // custom form values keyed by inspection_form_field id
+    customValues: jsonb("custom_values"),
+
+    // form version pinned at start; completed results keep their version
+    inspectionFormId: integer("inspection_form_id").references(
+      () => inspectionForm.inspectionFormId,
+      { onDelete: "restrict" }
+    ),
 
     // per-session ordinal, assigned max+1 at creation
     displayNumber: integer("display_number").notNull(),
@@ -268,6 +527,20 @@ export const result = pgTable(
     idxResultComponentId: index("idx_result_component_id").on(table.componentId),
     idxResultItemId: index("idx_result_item_id").on(table.itemId),
     idxResultSessionId: index("idx_result_session_id").on(table.sessionId),
+    idxResultMainComponentId: index("idx_result_main_component_id").on(table.mainComponentId),
+    idxResultComponentCodeId: index("idx_result_component_code_id").on(table.componentCodeId),
+    // active-layer lookups: one open inspection per session per layer
+    idxResultSessionLayer: index("idx_result_session_layer").on(table.sessionId, table.layer),
+    // v2 target: exactly one target, or a legacy row that still has a session item
+    resultTargetCheck: check(
+      "result_target_check",
+      sql`(num_nonnulls(${table.mainComponentId}, ${table.componentCodeId}) = 1
+        OR (num_nonnulls(${table.mainComponentId}, ${table.componentCodeId}) = 0 AND ${table.sessionItemId} IS NOT NULL))`,
+    ),
+    resultLayerCheck: check(
+      "result_layer_check",
+      sql`${table.layer} IS NULL OR ${table.layer} BETWEEN 1 AND 3`,
+    ),
     idxResultInspectionTypeCode: index("idx_result_inspection_type_code").on(
       table.inspectionTypeCode
     ),
