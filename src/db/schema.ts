@@ -348,10 +348,12 @@ export const mainComponentType = pgTable(
       .notNull()
       .references(() => mainComponent.mainComponentId, { onDelete: "cascade" }),
 
-    // restrict: a catalog value in use cannot be deleted, only renamed in place
+    // cascade: deleting a catalog value removes its branches (and their codes).
+    // The "in use" refusal is a service-level 409, not a database block, so
+    // deleting a project never deadlocks on cascade ordering.
     componentTypeId: integer("component_type_id")
       .notNull()
-      .references(() => componentType.componentTypeId, { onDelete: "restrict" }),
+      .references(() => componentType.componentTypeId, { onDelete: "cascade" }),
 
     displayOrder: integer("display_order").notNull().default(0),
 
@@ -486,13 +488,15 @@ export const result = pgTable(
     itemId: integer("item_id"),
     sessionId: integer("session_id").notNull(),
 
-    // v2 target: main component XOR component code (check below)
+    // v2 target: main component XOR component code (check below).
+    // cascade: removing a target removes its results, matching the legacy
+    // item > session_item > result cascade.
     mainComponentId: integer("main_component_id").references(() => mainComponent.mainComponentId, {
-      onDelete: "restrict",
+      onDelete: "cascade",
     }),
     componentCodeId: integer("component_code_id").references(
       () => componentCode.componentCodeId,
-      { onDelete: "restrict" }
+      { onDelete: "cascade" }
     ),
 
     // master-video timeline anchors for playback layer markers
@@ -508,7 +512,7 @@ export const result = pgTable(
     // form version pinned at start; completed results keep their version
     inspectionFormId: integer("inspection_form_id").references(
       () => inspectionForm.inspectionFormId,
-      { onDelete: "restrict" }
+      { onDelete: "cascade" }
     ),
 
     // per-session ordinal, assigned max+1 at creation

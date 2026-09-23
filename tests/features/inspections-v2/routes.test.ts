@@ -10,9 +10,10 @@ import {
 import { json } from "../../helpers/json";
 import { inspectionRoutes } from "../../../src/features/inspections/routes";
 import { inspectionFormRoutes } from "../../../src/features/inspection-forms/routes";
+import { projectRoutes } from "../../../src/features/projects/routes";
 import * as schema from "../../../src/db/schema";
 
-const app = appFor(testDb, inspectionRoutes, inspectionFormRoutes);
+const app = appFor(testDb, inspectionRoutes, inspectionFormRoutes, projectRoutes);
 
 const post = async (path: string, body: unknown) =>
   app.request(path, {
@@ -205,5 +206,25 @@ describe("inspections v2 routes", () => {
       .data as Array<Record<string, any>>;
     expect(active).toHaveLength(2);
     expect(active.map((row) => row.layer).sort()).toEqual([1, 2]);
+  });
+
+  // regression: RESTRICT target FKs deadlocked project deletion once results existed
+  it("deletes a project that has v2 results and tree data", async () => {
+    await seedWorld();
+    const started = await startV2({});
+    const resultId = (await json(started)).data.resultId as number;
+    await post(`/api/v1/inspections/v2/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 1000
+    });
+
+    const deleted = await app.request("/api/v1/projects/1", { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+
+    const remaining = await testDb.query.result.findMany({ where: undefined });
+    expect(remaining).toHaveLength(0);
+    const remainingGroups = await testDb.query.taskGroup.findMany({ where: undefined });
+    expect(remainingGroups).toHaveLength(0);
   });
 });
