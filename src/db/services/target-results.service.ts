@@ -69,6 +69,7 @@ export const getTargetResultSidebar = async (
               return {
                 resultId: row.resultId,
                 inspectionTypeCode: row.inspectionTypeCode,
+                inspectionTypeName: row.inspectionTypeCode,
                 layer: row.layer,
                 displayNumber: row.displayNumber,
                 masterStartMs: row.masterStartMs,

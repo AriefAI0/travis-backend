@@ -24,29 +24,32 @@ import {
 const seedDomain = async () => {
   await testDb.insert(schema.project).values({ displayNumber: 9200, projectId: 9200, title: "P" });
   await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 9200, projectId: 9200, name: "S" });
-  await testDb.insert(schema.asset).values({ assetId: 9200, projectId: 9200, name: "A" });
-  await testDb
-    .insert(schema.component)
-    .values({ componentId: 9200, assetId: 9200, projectId: 9200, name: "C" });
-  await testDb.insert(schema.item).values({
-    itemId: 9200,
-    componentId: 9200,
+  await testDb.insert(schema.taskGroup).values({
+    taskGroupId: 9200,
     projectId: 9200,
-    assetId: 9200,
-    itemLabel: "I",
+    groupCode: "100",
+    label: "Rows",
   });
-  await testDb
-    .insert(schema.sessionItem)
-    .values({ sessionItemId: 9200, sessionId: 9200, itemId: 9200 });
+  await testDb.insert(schema.taskCode).values({
+    taskCodeId: 9200,
+    taskGroupId: 9200,
+    code: "101",
+    label: "Row A",
+  });
+  await testDb.insert(schema.mainComponent).values({
+    mainComponentId: 9200,
+    taskCodeId: 9200,
+    description: "I",
+  });
+  // session_item is gone: v2 results carry their own target
   await testDb.insert(schema.result).values({
     displayNumber: 9200,
     resultId: 9200,
-    sessionItemId: 9200,
     inspectionTypeCode: "GVI",
+        mainComponentId: 9200,
+        layer: 1,
+        masterStartMs: 0,
     projectId: 9200,
-    assetId: 9200,
-    componentId: 9200,
-    itemId: 9200,
     sessionId: 9200,
   });
 };

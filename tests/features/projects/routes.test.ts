@@ -78,11 +78,4 @@ describe("projects routes", () => {
     expect((await json(res)).code).toBe("validation_error");
   });
 
-  it("report-signature for unknown project is 200, not 404", async () => {
-    const res = await app.request("/api/v1/projects/999/report-signature");
-    expect(res.status).toBe(200);
-    const { data } = await json(res);
-    expect(data.resultIds).toEqual([]);
-    expect(data.updatedAtByResultId).toEqual({});
-  });
 });

@@ -311,6 +311,7 @@ export const attachMainComponentType = async (
   const existing = await findComponentTypeByProjectIdAndCode(projectId, typeCode, database);
   const catalogRow =
     existing ?? (await createComponentTypeRecord({ projectId, typeCode, label }, database));
+  if (!catalogRow) throw new Error("Failed to resolve the component type");
 
   return createMainComponentTypeRecord(
     {
@@ -342,6 +343,23 @@ export const listComponentTypes = (
 
 export const getComponentTypeById = (componentTypeId: number, database?: DbOrTx) =>
   findComponentTypeById(componentTypeId, database);
+
+// The label media keys and breadcrumbs use for a result's v2 target: the main
+// component description, else the component code.
+export const resolveTargetLabel = async (
+  target: { mainComponentId: number | null; componentCodeId: number | null },
+  database?: DbOrTx,
+): Promise<string> => {
+  if (target.mainComponentId !== null) {
+    const component = await findMainComponentById(target.mainComponentId, database);
+    return component?.description ?? `component-${target.mainComponentId}`;
+  }
+  if (target.componentCodeId !== null) {
+    const code = await findComponentCodeById(target.componentCodeId, database);
+    return code?.code ?? `code-${target.componentCodeId}`;
+  }
+  throw new AppError(400, "validation_error", "result has no inspection target");
+};
 
 export const createComponentType = async (
   projectId: number,

@@ -50,66 +50,79 @@ const seedVideoContext = async () => {
     },
   ]);
 
-  await testDb.insert(schema.asset).values({
-    assetId: 1,
+  // v2 target chain: group > code > main component (+ type + code)
+  await testDb.insert(schema.taskGroup).values({
+    taskGroupId: 1,
     projectId: 1,
-    name: "Platform A",
+    groupCode: "100",
+    label: "Rows",
   });
 
-  await testDb.insert(schema.component).values({
-    componentId: 10,
-    assetId: 1,
-    projectId: 1,
-    name: "Jacket Leg",
+  await testDb.insert(schema.taskCode).values({
+    taskCodeId: 10,
+    taskGroupId: 1,
+    code: "101",
+    label: "Row A",
   });
 
-  await testDb.insert(schema.item).values({
-    itemId: 100,
-    componentId: 10,
-    projectId: 1,
-    assetId: 1,
-    itemLabel: "JL-01",
-    status: "pending",
+  await testDb.insert(schema.mainComponent).values({
+    mainComponentId: 100,
+    taskCodeId: 10,
+    description: "JL-01",
   });
 
-  await testDb.insert(schema.sessionItem).values({
-    sessionItemId: 1000,
-    sessionId: 101,
-    itemId: 100,
+  await testDb.insert(schema.componentType).values({
+    componentTypeId: 1,
+    projectId: 1,
+    typeCode: "VDM",
+    label: "VDM",
+  });
+
+  await testDb.insert(schema.mainComponentType).values({
+    mainComponentTypeId: 1,
+    mainComponentId: 100,
+    componentTypeId: 1,
+  });
+
+  await testDb.insert(schema.inspectionForm).values({
+    inspectionFormId: 1,
+    projectId: 1,
+    inspectionTypeCode: "GVI",
+    version: 1,
   });
 
   await testDb.insert(schema.result).values([
     {
       displayNumber: 1,
       resultId: 5001,
-      sessionItemId: 1000,
       inspectionTypeCode: "GVI",
       projectId: 1,
-      assetId: 1,
-      componentId: 10,
-      itemId: 100,
+      mainComponentId: 100,
+      layer: 1,
+      masterStartMs: 0,
+      inspectionFormId: 1,
       sessionId: 101,
     },
     {
       displayNumber: 2,
       resultId: 5002,
-      sessionItemId: 1000,
       inspectionTypeCode: "GVI",
       projectId: 1,
-      assetId: 1,
-      componentId: 10,
-      itemId: 100,
+      mainComponentId: 100,
+      layer: 1,
+      masterStartMs: 0,
+      inspectionFormId: 1,
       sessionId: 101,
     },
     {
       displayNumber: 3,
       resultId: 5003,
-      sessionItemId: 1000,
       inspectionTypeCode: "GVI",
       projectId: 1,
-      assetId: 1,
-      componentId: 10,
-      itemId: 100,
+      mainComponentId: 100,
+      layer: 1,
+      masterStartMs: 0,
+      inspectionFormId: 1,
       sessionId: 101,
     },
   ]);

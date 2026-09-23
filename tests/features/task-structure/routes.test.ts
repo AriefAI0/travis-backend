@@ -107,13 +107,13 @@ describe("task structure routes", () => {
     const tree = (await json(treeRes)).data as Array<Record<string, any>>;
 
     expect(tree).toHaveLength(2);
-    expect(tree[0].groupCode).toBe("100");
-    expect(tree[0].taskCodes[0].code).toBe("101");
-    expect(tree[0].taskCodes[0].mainComponents[0].description).toBe("Row A");
-    expect(tree[0].taskCodes[0].mainComponents[0].types[0].typeCode).toBe("VDM");
-    expect(tree[0].taskCodes[0].mainComponents[0].types[0].componentCodes[0].code).toBe("101-105");
-    expect(tree[1].groupCode).toBe("800");
-    expect(tree[1].taskCodes[0].mainComponents[0].types).toEqual([]);
+    expect(tree[0]!.groupCode).toBe("100");
+    expect(tree[0]!.taskCodes[0]!.code).toBe("101");
+    expect(tree[0]!.taskCodes[0]!.mainComponents[0]!.description).toBe("Row A");
+    expect(tree[0]!.taskCodes[0]!.mainComponents[0]!.types[0]!.typeCode).toBe("VDM");
+    expect(tree[0]!.taskCodes[0]!.mainComponents[0]!.types[0]!.componentCodes[0]!.code).toBe("101-105");
+    expect(tree[1]!.groupCode).toBe("800");
+    expect(tree[1]!.taskCodes[0]!.mainComponents[0]!.types).toEqual([]);
   });
 
   it("rejects a duplicate group code within the project", async () => {
@@ -147,7 +147,7 @@ describe("task structure routes", () => {
     const catalog = (await json(
       await app.request(`/api/v1/projects/${projectId}/component-types`),
     )).data as Array<Record<string, any>>;
-    const typeId = catalog[0].componentTypeId;
+    const typeId = catalog[0]!.componentTypeId;
 
     const renamed = await patch(`/api/v1/component-types/${typeId}`, {
       typeCode: "VHM",
@@ -159,7 +159,7 @@ describe("task structure routes", () => {
     const tree = (await json(
       await app.request(`/api/v1/projects/${projectId}/task-structure`),
     )).data as Array<Record<string, any>>;
-    expect(tree[0].taskCodes[0].mainComponents[0].types[0].typeCode).toBe("VHM");
+    expect(tree[0]!.taskCodes[0]!.mainComponents[0]!.types[0]!.typeCode).toBe("VHM");
   });
 
   it("refuses to delete an in-use catalog type and deletes an unused one", async () => {
@@ -168,7 +168,7 @@ describe("task structure routes", () => {
     const catalog = (await json(
       await app.request(`/api/v1/projects/${projectId}/component-types`),
     )).data as Array<Record<string, any>>;
-    const inUseId = catalog[0].componentTypeId;
+    const inUseId = catalog[0]!.componentTypeId;
 
     const refused = await app.request(`/api/v1/component-types/${inUseId}`, { method: "DELETE" });
     expect(refused.status).toBe(409);
@@ -208,6 +208,6 @@ describe("task structure routes", () => {
       await app.request(`/api/v1/projects/${projectId}/component-types?q=vh`),
     )).data as Array<Record<string, any>>;
     expect(filtered).toHaveLength(1);
-    expect(filtered[0].typeCode).toBe("VHM");
+    expect(filtered[0]!.typeCode).toBe("VHM");
   });
 });

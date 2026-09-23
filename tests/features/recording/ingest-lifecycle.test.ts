@@ -32,29 +32,32 @@ const quietStorage: SegmentStorage = { put: async () => {} };
 const seedDomain = async () => {
   await testDb.insert(schema.project).values({ displayNumber: 9300, projectId: 9300, title: "P" });
   await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 9300, projectId: 9300, name: "S" });
-  await testDb.insert(schema.asset).values({ assetId: 9300, projectId: 9300, name: "A" });
-  await testDb
-    .insert(schema.component)
-    .values({ componentId: 9300, assetId: 9300, projectId: 9300, name: "C" });
-  await testDb.insert(schema.item).values({
-    itemId: 9300,
-    componentId: 9300,
+  await testDb.insert(schema.taskGroup).values({
+    taskGroupId: 9300,
     projectId: 9300,
-    assetId: 9300,
-    itemLabel: "I",
+    groupCode: "100",
+    label: "Rows",
   });
-  await testDb
-    .insert(schema.sessionItem)
-    .values({ sessionItemId: 9300, sessionId: 9300, itemId: 9300 });
+  await testDb.insert(schema.taskCode).values({
+    taskCodeId: 9300,
+    taskGroupId: 9300,
+    code: "101",
+    label: "Row A",
+  });
+  await testDb.insert(schema.mainComponent).values({
+    mainComponentId: 9300,
+    taskCodeId: 9300,
+    description: "I",
+  });
+  // session_item is gone: v2 results carry their own target
   await testDb.insert(schema.result).values({
     displayNumber: 9300,
     resultId: 9300,
-    sessionItemId: 9300,
     inspectionTypeCode: "GVI",
+        mainComponentId: 9300,
+        layer: 1,
+        masterStartMs: 0,
     projectId: 9300,
-    assetId: 9300,
-    componentId: 9300,
-    itemId: 9300,
     sessionId: 9300,
   });
 };

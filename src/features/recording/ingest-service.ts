@@ -26,8 +26,7 @@ import {
   listVideoClipRecordsByResultId,
 } from "../../db/repositories/video-clip.repository";
 import { findResultById } from "../../db/repositories/result.repository";
-import { findItemById } from "../../db/repositories/item.repository";
-import { findSessionItemById } from "../../db/repositories/session-item.repository";
+import { resolveTargetLabel } from "../../db/services/task-structure.service";
 import { createSession } from "../../db/services/session.service";
 import { enqueueClipStill, enqueueThumbnails } from "./jobs/thumbnails";
 
@@ -151,10 +150,8 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
   if (!session) throw notFound("Session");
   const project = await findProjectById(session.projectId, tx);
   if (!project) throw notFound("Project");
-  const sessionItem = await findSessionItemById(result.sessionItemId, tx);
-  if (!sessionItem) throw notFound("Session item");
-  const item = await findItemById(sessionItem.itemId, tx);
-  if (!item) throw notFound("Item");
+  // the v2 target label names the clip folder
+  const targetLabel = await resolveTargetLabel(result, tx);
 
   // uq_video_clip_result_id: one clip per result, so a re-record reuses the row
   const [existing] = await listVideoClipRecordsByResultId(input.resultId, tx);
@@ -181,7 +178,7 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
     displayNumber: session.displayNumber ?? session.sessionId,
     startEpoch: master.startEpoch,
     resultNumber: result.displayNumber,
-    itemLabel: item.itemLabel,
+    itemLabel: targetLabel,
     inspectionType: result.inspectionTypeCode,
   });
 

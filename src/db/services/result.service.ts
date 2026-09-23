@@ -1,12 +1,11 @@
-import type { CpDetail, CviDetail, FmdDetail, ScourDetail, GviDetail, InspectionTypeCode, ItemResultSidebarData, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput } from "../../types/api";
+import type { CpDetail, CviDetail, FmdDetail, ScourDetail, GviDetail, InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput } from "../../types/api";
 import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
 import { AppError } from "../../lib/error";
 import { listResultImageSummariesByResultIds, mintTimelineThumbnailUrl } from "./result-media.service";
 import { listPlayableClipIds, playbackUrl } from "./recording-playback.service";
-import { getItemById } from "./structure.service";
-import { listSessionItemsByItemId, listSessionsByIds } from "./session.service";
+import { listSessionsByIds } from "./session.service";
 import { listVideoClipPlaybackByResultIds } from "./video.service";
 import {
   createResultRecord,
@@ -15,8 +14,6 @@ import {
   listResultRecords,
   listResultRecordsByProjectId,
   listResultRecordsBySessionId,
-  listResultRecordsBySessionItemId,
-  listResultRecordsBySessionItemIds,
   maxResultDisplayNumberBySessionId,
   updateResultById,
 } from "../repositories/result.repository";
@@ -30,16 +27,6 @@ import {
 } from "../repositories/result-image.repository";
 import { result, resultImage } from "../schema";
 
-export type CreateResultInput = {
-  sessionItemId: number;
-  inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR";
-  projectId: number;
-  assetId: number;
-  componentId: number;
-  itemId: number;
-  sessionId: number;
-  remarks?: string | null;
-};
 
 export type CreateResultImageInput = {
   resultId: number;
@@ -59,9 +46,6 @@ const normalizeResultUpdate = (
 ): Partial<typeof result.$inferInsert> => {
   const nextData: Partial<typeof result.$inferInsert> = {};
 
-  if ("sessionItemId" in data) {
-    nextData.sessionItemId = data.sessionItemId;
-  }
 
   if ("inspectionTypeCode" in data) {
     nextData.inspectionTypeCode = data.inspectionTypeCode;
@@ -71,17 +55,6 @@ const normalizeResultUpdate = (
     nextData.projectId = data.projectId;
   }
 
-  if ("assetId" in data) {
-    nextData.assetId = data.assetId;
-  }
-
-  if ("componentId" in data) {
-    nextData.componentId = data.componentId;
-  }
-
-  if ("itemId" in data) {
-    nextData.itemId = data.itemId;
-  }
 
   if ("sessionId" in data) {
     nextData.sessionId = data.sessionId;
@@ -386,41 +359,6 @@ const writeCviDetail = async (
 // Ordinal assignment mirrors createSession. startInspection passes its own
 // transaction, so that path gets a single attempt and the uniq
 // (session_id, display_number) index is the backstop.
-export const createResult = async (
-  data: CreateResultInput,
-  database?: DbOrTx,
-) => {
-  const insertOnce = async (dbOrTx?: DbOrTx) => {
-    const max = await maxResultDisplayNumberBySessionId(data.sessionId, dbOrTx);
-    return createResultRecord(
-      {
-        sessionItemId: data.sessionItemId,
-        inspectionTypeCode: data.inspectionTypeCode,
-        projectId: data.projectId,
-        assetId: data.assetId,
-        componentId: data.componentId,
-        itemId: data.itemId,
-        sessionId: data.sessionId,
-        displayNumber: (max ?? 0) + 1,
-        remarks: normalizeOptionalText(data.remarks),
-      },
-      dbOrTx,
-    );
-  };
-
-  if (database) {
-    return insertOnce(database);
-  }
-
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await insertOnce();
-    } catch (err) {
-      const lostRace = attempt < 2 && String(err).includes("uq_result_session_display");
-      if (!lostRace) throw err;
-    }
-  }
-};
 
 export const listResults = async (database?: DbOrTx) =>
   listResultRecords(database);
@@ -486,122 +424,6 @@ export const listResultsBySessionId = async (
   database?: DbOrTx,
 ) => listResultRecordsBySessionId(sessionId, database);
 
-export const listResultsBySessionItemId = async (
-  sessionItemId: number,
-  database?: DbOrTx,
-) => listResultRecordsBySessionItemId(sessionItemId, database);
-
-export const getItemResultSidebar = async (
-  itemId: number,
-  database?: DbOrTx,
-): Promise<ItemResultSidebarData | null> => {
-  const selectedItem = await getItemById(itemId, database);
-
-  if (!selectedItem) {
-    return null;
-  }
-
-  const sessionItems = await listSessionItemsByItemId(itemId, database);
-  const sessionItemIds = sessionItems.map(
-    (sessionItem) => sessionItem.sessionItemId,
-  );
-  const sessionIds = [
-    ...new Set(sessionItems.map((sessionItem) => sessionItem.sessionId)),
-  ];
-
-  // Round 1: sessions + results in parallel. Results are needed to key round 2.
-  const [sessions, results] = await Promise.all([
-    listSessionsByIds(sessionIds, database),
-    listResultRecordsBySessionItemIds(sessionItemIds, database),
-  ]);
-
-  const resultIds = results.map((resultRecord) => resultRecord.resultId);
-
-  // Round 2: images + clip playback in parallel, each a single batched query.
-  // The previous implementation issued these per session_item / per result
-  // (2 + 2*S + 2*S*R queries); this is 6 total regardless of row count.
-  const [imagesByResultId, clipsByResultId] = await Promise.all([
-    listResultImageSummariesByResultIds(resultIds, database),
-    listVideoClipPlaybackByResultIds(resultIds, database),
-  ]);
-
-  // one batched read decides clip playability for every clip in the sidebar
-  const playableClipIds = await listPlayableClipIds(
-    [...clipsByResultId.values()].flat().map((clip) => clip.clipId),
-    database,
-  );
-
-  const sessionById = new Map(
-    sessions.map((session) => [session.sessionId, session]),
-  );
-  const resultsBySessionItemId = new Map<number, typeof results>();
-  for (const resultRecord of results) {
-    const bucket = resultsBySessionItemId.get(resultRecord.sessionItemId) ?? [];
-    bucket.push(resultRecord);
-    resultsBySessionItemId.set(resultRecord.sessionItemId, bucket);
-  }
-
-  return {
-    itemId: selectedItem.itemId,
-    itemLabel: selectedItem.itemLabel,
-    position: selectedItem.position,
-    status: selectedItem.status,
-    sessions: await Promise.all(
-      sessionItems.map(async (sessionItemRecord) => {
-      const sessionRecord = sessionById.get(sessionItemRecord.sessionId);
-      const itemResults =
-        resultsBySessionItemId.get(sessionItemRecord.sessionItemId) ?? [];
-
-      return {
-        sessionId: sessionItemRecord.sessionId,
-        sessionItemId: sessionItemRecord.sessionItemId,
-        sessionName: sessionRecord?.name ?? null,
-        // auto-created sessions carry no name, so the ordinal is the label
-        sessionDisplayNumber: sessionRecord?.displayNumber ?? null,
-        results: await Promise.all(itemResults.map(async (resultRecord) => {
-          // summaries arrive ordered by imageId asc, so [0] IS the poster
-          const entryImages = imagesByResultId.get(resultRecord.resultId) ?? [];
-
-          return {
-            resultId: resultRecord.resultId,
-            inspectionTypeCode: resultRecord.inspectionTypeCode,
-            inspectionTypeName: resultRecord.inspectionTypeCode, // Same value (code is canonical)
-            projectId: resultRecord.projectId,
-            assetId: resultRecord.assetId,
-            componentId: resultRecord.componentId,
-            itemId: resultRecord.itemId,
-            sessionId: resultRecord.sessionId,
-            remarks: resultRecord.remarks,
-            createdAt: toIsoString(resultRecord.createdAt),
-            updatedAt: toIsoString(resultRecord.updatedAt),
-            images: entryImages,
-            posterUrl: entryImages[0]?.url ?? null,
-            clips: await Promise.all(
-              (clipsByResultId.get(resultRecord.resultId) ?? []).map(
-                async (clipPlayback) => ({
-                  clipId: clipPlayback.clipId,
-                  resultId: clipPlayback.resultId,
-                  startOffsetMs: clipPlayback.startOffsetMs,
-                  endOffsetMs: clipPlayback.endOffsetMs,
-                  durationMs: clipPlayback.durationMs,
-                  startEpochMs: clipPlayback.startEpochMs,
-                  endEpochMs: clipPlayback.endEpochMs,
-                  videoUrl: playableClipIds.has(clipPlayback.clipId)
-                    ? playbackUrl({ kind: "clip", id: clipPlayback.clipId })
-                    : null,
-                  // the clip's own still once its job has run, else the card
-                  // falls back to the result's first image
-                  thumbnailUrl: await mintTimelineThumbnailUrl(clipPlayback.thumbnailKey),
-                }),
-              ),
-            ),
-          };
-        })),
-      };
-      }),
-    ),
-  };
-};
 
 export const updateResult = async (
   resultId: number,
@@ -704,9 +526,9 @@ export const listProjectSummary = async (
     resultId: resultRecord.resultId,
     createdAt: toIsoString(resultRecord.createdAt),
     inspectionTypeCode: resultRecord.inspectionTypeCode,
-    assetId: resultRecord.assetId,
-    componentId: resultRecord.componentId,
-    itemId: resultRecord.itemId,
+    // v2 target ids replace the item-model ids
+    mainComponentId: resultRecord.mainComponentId,
+    componentCodeId: resultRecord.componentCodeId,
     remarks: resultRecord.remarks,
     resultValue: formatResultValue(
       resultRecord.inspectionTypeCode,

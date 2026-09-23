@@ -10,26 +10,11 @@ import {
   maxSessionDisplayNumberByProjectId,
   updateSessionById,
 } from "../repositories/session.repository";
-import {
-  createSessionItemRecord,
-  deleteSessionItemById,
-  findSessionItemById,
-  findSessionItemBySessionIdAndItemId,
-  listSessionItemRecords,
-  listSessionItemRecordsByItemId,
-  listSessionItemRecordsBySessionId,
-  updateSessionItemById,
-} from "../repositories/session-item.repository";
-import { session, sessionItem } from "../schema";
+import { session } from "../schema";
 
 export type CreateSessionInput = {
   projectId: number;
   name?: string | null;
-};
-
-export type CreateSessionItemInput = {
-  sessionId: number;
-  itemId: number;
 };
 
 const normalizeOptionalText = (value?: string | null) => {
@@ -134,49 +119,3 @@ export const deleteSession = async (
   database?: DbOrTx,
 ) => deleteSessionById(sessionId, database);
 
-export const createSessionItem = async (
-  data: CreateSessionItemInput,
-  database?: DbOrTx,
-) =>
-  createSessionItemRecord(
-    {
-      sessionId: data.sessionId,
-      itemId: data.itemId,
-    },
-    database,
-  );
-
-export const listSessionItems = async (database?: DbOrTx) =>
-  listSessionItemRecords(database);
-
-export const listSessionItemsBySessionId = async (
-  sessionId: number,
-  database?: DbOrTx,
-) => listSessionItemRecordsBySessionId(sessionId, database);
-
-export const listSessionItemsByItemId = async (
-  itemId: number,
-  database?: DbOrTx,
-) => listSessionItemRecordsByItemId(itemId, database);
-
-export const getSessionItemById = async (
-  sessionItemId: number,
-  database?: DbOrTx,
-) => findSessionItemById(sessionItemId, database);
-
-export const getSessionItemBySessionIdAndItemId = async (
-  sessionId: number,
-  itemId: number,
-  database?: DbOrTx,
-) => findSessionItemBySessionIdAndItemId(sessionId, itemId, database);
-
-export const updateSessionItem = async (
-  sessionItemId: number,
-  data: Partial<typeof sessionItem.$inferInsert>,
-  database?: DbOrTx,
-) => updateSessionItemById(sessionItemId, data, database);
-
-export const deleteSessionItem = async (
-  sessionItemId: number,
-  database?: DbOrTx,
-) => deleteSessionItemById(sessionItemId, database);

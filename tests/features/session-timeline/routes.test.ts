@@ -73,13 +73,13 @@ describe("session timeline routes", () => {
     const rows = (await json(await app.request("/api/v1/sessions/101/results")))
       .data as Array<Record<string, any>>;
     expect(rows).toHaveLength(2);
-    expect(rows[0].target.kind).toBe("main_component");
-    expect(rows[0].breadcrumb.taskGroup.code).toBe("100");
-    expect(rows[0].breadcrumb.mainComponent.description).toBe("Row A");
-    expect(rows[1].target.kind).toBe("component_code");
-    expect(rows[1].breadcrumb.componentType.code).toBe("VDM");
-    expect(rows[1].breadcrumb.componentCode.code).toBe("101-105");
-    expect(rows[1].masterEndMs).toBeNull();
+    expect(rows[0]!.target.kind).toBe("main_component");
+    expect(rows[0]!.breadcrumb.taskGroup.code).toBe("100");
+    expect(rows[0]!.breadcrumb.mainComponent.description).toBe("Row A");
+    expect(rows[1]!.target.kind).toBe("component_code");
+    expect(rows[1]!.breadcrumb.componentType.code).toBe("VDM");
+    expect(rows[1]!.breadcrumb.componentCode.code).toBe("101-105");
+    expect(rows[1]!.masterEndMs).toBeNull();
   });
 
   it("returns only finished markers ordered by master start", async () => {
@@ -92,8 +92,8 @@ describe("session timeline routes", () => {
       .data as Array<Record<string, any>>;
     expect(markers).toHaveLength(2);
     expect(markers.map((m) => m.masterStartMs)).toEqual([0, 120000]);
-    expect(markers[0].layer).toBe(2);
-    expect(markers[1].layer).toBe(1);
+    expect(markers[0]!.layer).toBe(2);
+    expect(markers[1]!.layer).toBe(1);
   });
 
   it("serves the sidebar for both target kinds", async () => {
@@ -111,12 +111,12 @@ describe("session timeline routes", () => {
     const comp = (await json(await app.request("/api/v1/main-components/30/results")))
       .data as Record<string, any>;
     expect(comp.sessions).toHaveLength(1);
-    expect(comp.sessions[0].results).toHaveLength(1);
-    expect(comp.sessions[0].results[0].layer).toBe(1);
+    expect(comp.sessions[0]!.results).toHaveLength(1);
+    expect(comp.sessions[0]!.results[0]!.layer).toBe(1);
 
     const code = (await json(await app.request("/api/v1/component-codes/60/results")))
       .data as Record<string, any>;
-    expect(code.sessions[0].results).toHaveLength(1);
+    expect(code.sessions[0]!.results).toHaveLength(1);
     expect(code.target.componentCodeId).toBe(60);
   });
 

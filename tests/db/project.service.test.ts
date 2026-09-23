@@ -15,11 +15,7 @@ import {
   listProjects,
   updateProject,
 } from "../../src/db/services/project.service";
-import { createAssetRecord } from "../../src/db/repositories/asset.repository";
-import { createComponentRecord } from "../../src/db/repositories/component.repository";
-import { createItemRecord } from "../../src/db/repositories/item.repository";
 import { createSessionRecord } from "../../src/db/repositories/session.repository";
-import { createSessionItemRecord } from "../../src/db/repositories/session-item.repository";
 import { createResultRecord } from "../../src/db/repositories/result.repository";
 
 describe("project.service", () => {
@@ -130,69 +126,71 @@ describe("project.service", () => {
     expect(dashboard[0]!.projectId).toBe(project1!.projectId);
   });
 
-  it("computes dashboard progress from item.status, not results", async () => {
+  it("counts progress from stopped results, not from targets alone", async () => {
     const projectRecord = await createProject({ title: "Progress Project" }, testDb);
+    const projectId = projectRecord!.projectId;
 
-    const assetRecord = await createAssetRecord(
-      { projectId: projectRecord!.projectId, name: "Asset 1" },
-      testDb,
-    );
-    const componentRecord = await createComponentRecord(
-      {
-        projectId: projectRecord!.projectId,
-        assetId: assetRecord!.assetId,
-        name: "Component 1",
-      },
-      testDb,
-    );
+    const group = await testDb
+      .insert(schema.taskGroup)
+      .values({ projectId, groupCode: "100", label: "Rows" })
+      .returning()
+      .then((rows) => rows[0]!);
+    const taskCode = await testDb
+      .insert(schema.taskCode)
+      .values({ taskGroupId: group.taskGroupId, code: "101", label: "Row A" })
+      .returning()
+      .then((rows) => rows[0]!);
+    const componentA = await testDb
+      .insert(schema.mainComponent)
+      .values({ taskCodeId: taskCode.taskCodeId, description: "A" })
+      .returning()
+      .then((rows) => rows[0]!);
+    const componentB = await testDb
+      .insert(schema.mainComponent)
+      .values({ taskCodeId: taskCode.taskCodeId, description: "B" })
+      .returning()
+      .then((rows) => rows[0]!);
+    const sessionRecord = await testDb
+      .insert(schema.session)
+      .values({ projectId, displayNumber: 1 })
+      .returning()
+      .then((rows) => rows[0]!);
+    const form = await testDb
+      .insert(schema.inspectionForm)
+      .values({ projectId, inspectionTypeCode: "GVI", version: 1 })
+      .returning()
+      .then((rows) => rows[0]!);
 
-    const baseItem = {
-      projectId: projectRecord!.projectId,
-      assetId: assetRecord!.assetId,
-      componentId: componentRecord!.componentId,
-    };
-
-    // itemA: marked complete — should count toward progress.
-    await createItemRecord(
-      { ...baseItem, itemLabel: "A", status: "complete" },
-      testDb,
-    );
-
-    // itemB: not_set but carries a result — must NOT count under status-based progress.
-    const itemB = await createItemRecord(
-      { ...baseItem, itemLabel: "B", status: "not_set" },
-      testDb,
-    );
-
-    const sessionRecord = await createSessionRecord(
-      { projectId: projectRecord!.projectId, displayNumber: 1 },
-      testDb,
-    );
-    const sessionItemRecord = await createSessionItemRecord(
-      { sessionId: sessionRecord!.sessionId, itemId: itemB!.itemId },
-      testDb,
-    );
-    await createResultRecord(
-      {
-        sessionItemId: sessionItemRecord!.sessionItemId,
-        inspectionTypeCode: "GVI",
-        projectId: projectRecord!.projectId,
-        assetId: assetRecord!.assetId,
-        componentId: componentRecord!.componentId,
-        itemId: itemB!.itemId,
-        sessionId: sessionRecord!.sessionId,
-        displayNumber: 1,
-      },
-      testDb,
-    );
+    // A is stopped (has an end anchor) so it counts; B is still open.
+    await testDb.insert(schema.result).values({
+      projectId,
+      sessionId: sessionRecord.sessionId,
+      inspectionTypeCode: "GVI",
+      mainComponentId: componentA.mainComponentId,
+      layer: 1,
+      masterStartMs: 0,
+      masterEndMs: 5000,
+      displayNumber: 1,
+      inspectionFormId: form.inspectionFormId,
+    });
+    await testDb.insert(schema.result).values({
+      projectId,
+      sessionId: sessionRecord.sessionId,
+      inspectionTypeCode: "GVI",
+      mainComponentId: componentB.mainComponentId,
+      layer: 2,
+      masterStartMs: 0,
+      displayNumber: 2,
+      inspectionFormId: form.inspectionFormId,
+    });
 
     const dashboard = await listDashboard(testDb);
-    const row = dashboard.find(
-      (entry) => entry.projectId === projectRecord!.projectId,
-    );
+    const row = dashboard.find((entry) => entry.projectId === projectId);
 
     expect(row).toBeDefined();
-    expect(row!.totalItems).toBe(2);
+    expect(row!.totalAssets).toBe(1); // task groups
+    expect(row!.totalComponents).toBe(1); // task codes
+    expect(row!.totalItems).toBe(2); // inspectable targets
     expect(row!.completedItems).toBe(1);
     expect(row!.overallProgress).toBe(50);
     expect(row!.pendingItems).toBe(1);
@@ -250,18 +248,13 @@ describe("project.service", () => {
     expect(foundProject).toBeNull();
   });
 
-  describe("with hierarchy data", () => {
+  describe("with v2 hierarchy data", () => {
     beforeEach(async () => {
       await truncateTestDatabase();
     });
 
-    it("creates project with asset, component, item, session, sessionItem, result, videoClip, masterVideo", async () => {
-      const project = await createProject(
-        {
-          title: "Full Hierarchy",
-        },
-        testDb,
-      );
+    it("creates project with task group, task code, component, type, component code, session, result, clip, master", async () => {
+      const project = await createProject({ title: "Full Hierarchy" }, testDb);
 
       const session = await testDb
         .insert(schema.session)
@@ -274,45 +267,54 @@ describe("project.service", () => {
         .returning()
         .then((rows) => rows[0]!);
 
-      const asset = await testDb
-        .insert(schema.asset)
-        .values({
-          projectId: project!.projectId,
-          name: "Asset 1",
-          assetType: "Structure",
-        })
+      const group = await testDb
+        .insert(schema.taskGroup)
+        .values({ projectId: project!.projectId, groupCode: "100", label: "Rows" })
+        .returning()
+        .then((rows) => rows[0]!);
+
+      const taskCode = await testDb
+        .insert(schema.taskCode)
+        .values({ taskGroupId: group.taskGroupId, code: "101", label: "Row A" })
         .returning()
         .then((rows) => rows[0]!);
 
       const component = await testDb
-        .insert(schema.component)
+        .insert(schema.mainComponent)
+        .values({ taskCodeId: taskCode.taskCodeId, description: "Row A" })
+        .returning()
+        .then((rows) => rows[0]!);
+
+      const componentType = await testDb
+        .insert(schema.componentType)
+        .values({ projectId: project!.projectId, typeCode: "VDM", label: "Vertical Diagonal Member" })
+        .returning()
+        .then((rows) => rows[0]!);
+
+      const branch = await testDb
+        .insert(schema.mainComponentType)
         .values({
-          assetId: asset.assetId,
-          projectId: project!.projectId,
-          name: "Component 1",
+          mainComponentId: component.mainComponentId,
+          componentTypeId: componentType.componentTypeId,
         })
         .returning()
         .then((rows) => rows[0]!);
 
-      const item = await testDb
-        .insert(schema.item)
-        .values({
-          componentId: component.componentId,
-          projectId: project!.projectId,
-          assetId: asset.assetId,
-          itemLabel: "Item 1",
-          position: "POS-001",
-          status: "pending",
-        })
+      const componentCode = await testDb
+        .insert(schema.componentCode)
+        .values({ mainComponentTypeId: branch.mainComponentTypeId, code: "101-105" })
         .returning()
         .then((rows) => rows[0]!);
 
-      const sessionItem = await testDb
-        .insert(schema.sessionItem)
-        .values({
-          sessionId: session.sessionId,
-          itemId: item.itemId,
-        })
+      const form = await testDb
+        .insert(schema.inspectionForm)
+        .values({ projectId: project!.projectId, inspectionTypeCode: "GVI", version: 1 })
+        .returning()
+        .then((rows) => rows[0]!);
+
+      const master = await testDb
+        .insert(schema.masterVideo)
+        .values({ sessionId: session.sessionId, startEpoch: 1000 })
         .returning()
         .then((rows) => rows[0]!);
 
@@ -321,25 +323,14 @@ describe("project.service", () => {
         .values({
           displayNumber: 8001,
           resultId: 8001,
-          sessionItemId: sessionItem.sessionItemId,
           inspectionTypeCode: "GVI",
           projectId: project!.projectId,
-          assetId: asset.assetId,
-          componentId: component.componentId,
-          itemId: item.itemId,
           sessionId: session.sessionId,
+          componentCodeId: componentCode.componentCodeId,
+          layer: 1,
+          masterStartMs: 0,
+          inspectionFormId: form.inspectionFormId,
           remarks: "Test result",
-        })
-        .returning()
-        .then((rows) => rows[0]!);
-
-      const masterVideo = await testDb
-        .insert(schema.masterVideo)
-        .values({
-          masterVideoId: 9001,
-          sessionId: session.sessionId,
-          // pg integer columns reject fractional seconds — floor the epoch
-          startEpoch: Math.floor(Date.now() / 1000),
         })
         .returning()
         .then((rows) => rows[0]!);
@@ -347,25 +338,19 @@ describe("project.service", () => {
       const clip = await testDb
         .insert(schema.videoClip)
         .values({
-          clipId: 10001,
           resultId: result.resultId,
-          masterVideoId: masterVideo.masterVideoId,
+          masterVideoId: master.masterVideoId,
           startOffsetMs: 0,
         })
         .returning()
         .then((rows) => rows[0]!);
 
-      expect(project!.projectId).toBe(asset.projectId);
-      expect(asset.assetId).toBe(component.assetId);
-      expect(component.componentId).toBe(item.componentId);
-      expect(result.sessionItemId).toBe(sessionItem.sessionItemId);
-      expect(result.inspectionTypeCode).toBe("GVI");
-      expect(result.projectId).toBe(project!.projectId);
-      expect(result.assetId).toBe(asset.assetId);
-      expect(result.componentId).toBe(component.componentId);
-      expect(result.itemId).toBe(item.itemId);
-      expect(result.sessionId).toBe(session.sessionId);
-      expect(clip.masterVideoId).toBe(masterVideo.masterVideoId);
+      expect(result.resultId).toBe(8001);
+      expect(clip.resultId).toBe(result.resultId);
+      expect(clip.clipId).toBeGreaterThan(0);
+      expect(master.sessionId).toBe(session.sessionId);
+      expect(componentCode.mainComponentTypeId).toBe(branch.mainComponentTypeId);
+      expect(branch.mainComponentId).toBe(component.mainComponentId);
     });
   });
 });

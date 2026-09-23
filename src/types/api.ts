@@ -314,9 +314,8 @@ export type ProjectResultSummaryRow = {
   resultId: number;
   createdAt: string;
   inspectionTypeCode: InspectionTypeCode;
-  assetId: number;
-  componentId: number;
-  itemId: number;
+  mainComponentId: number | null;
+  componentCodeId: number | null;
   remarks: string | null;
   resultValue: string;
 };

@@ -45,38 +45,32 @@ const seedContext = async (p: {
     projectId: p.project,
     name: "Run 1",
   });
-  await testDb.insert(schema.asset).values({
-    assetId: p.asset,
+  await testDb.insert(schema.taskGroup).values({
+    taskGroupId: p.asset,
     projectId: p.project,
-    name: "Platform A",
+    groupCode: "100",
+    label: "Rows",
   });
-  await testDb.insert(schema.component).values({
-    componentId: p.component,
-    assetId: p.asset,
-    projectId: p.project,
-    name: "Jacket Leg",
+  await testDb.insert(schema.taskCode).values({
+    taskCodeId: p.component,
+    taskGroupId: p.asset,
+    code: "101",
+    label: "Row A",
   });
-  await testDb.insert(schema.item).values({
-    itemId: p.item,
-    componentId: p.component,
-    projectId: p.project,
-    assetId: p.asset,
-    itemLabel: "JL-01",
+  await testDb.insert(schema.mainComponent).values({
+    mainComponentId: p.item,
+    taskCodeId: p.component,
+    description: "I",
   });
-  await testDb.insert(schema.sessionItem).values({
-    sessionItemId: p.sessionItem,
-    sessionId: p.session,
-    itemId: p.item,
-  });
+  // session_item is gone: v2 results carry their own target
   await testDb.insert(schema.result).values({
     displayNumber: p.sessionItem,
     resultId: p.sessionItem + 1, // unique per context
-    sessionItemId: p.sessionItem,
     inspectionTypeCode: "GVI",
+        mainComponentId: p.item,
+        layer: 1,
+        masterStartMs: 0,
     projectId: p.project,
-    assetId: p.asset,
-    componentId: p.component,
-    itemId: p.item,
     sessionId: p.session,
   });
 };

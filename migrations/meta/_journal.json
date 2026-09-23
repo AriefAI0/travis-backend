@@ -120,6 +120,13 @@
       "when": 1790354999751,
       "tag": "0016_fix_inspection_fk_actions",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790358599751,
+      "tag": "0017_drop_legacy_structure",
+      "breakpoints": true
     }
   ]
 }

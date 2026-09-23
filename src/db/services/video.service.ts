@@ -1,7 +1,7 @@
 import { db, type DbOrTx } from "../client";
 import type { MasterVideoPlaybackData } from "../../types/api";
 import { mintTimelineThumbnailUrl } from "./result-media.service";
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, sql } from "drizzle-orm";
 import {
   createMasterVideoRecord,
   deleteMasterVideoById,
@@ -33,14 +33,12 @@ import {
   type VideoClipPlaybackRow,
 } from "../repositories/video-clip.repository";
 import {
-  asset,
-  component,
-  item,
+  componentCode,
+  mainComponent,
   masterVideo,
   result,
   resultImage,
   session,
-  sessionItem,
   videoClip,
 } from "../schema";
 import { listResultImageSummariesByResultIds } from "./result-media.service";
@@ -359,9 +357,11 @@ export const getMasterVideoPlaybackData = async (
       clipId: videoClip.clipId,
       resultId: result.resultId,
       inspectionTypeCode: result.inspectionTypeCode,
-      itemLabel: item.itemLabel,
-      assetName: asset.name,
-      componentName: component.name,
+      // the v2 target replaces the item chain: the main component description
+      // names it, and the component code is the sub-label when the target is a code
+      itemLabel: sql<string>`coalesce(${mainComponent.description}, ${componentCode.code}, '')`,
+      assetName: sql<string>`coalesce(${mainComponent.description}, ${componentCode.code}, '')`,
+      componentName: sql<string>`coalesce(${componentCode.code}, '')`,
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
       remarks: result.remarks,
@@ -370,19 +370,16 @@ export const getMasterVideoPlaybackData = async (
     })
     .from(videoClip)
     .innerJoin(result, eq(result.resultId, videoClip.resultId))
-    .innerJoin(sessionItem, eq(sessionItem.sessionItemId, result.sessionItemId))
-    .innerJoin(item, eq(item.itemId, sessionItem.itemId))
-    .innerJoin(component, eq(component.componentId, item.componentId))
-    .innerJoin(asset, eq(asset.assetId, component.assetId))
+    .leftJoin(mainComponent, eq(mainComponent.mainComponentId, result.mainComponentId))
+    .leftJoin(componentCode, eq(componentCode.componentCodeId, result.componentCodeId))
     .leftJoin(resultImage, eq(resultImage.resultId, result.resultId))
     .where(eq(videoClip.masterVideoId, masterVideoId))
     .groupBy(
       videoClip.clipId,
       result.resultId,
       result.inspectionTypeCode,
-      item.itemLabel,
-      asset.name,
-      component.name,
+      mainComponent.description,
+      componentCode.code,
       videoClip.startOffsetMs,
       videoClip.endOffsetMs,
       result.remarks,

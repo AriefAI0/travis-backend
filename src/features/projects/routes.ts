@@ -7,7 +7,6 @@ import {
   listDashboard,
   updateProject,
 } from "../../db/services/project.service";
-import { gatherReportData, gatherReportSignature } from "../../db/services/report.service";
 import { notFound } from "../../lib/error";
 import { parseBody, parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
@@ -43,17 +42,8 @@ export const projectRoutes = (database?: DbOrTx) => {
     return ok(c, project);
   });
 
-  // staleness fingerprint for re-compose-on-dirty (app parity: empty for no rows)
-  routes.get("/api/v1/projects/:id/report-signature", async (c) => {
-    const id = parseId(c, "id");
-    return ok(c, await gatherReportSignature(id, database));
-  });
-
-  // aggregated gather model: one call replacing the app's 10+ service walks
-  routes.get("/api/v1/projects/:id/report-data", async (c) => {
-    const id = parseId(c, "id");
-    return ok(c, await gatherReportData(id, database));
-  });
+  // Report gathers were removed with the item model. Reports are server-owned
+  // and land as a placeholder under features/reports.
 
   return routes;
 };

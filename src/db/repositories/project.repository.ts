@@ -1,8 +1,18 @@
 import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
-import { asset, component, item, project } from "../schema";
+import {
+  componentCode,
+  mainComponent,
+  mainComponentType,
+  project,
+  result,
+  taskCode,
+  taskGroup,
+} from "../schema";
 
+// Field names are kept from the item-model era so the app contract holds; the
+// counts now describe the task tree: groups, task codes, targets, done targets.
 export type ProjectDashboardRow = {
   projectId: number;
   displayNumber: number;
@@ -61,42 +71,93 @@ export const findProjectById = async (
     where: eq(project.projectId, projectId),
   })) ?? null;
 
+// flow: tree counts > target counts > finished-target counts > merge by project
 export const listProjectDashboardRows = async (
   database: DbOrTx = db,
 ): Promise<ProjectDashboardRow[]> => {
-  // pg count() returns text — mapWith(Number) keeps the row contract numeric
-  const totalAssets = sql<number>`count(distinct ${asset.assetId})`.mapWith(Number);
-  const totalComponents =
-    sql<number>`count(distinct ${component.componentId})`.mapWith(Number);
-  const totalItems = sql<number>`count(distinct ${item.itemId})`.mapWith(Number);
-  // Progress follows item.status ('complete'), not result existence.
-  const completedItems =
-    sql<number>`count(distinct case when ${item.status} = 'complete' then ${item.itemId} end)`.mapWith(Number);
+  const count = (expr: ReturnType<typeof sql>) => sql<number>`${expr}`.mapWith(Number);
 
-  return database
-    .select({
-      projectId: project.projectId,
-      displayNumber: project.displayNumber,
-      title: project.title,
-      description: project.description,
-      documentId: project.documentId,
-      totalAssets,
-      totalComponents,
-      totalItems,
-      completedItems,
-    })
-    .from(project)
-    .leftJoin(asset, eq(asset.projectId, project.projectId))
-    .leftJoin(component, eq(component.assetId, asset.assetId))
-    .leftJoin(item, eq(item.componentId, component.componentId))
-    .groupBy(
-      project.projectId,
-      project.displayNumber,
-      project.title,
-      project.description,
-      project.documentId,
-    )
-    .orderBy(project.projectId);
+  const [projects, groups, codes, components, codesPerBranch, finished] = await Promise.all([
+    database.query.project.findMany({
+      where: isNull(project.archivedAt),
+      orderBy: asc(project.projectId),
+    }),
+
+    database
+      .select({
+        projectId: taskGroup.projectId,
+        value: count(sql`count(distinct ${taskGroup.taskGroupId})`),
+      })
+      .from(taskGroup)
+      .groupBy(taskGroup.projectId),
+
+    database
+      .select({
+        projectId: taskGroup.projectId,
+        value: count(sql`count(distinct ${taskCode.taskCodeId})`),
+      })
+      .from(taskCode)
+      .innerJoin(taskGroup, eq(taskGroup.taskGroupId, taskCode.taskGroupId))
+      .groupBy(taskGroup.projectId),
+
+    database
+      .select({
+        projectId: taskGroup.projectId,
+        value: count(sql`count(distinct ${mainComponent.mainComponentId})`),
+      })
+      .from(mainComponent)
+      .innerJoin(taskCode, eq(taskCode.taskCodeId, mainComponent.taskCodeId))
+      .innerJoin(taskGroup, eq(taskGroup.taskGroupId, taskCode.taskGroupId))
+      .groupBy(taskGroup.projectId),
+
+    database
+      .select({
+        projectId: taskGroup.projectId,
+        value: count(sql`count(distinct ${componentCode.componentCodeId})`),
+      })
+      .from(componentCode)
+      .innerJoin(
+        mainComponentType,
+        eq(mainComponentType.mainComponentTypeId, componentCode.mainComponentTypeId),
+      )
+      .innerJoin(mainComponent, eq(mainComponent.mainComponentId, mainComponentType.mainComponentId))
+      .innerJoin(taskCode, eq(taskCode.taskCodeId, mainComponent.taskCodeId))
+      .innerJoin(taskGroup, eq(taskGroup.taskGroupId, taskCode.taskGroupId))
+      .groupBy(taskGroup.projectId),
+
+    // a target counts as done once it has a finished (stopped) inspection
+    database
+      .select({
+        projectId: result.projectId,
+        value: count(
+          sql`count(distinct (coalesce(${result.mainComponentId}, -1), coalesce(${result.componentCodeId}, -1)))`,
+        ),
+      })
+      .from(result)
+      .where(isNotNull(result.masterEndMs))
+      .groupBy(result.projectId),
+  ]);
+
+  const asMap = (rows: Array<{ projectId: number; value: number }>): Map<number, number> =>
+    new Map(rows.map((row) => [row.projectId, row.value]));
+  const groupCounts = asMap(groups);
+  const codeCounts = asMap(codes);
+  const componentCounts = asMap(components);
+  const componentCodeCounts = asMap(codesPerBranch);
+  const finishedCounts = asMap(finished);
+
+  return projects.map((row) => ({
+    projectId: row.projectId,
+    displayNumber: row.displayNumber,
+    title: row.title,
+    description: row.description,
+    documentId: row.documentId,
+    totalAssets: groupCounts.get(row.projectId) ?? 0,
+    totalComponents: codeCounts.get(row.projectId) ?? 0,
+    totalItems:
+      (componentCounts.get(row.projectId) ?? 0) + (componentCodeCounts.get(row.projectId) ?? 0),
+    completedItems: finishedCounts.get(row.projectId) ?? 0,
+  }));
 };
 
 export const updateProjectById = async (

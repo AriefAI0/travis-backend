@@ -16,9 +16,8 @@ import { findProjectById } from "../repositories/project.repository";
 import { findSessionById } from "../repositories/session.repository";
 import { listMasterVideoRecordsBySessionId } from "../repositories/master-video.repository";
 import { listVideoClipRecordsByResultId } from "../repositories/video-clip.repository";
-import { findItemById } from "../repositories/item.repository";
-import { findSessionItemById } from "../repositories/session-item.repository";
 import { getResultById, touchResult } from "./result.service";
+import { resolveTargetLabel } from "./task-structure.service";
 
 export type ImageUploadTicket = {
   imageId: number;
@@ -52,7 +51,8 @@ const resolveImageStem = async (
   resultRow: {
     projectId: number;
     sessionId: number;
-    sessionItemId: number;
+    mainComponentId: number | null;
+    componentCodeId: number | null;
     resultId: number;
     displayNumber: number;
     inspectionTypeCode: string;
@@ -69,15 +69,8 @@ const resolveImageStem = async (
     throw new AppError(404, "not_found", `session ${resultRow.sessionId} not found`);
   }
 
-  const sessionItem = await findSessionItemById(resultRow.sessionItemId, database);
-  if (!sessionItem) {
-    throw new AppError(404, "not_found", `session item ${resultRow.sessionItemId} not found`);
-  }
-
-  const item = await findItemById(sessionItem.itemId, database);
-  if (!item) {
-    throw new AppError(404, "not_found", `item ${sessionItem.itemId} not found`);
-  }
+  // the v2 target label names the evidence folder, exactly like the item did
+  const targetLabel = await resolveTargetLabel(resultRow, database);
 
   // A session holds one master in practice. The repo pins the pick by
   // (startEpoch, masterVideoId) when it somehow holds more.
@@ -92,11 +85,11 @@ const resolveImageStem = async (
       ? master.startEpoch
       : Math.floor(session.createdAt.getTime() / 1000),
     resultNumber: resultRow.displayNumber,
-    itemLabel: item.itemLabel,
+    itemLabel: targetLabel,
     clip: clip
       ? {
           resultNumber: resultRow.displayNumber,
-          itemLabel: item.itemLabel,
+          itemLabel: targetLabel,
           inspectionType: resultRow.inspectionTypeCode,
         }
       : undefined,

@@ -4,7 +4,6 @@ import {
   getCpDetailByResultId,
   getCviDetailByResultId,
   getFmdDetailByResultId,
-  getItemResultSidebar,
   getGviDetailByResultId,
   getResultEvidence,
   getResultMgiDetailByResultId,
@@ -28,11 +27,6 @@ import { createResultImageSchema, resultIdsSchema } from "../../types/api";
 export const resultRoutes = (database?: DbOrTx) => {
   const routes = new Hono();
 
-  // per-item sidebar (sessions + results); null when item has no results
-  routes.get("/api/v1/items/:itemId/results", async (c) => {
-    const itemId = parseId(c, "itemId");
-    return ok(c, await getItemResultSidebar(itemId, database));
-  });
 
   // v2 target sidebars: results grouped by session for either target kind
   routes.get("/api/v1/main-components/:id/results", async (c) =>

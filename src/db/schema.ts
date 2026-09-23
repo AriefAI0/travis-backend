@@ -2,7 +2,6 @@ import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, times
 import { sql } from "drizzle-orm";
 
 /* =================== CHANGABLE ENUMRATIONS =================== */
-export const itemStatus = pgEnum("item_status", ["not_set", "pending", "complete"]);
 
 export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
 
@@ -114,120 +113,6 @@ export const session = pgTable(
       table.projectId,
       table.displayNumber,
     ),
-  })
-);
-
-/* =========================================================
-   ASSET
-========================================================= */
-export const asset = pgTable(
-  "asset",
-  {
-    assetId: integer("asset_id").primaryKey().generatedByDefaultAsIdentity(),
-
-    projectId: integer("project_id")
-      .notNull()
-      .references(() => project.projectId, { onDelete: "cascade" }),
-
-    name: text("name").notNull(),
-    assetType: text("asset_type"),
-
-    ...createdAt,
-    ...updatedAt,
-    ...archivedAt,
-  },
-  (table) => ({
-    idxAssetProjectId: index("idx_asset_project_id").on(table.projectId),
-  })
-);
-
-/* =========================================================
-   COMPONENT
-========================================================= */
-export const component = pgTable(
-  "component",
-  {
-    componentId: integer("component_id").primaryKey().generatedByDefaultAsIdentity(),
-
-    assetId: integer("asset_id")
-      .notNull()
-      .references(() => asset.assetId, { onDelete: "cascade" }),
-
-    projectId: integer("project_id").notNull(), // denormalized, indexed, NOT a FK
-
-    name: text("name").notNull(),
-
-    ...createdAt,
-    ...updatedAt,
-    ...archivedAt,
-  },
-  (table) => ({
-    idxComponentAssetId: index("idx_component_asset_id").on(table.assetId),
-    idxComponentProjectId: index("idx_component_project_id").on(table.projectId),
-  })
-);
-
-/* =========================================================
-   ITEM
-========================================================= */
-export const item = pgTable(
-  "item",
-  {
-    itemId: integer("item_id").primaryKey().generatedByDefaultAsIdentity(),
-
-    componentId: integer("component_id")
-      .notNull()
-      .references(() => component.componentId, { onDelete: "cascade" }),
-
-    projectId: integer("project_id").notNull(), // denormalized, indexed, NOT a FK
-    assetId: integer("asset_id").notNull(), // denormalized, indexed, NOT a FK
-
-    itemLabel: text("item_label").notNull(),
-
-    position: text("position"),
-    status: itemStatus("status").notNull().default("not_set"),
-
-    ...createdAt,
-    ...updatedAt,
-    ...archivedAt,
-  },
-  (table) => ({
-    itemLabelWithinComponent: unique("item_label_within_component").on(
-      table.componentId,
-      table.itemLabel
-    ),
-    idxItemComponentId: index("idx_item_component_id").on(table.componentId),
-    idxItemProjectId: index("idx_item_project_id").on(table.projectId),
-    idxItemAssetId: index("idx_item_asset_id").on(table.assetId),
-  })
-);
-
-/* =========================================================
-   SESSION ITEM (SESSION ↔ ITEM)
-========================================================= */
-export const sessionItem = pgTable(
-  "session_item",
-  {
-    sessionItemId: integer("session_item_id").primaryKey().generatedByDefaultAsIdentity(),
-
-    sessionId: integer("session_id")
-      .notNull()
-      .references(() => session.sessionId, { onDelete: "cascade" }),
-
-    itemId: integer("item_id")
-      .notNull()
-      .references(() => item.itemId, { onDelete: "cascade" }),
-
-    ...createdAt,
-    ...updatedAt,
-  },
-  (table) => ({
-    sessionItemUnique: unique("session_item_session_id_item_id_unique").on(
-      table.sessionId,
-      table.itemId
-    ),
-    idxSessionItemSessionId: index("idx_session_item_session_id").on(table.sessionId),
-    idxSessionItemItemId: index("idx_session_item_item_id").on(table.itemId),
   })
 );
 
@@ -473,24 +358,13 @@ export const result = pgTable(
   {
     resultId: integer("result_id").primaryKey().generatedByDefaultAsIdentity(),
 
-    // nullable since the v2 target model: legacy rows keep the session_item path
-    sessionItemId: integer("session_item_id").references(() => sessionItem.sessionItemId, {
-      onDelete: "cascade",
-    }),
-
     inspectionTypeCode: inspectionType("inspection_type_code").notNull(),
 
-    // denormalized hierarchy ids (indexed ints, NOT FKs) — query perf + mediaEngine paths;
-    // null on v2 rows, which carry the XOR target pair below instead
     projectId: integer("project_id").notNull(),
-    assetId: integer("asset_id"),
-    componentId: integer("component_id"),
-    itemId: integer("item_id"),
     sessionId: integer("session_id").notNull(),
 
     // v2 target: main component XOR component code (check below).
-    // cascade: removing a target removes its results, matching the legacy
-    // item > session_item > result cascade.
+    // cascade: removing a target removes its results.
     mainComponentId: integer("main_component_id").references(() => mainComponent.mainComponentId, {
       onDelete: "cascade",
     }),
@@ -525,21 +399,16 @@ export const result = pgTable(
     ...archivedAt,
   },
   (table) => ({
-    idxResultSessionItemId: index("idx_result_session_item_id").on(table.sessionItemId),
     idxResultProjectId: index("idx_result_project_id").on(table.projectId),
-    idxResultAssetId: index("idx_result_asset_id").on(table.assetId),
-    idxResultComponentId: index("idx_result_component_id").on(table.componentId),
-    idxResultItemId: index("idx_result_item_id").on(table.itemId),
     idxResultSessionId: index("idx_result_session_id").on(table.sessionId),
     idxResultMainComponentId: index("idx_result_main_component_id").on(table.mainComponentId),
     idxResultComponentCodeId: index("idx_result_component_code_id").on(table.componentCodeId),
     // active-layer lookups: one open inspection per session per layer
     idxResultSessionLayer: index("idx_result_session_layer").on(table.sessionId, table.layer),
-    // v2 target: exactly one target, or a legacy row that still has a session item
+    // v2 target: exactly one target
     resultTargetCheck: check(
       "result_target_check",
-      sql`(num_nonnulls(${table.mainComponentId}, ${table.componentCodeId}) = 1
-        OR (num_nonnulls(${table.mainComponentId}, ${table.componentCodeId}) = 0 AND ${table.sessionItemId} IS NOT NULL))`,
+      sql`num_nonnulls(${table.mainComponentId}, ${table.componentCodeId}) = 1`,
     ),
     resultLayerCheck: check(
       "result_layer_check",

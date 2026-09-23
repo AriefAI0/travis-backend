@@ -112,31 +112,26 @@ describe("hls routes", () => {
   };
 
   const seedResult = async () => {
-    await testDb.insert(schema.asset).values({ assetId: PROJECT_ID, projectId: PROJECT_ID, name: "A" });
+    // v2 target chain replaces the item chain
     await testDb
-      .insert(schema.component)
-      .values({ componentId: PROJECT_ID, assetId: PROJECT_ID, projectId: PROJECT_ID, name: "C" });
-    await testDb.insert(schema.item).values({
-      itemId: PROJECT_ID,
-      componentId: PROJECT_ID,
-      projectId: PROJECT_ID,
-      assetId: PROJECT_ID,
-      itemLabel: "I",
-    });
+      .insert(schema.taskGroup)
+      .values({ taskGroupId: PROJECT_ID, projectId: PROJECT_ID, groupCode: "100", label: "G" });
     await testDb
-      .insert(schema.sessionItem)
-      .values({ sessionItemId: PROJECT_ID, sessionId: PROJECT_ID, itemId: PROJECT_ID });
+      .insert(schema.taskCode)
+      .values({ taskCodeId: PROJECT_ID, taskGroupId: PROJECT_ID, code: "101", label: "C" });
+    await testDb
+      .insert(schema.mainComponent)
+      .values({ mainComponentId: PROJECT_ID, taskCodeId: PROJECT_ID, description: "I" });
     const [result] = await testDb
       .insert(schema.result)
       .values({
         displayNumber: PROJECT_ID,
         resultId: PROJECT_ID,
-        sessionItemId: PROJECT_ID,
         inspectionTypeCode: "GVI",
         projectId: PROJECT_ID,
-        assetId: PROJECT_ID,
-        componentId: PROJECT_ID,
-        itemId: PROJECT_ID,
+        mainComponentId: PROJECT_ID,
+        layer: 1,
+        masterStartMs: 0,
         sessionId: PROJECT_ID,
       })
       .returning({ resultId: schema.result.resultId });

@@ -21,34 +21,32 @@ const seedResultContext = async () => {
     projectId: 1,
     name: "Run 1",
   });
-  await testDb.insert(schema.asset).values({ assetId: 1, projectId: 1, name: "Platform A" });
-  await testDb.insert(schema.component).values({
-    componentId: 10,
-    assetId: 1,
+  await testDb.insert(schema.taskGroup).values({
+    taskGroupId: 1,
     projectId: 1,
-    name: "Jacket Leg",
+    groupCode: "100",
+    label: "Rows",
   });
-  await testDb.insert(schema.item).values({
-    itemId: 100,
-    componentId: 10,
-    projectId: 1,
-    assetId: 1,
-    itemLabel: "JL-01",
+  await testDb.insert(schema.taskCode).values({
+    taskCodeId: 10,
+    taskGroupId: 1,
+    code: "101",
+    label: "Row A",
   });
-  await testDb.insert(schema.sessionItem).values({
-    sessionItemId: 1000,
-    sessionId: 101,
-    itemId: 100,
+  await testDb.insert(schema.mainComponent).values({
+    mainComponentId: 100,
+    taskCodeId: 10,
+    description: "I",
   });
+  // session_item is gone: v2 results carry their own target
   await testDb.insert(schema.result).values({
     displayNumber: 5001,
     resultId: 5001,
-    sessionItemId: 1000,
     inspectionTypeCode: "GVI",
+        mainComponentId: 100,
+        layer: 1,
+        masterStartMs: 0,
     projectId: 1,
-    assetId: 1,
-    componentId: 10,
-    itemId: 100,
     sessionId: 101,
   });
 };
@@ -59,22 +57,7 @@ describe("results routes", () => {
   afterAll(closeTestDatabase);
   beforeEach(truncateTestDatabase);
 
-  it("sidebar lists results for an item with data", async () => {
-    await seedResultContext();
 
-    const res = await app.request("/api/v1/items/100/results");
-    expect(res.status).toBe(200);
-    const { data } = await json(res);
-    expect(data).not.toBeNull();
-    expect(data.sessions).toHaveLength(1);
-    expect(data.sessions[0].results[0].resultId).toBe(5001);
-  });
-
-  it("sidebar for unknown item is 200 + data null (app parity)", async () => {
-    const res = await app.request("/api/v1/items/999/results");
-    expect(res.status).toBe(200);
-    expect(await json<unknown>(res)).toEqual({ ok: true, data: null });
-  });
 
   it("evidence always carries clips + images arrays", async () => {
     await seedResultContext();

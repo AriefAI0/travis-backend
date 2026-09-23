@@ -9,7 +9,6 @@ import { ingestRoutes } from "./features/recording/ingest-routes";
 import { hlsRoutes } from "./features/playback-stream/hls-routes";
 import { exportRoutes } from "./features/media-export/routes";
 import { sessionRoutes } from "./features/sessions/routes";
-import { structureRoutes } from "./features/structure/routes";
 import { taskStructureRoutes } from "./features/task-structure/routes";
 import { inspectionFormRoutes } from "./features/inspection-forms/routes";
 import { sessionTimelineRoutes } from "./features/session-timeline/routes";
@@ -29,7 +28,6 @@ if (env.NODE_ENV !== "test") {
 app.onError(onError);
 app.route("/", healthRoutesFor(minio, [{ name: "db", check: pingDb }]));
 app.route("/", projectRoutes());
-app.route("/", structureRoutes());
 app.route("/", taskStructureRoutes());
 app.route("/", inspectionFormRoutes());
 app.route("/", sessionTimelineRoutes());
