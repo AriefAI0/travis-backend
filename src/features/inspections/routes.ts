@@ -2,17 +2,23 @@ import { Hono } from "hono";
 import type { DbOrTx } from "../../db/client";
 import {
   cancelInspection,
+  cancelInspectionV2,
   getActiveInspectionByPair,
+  listActiveV2BySessionId,
   listOpenInspectionsBySessionId,
   startInspection,
+  startInspectionV2,
   stopInspection,
+  stopInspectionV2,
 } from "../../db/services/inspection.service";
 import { parseBody, parseId, parseQuery } from "../../lib/parse";
 import { ok } from "../../lib/response";
 import {
   activeInspectionQuerySchema,
   startInspectionSchema,
+  startInspectionV2Schema,
   stopInspectionSchema,
+  stopInspectionV2Schema,
 } from "../../types/api";
 
 // inspection lifecycle over HTTP: start, stop, cancel, active.
@@ -52,6 +58,27 @@ export const inspectionRoutes = (database?: DbOrTx) => {
 
   routes.post("/api/v1/inspections/:resultId/cancel", async (c) =>
     ok(c, await cancelInspection(parseId(c, "resultId"), database)),
+  );
+
+  /* v2 lifecycle — task-tree targets, layers, custom values */
+  routes.post("/api/v1/inspections/v2/start", async (c) => {
+    const input = await parseBody(c, startInspectionV2Schema);
+    return ok(c, await startInspectionV2(input, database), 201);
+  });
+
+  // literal path first so :resultId can never shadow it
+  routes.get("/api/v1/sessions/:sessionId/inspections/active", async (c) =>
+    ok(c, await listActiveV2BySessionId(parseId(c, "sessionId"), database)),
+  );
+
+  routes.post("/api/v1/inspections/v2/:resultId/stop", async (c) => {
+    const resultId = parseId(c, "resultId");
+    const input = await parseBody(c, stopInspectionV2Schema);
+    return ok(c, await stopInspectionV2(resultId, input, database));
+  });
+
+  routes.post("/api/v1/inspections/v2/:resultId/cancel", async (c) =>
+    ok(c, await cancelInspectionV2(parseId(c, "resultId"), database)),
   );
 
   return routes;

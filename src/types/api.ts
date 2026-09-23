@@ -606,6 +606,29 @@ export const saveInspectionFormSchema = z.object({
 });
 export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
 
+/* inspection v2 lifecycle — task-tree targets, layer, master anchors */
+export const startInspectionV2Schema = z
+  .object({
+    sessionId: id,
+    layer: z.number().int().min(1).max(3),
+    inspectionTypeCode: inspectionType,
+    mainComponentId: id.optional(),
+    componentCodeId: id.optional(),
+    remarks: optionalText,
+    masterStartMs: z.number().int().nonnegative(),
+  })
+  .refine(
+    (v) => (v.mainComponentId !== undefined) !== (v.componentCodeId !== undefined),
+    { message: "exactly one of mainComponentId or componentCodeId is required" },
+  );
+export const stopInspectionV2Schema = z.object({
+  remarks: optionalText,
+  // typed detail payload — discriminated union checked in the service
+  payload: z.unknown(),
+  customValues: z.record(z.string(), z.unknown()).optional(),
+  masterEndMs: z.number().int().nonnegative(),
+});
+
 // sessions — service normalize only honors name today
 export const createSessionSchema = z.object({ projectId: id, name: optionalText });
 export const updateSessionSchema = z.object({ name: optionalText });

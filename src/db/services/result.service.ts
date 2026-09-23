@@ -91,6 +91,14 @@ const normalizeResultUpdate = (
     nextData.remarks = normalizeOptionalText(data.remarks);
   }
 
+  if ("masterEndMs" in data) {
+    nextData.masterEndMs = data.masterEndMs;
+  }
+
+  if ("customValues" in data) {
+    nextData.customValues = data.customValues;
+  }
+
   return nextData;
 };
 
@@ -411,6 +419,57 @@ export const createResult = async (
 
 export const listResults = async (database?: DbOrTx) =>
   listResultRecords(database);
+
+/* ---------- v2 create: task-tree target columns ---------- */
+export type CreateResultV2Input = {
+  sessionId: number;
+  projectId: number;
+  inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR";
+  mainComponentId?: number;
+  componentCodeId?: number;
+  layer: number;
+  masterStartMs: number;
+  inspectionFormId: number;
+  remarks?: string | null;
+};
+
+// same ordinal mint + lost-race retry as createResult, v2 column set
+export const createResultV2 = async (
+  data: CreateResultV2Input,
+  database?: DbOrTx,
+) => {
+  const insertOnce = async (dbOrTx?: DbOrTx) => {
+    const max = await maxResultDisplayNumberBySessionId(data.sessionId, dbOrTx);
+    return createResultRecord(
+      {
+        sessionId: data.sessionId,
+        projectId: data.projectId,
+        inspectionTypeCode: data.inspectionTypeCode,
+        mainComponentId: data.mainComponentId ?? null,
+        componentCodeId: data.componentCodeId ?? null,
+        layer: data.layer,
+        masterStartMs: data.masterStartMs,
+        inspectionFormId: data.inspectionFormId,
+        displayNumber: (max ?? 0) + 1,
+        remarks: normalizeOptionalText(data.remarks),
+      },
+      dbOrTx,
+    );
+  };
+
+  if (database) {
+    return insertOnce(database);
+  }
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await insertOnce();
+    } catch (err) {
+      const lostRace = attempt < 2 && String(err).includes("uq_result_session_display");
+      if (!lostRace) throw err;
+    }
+  }
+};
 
 export const getResultById = async (resultId: number, database?: DbOrTx) =>
   findResultById(resultId, database);
