@@ -592,6 +592,20 @@ export const updateComponentTypeSchema = z.object({
 });
 export const componentTypeQuerySchema = z.object({ q: z.string().min(1).optional() });
 
+/* inspection forms — save-on-confirm posts the custom fields only;
+   builtins come from the server registry, never the request */
+export const formDataType = z.enum(["integer", "decimal", "text", "boolean"]);
+export const inspectionFormCustomFieldSchema = z.object({
+  label: z.string().min(1),
+  dataType: formDataType,
+  required: z.boolean().optional(),
+  displayOrder: z.number().int().nonnegative(),
+});
+export const saveInspectionFormSchema = z.object({
+  customFields: z.array(inspectionFormCustomFieldSchema),
+});
+export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
+
 // sessions — service normalize only honors name today
 export const createSessionSchema = z.object({ projectId: id, name: optionalText });
 export const updateSessionSchema = z.object({ name: optionalText });
