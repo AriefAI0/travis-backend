@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { componentCode } from "../schema";
@@ -22,6 +22,21 @@ export const listComponentCodeRecordsByMainComponentTypeId = async (
     ),
     orderBy: [asc(componentCode.displayOrder), asc(componentCode.componentCodeId)],
   });
+
+// batched tree read: all component codes under a set of type branches
+export const listComponentCodeRecordsByMainComponentTypeIds = async (
+  mainComponentTypeIds: number[],
+  database: DbOrTx = db,
+) =>
+  mainComponentTypeIds.length
+    ? database.query.componentCode.findMany({
+        where: and(
+          inArray(componentCode.mainComponentTypeId, mainComponentTypeIds),
+          isNull(componentCode.archivedAt),
+        ),
+        orderBy: [asc(componentCode.displayOrder), asc(componentCode.componentCodeId)],
+      })
+    : [];
 
 export const findComponentCodeById = async (
   componentCodeId: number,

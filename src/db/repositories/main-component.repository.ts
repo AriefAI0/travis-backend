@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { mainComponent } from "../schema";
@@ -19,6 +19,18 @@ export const listMainComponentRecordsByTaskCodeId = async (
     where: and(eq(mainComponent.taskCodeId, taskCodeId), isNull(mainComponent.archivedAt)),
     orderBy: [asc(mainComponent.displayOrder), asc(mainComponent.mainComponentId)],
   });
+
+// batched tree read: all main components under a set of task codes
+export const listMainComponentRecordsByTaskCodeIds = async (
+  taskCodeIds: number[],
+  database: DbOrTx = db,
+) =>
+  taskCodeIds.length
+    ? database.query.mainComponent.findMany({
+        where: and(inArray(mainComponent.taskCodeId, taskCodeIds), isNull(mainComponent.archivedAt)),
+        orderBy: [asc(mainComponent.displayOrder), asc(mainComponent.mainComponentId)],
+      })
+    : [];
 
 export const findMainComponentById = async (
   mainComponentId: number,

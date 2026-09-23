@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { taskCode } from "../schema";
@@ -19,6 +19,18 @@ export const listTaskCodeRecordsByTaskGroupId = async (
     where: and(eq(taskCode.taskGroupId, taskGroupId), isNull(taskCode.archivedAt)),
     orderBy: [asc(taskCode.displayOrder), asc(taskCode.taskCodeId)],
   });
+
+// batched tree read: all codes under a set of groups
+export const listTaskCodeRecordsByTaskGroupIds = async (
+  taskGroupIds: number[],
+  database: DbOrTx = db,
+) =>
+  taskGroupIds.length
+    ? database.query.taskCode.findMany({
+        where: and(inArray(taskCode.taskGroupId, taskGroupIds), isNull(taskCode.archivedAt)),
+        orderBy: [asc(taskCode.displayOrder), asc(taskCode.taskCodeId)],
+      })
+    : [];
 
 export const findTaskCodeById = async (taskCodeId: number, database: DbOrTx = db) =>
   (await database.query.taskCode.findFirst({

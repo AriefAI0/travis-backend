@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { mainComponentType } from "../schema";
@@ -21,6 +21,33 @@ export const listMainComponentTypeRecordsByMainComponentId = async (
       isNull(mainComponentType.archivedAt),
     ),
     orderBy: [asc(mainComponentType.displayOrder), asc(mainComponentType.mainComponentTypeId)],
+  });
+
+// batched tree read: all type branches under a set of main components
+export const listMainComponentTypeRecordsByMainComponentIds = async (
+  mainComponentIds: number[],
+  database: DbOrTx = db,
+) =>
+  mainComponentIds.length
+    ? database.query.mainComponentType.findMany({
+        where: and(
+          inArray(mainComponentType.mainComponentId, mainComponentIds),
+          isNull(mainComponentType.archivedAt),
+        ),
+        orderBy: [
+          asc(mainComponentType.displayOrder),
+          asc(mainComponentType.mainComponentTypeId),
+        ],
+      })
+    : [];
+
+// in-use check before a catalog delete
+export const listMainComponentTypeRecordsByComponentTypeId = async (
+  componentTypeId: number,
+  database: DbOrTx = db,
+) =>
+  database.query.mainComponentType.findMany({
+    where: eq(mainComponentType.componentTypeId, componentTypeId),
   });
 
 export const findMainComponentTypeById = async (

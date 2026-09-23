@@ -452,6 +452,7 @@ export type ReportGatherData = {
 // body ids are JSON numbers; params/queries coerce from strings
 const id = z.number().int().positive();
 const optionalText = z.string().min(1).nullable().optional();
+const optionalOrder = z.number().int().nonnegative().optional();
 const itemStatus = z.enum(["not_set", "pending", "complete"]);
 const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
 
@@ -483,6 +484,113 @@ export const updateItemSchema = z.object({
   position: optionalText,
   status: itemStatusPatch,
 });
+
+/* =========================================================
+   task tree — response nodes (Project > Task Group > Task Code
+   > Main Component > Type branch > Component Code)
+========================================================= */
+export type TaskStructureComponentCodeNode = {
+  componentCodeId: number;
+  code: string;
+  label: string | null;
+  displayOrder: number;
+};
+
+export type TaskStructureTypeBranchNode = {
+  mainComponentTypeId: number;
+  componentTypeId: number;
+  typeCode: string;
+  label: string;
+  displayOrder: number;
+  componentCodes: TaskStructureComponentCodeNode[];
+};
+
+export type TaskStructureMainComponentNode = {
+  mainComponentId: number;
+  description: string;
+  displayOrder: number;
+  types: TaskStructureTypeBranchNode[];
+};
+
+export type TaskStructureTaskCodeNode = {
+  taskCodeId: number;
+  code: string;
+  label: string;
+  displayOrder: number;
+  mainComponents: TaskStructureMainComponentNode[];
+};
+
+export type TaskStructureTaskGroupNode = {
+  taskGroupId: number;
+  groupCode: string;
+  label: string;
+  displayOrder: number;
+  taskCodes: TaskStructureTaskCodeNode[];
+};
+
+/* task tree — request schemas */
+export const createTaskGroupSchema = z.object({
+  projectId: id,
+  groupCode: z.string().min(1),
+  label: z.string().min(1),
+  displayOrder: optionalOrder,
+});
+export const updateTaskGroupSchema = z.object({
+  groupCode: z.string().min(1).optional(),
+  label: z.string().min(1).optional(),
+  displayOrder: optionalOrder,
+});
+export const createTaskCodeSchema = z.object({
+  taskGroupId: id,
+  code: z.string().min(1),
+  label: z.string().min(1),
+  displayOrder: optionalOrder,
+});
+export const updateTaskCodeSchema = z.object({
+  code: z.string().min(1).optional(),
+  label: z.string().min(1).optional(),
+  displayOrder: optionalOrder,
+});
+export const createMainComponentSchema = z.object({
+  taskCodeId: id,
+  description: z.string().min(1),
+  displayOrder: optionalOrder,
+});
+export const updateMainComponentSchema = z.object({
+  description: z.string().min(1).optional(),
+  displayOrder: optionalOrder,
+});
+// attach a type branch: catalog value is created on first use, reused after
+export const attachMainComponentTypeSchema = z.object({
+  mainComponentId: id,
+  typeCode: z.string().min(1),
+  label: z.string().min(1),
+});
+export const updateMainComponentTypeSchema = z.object({
+  componentTypeId: id.optional(),
+  displayOrder: optionalOrder,
+});
+export const createComponentCodeSchema = z.object({
+  mainComponentTypeId: id,
+  code: z.string().min(1),
+  label: optionalText,
+  displayOrder: optionalOrder,
+});
+export const updateComponentCodeSchema = z.object({
+  code: z.string().min(1).optional(),
+  label: optionalText,
+  displayOrder: optionalOrder,
+});
+// project type catalog: autocomplete + rename in place (stable id)
+export const createComponentTypeSchema = z.object({
+  typeCode: z.string().min(1),
+  label: z.string().min(1),
+});
+export const updateComponentTypeSchema = z.object({
+  typeCode: z.string().min(1),
+  label: z.string().min(1),
+});
+export const componentTypeQuerySchema = z.object({ q: z.string().min(1).optional() });
 
 // sessions — service normalize only honors name today
 export const createSessionSchema = z.object({ projectId: id, name: optionalText });
