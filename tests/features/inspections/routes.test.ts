@@ -50,8 +50,8 @@ const seedWorld = async (withMaster = true) => {
   }
 };
 
-const startV2 = (extra: Record<string, unknown>) =>
-  post("/api/v1/inspections/v2/start", {
+const startInspection = (extra: Record<string, unknown>) =>
+  post("/api/v1/inspections/start", {
     sessionId: 101,
     layer: 1,
     inspectionTypeCode: "GVI",
@@ -61,15 +61,15 @@ const startV2 = (extra: Record<string, unknown>) =>
   });
 
 // flow: start guards > stop validation > cancel > active list
-describe("inspections v2 routes", () => {
+describe("inspections routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
   beforeEach(truncateTestDatabase);
 
-  it("starts a v2 inspection with a target and pins the current form version", async () => {
+  it("starts an inspection with a target and pins the current form version", async () => {
     await seedWorld();
 
-    const res = await startV2({});
+    const res = await startInspection({});
     expect(res.status).toBe(201);
     const row = (await json(res)).data as Record<string, any>;
     expect(row.layer).toBe(1);
@@ -81,37 +81,41 @@ describe("inspections v2 routes", () => {
 
   it("rejects a duplicate active target and type", async () => {
     await seedWorld();
-    await startV2({});
+    await startInspection({});
 
-    const dup = await startV2({});
+    const dup = await startInspection({});
     expect(dup.status).toBe(409);
     expect((await json(dup)).data).toBeUndefined();
   });
 
-  it("rejects a second active inspection on the same layer and a layer above three", async () => {
+  it("rejects a second active inspection on the same layer and a layer above two", async () => {
     await seedWorld();
-    await startV2({});
+    await startInspection({});
 
-    const sameLayer = await startV2({ mainComponentId: 31 });
+    const sameLayer = await startInspection({ mainComponentId: 31 });
     expect(sameLayer.status).toBe(409);
     const sameLayerBody = (await json(sameLayer)) as Record<string, any>;
     expect(sameLayerBody.code ?? sameLayerBody.error?.code ?? "layer_in_use").toContain("layer_in_use");
 
-    const tooHigh = await startV2({ layer: 4, mainComponentId: 31 });
+    // 2-layer cap: layer 2 is the one ad-hoc child, a third is refused
+    const layerThree = await startInspection({ layer: 3, mainComponentId: 31 });
+    expect(layerThree.status).toBe(400);
+
+    const tooHigh = await startInspection({ layer: 4, mainComponentId: 31 });
     expect(tooHigh.status).toBe(400);
   });
 
   it("requires a master video", async () => {
     await seedWorld(false);
-    const noMaster = await startV2({});
+    const noMaster = await startInspection({});
     expect(noMaster.status).toBe(409);
   });
 
   it("requires exactly one target", async () => {
     await seedWorld();
-    const both = await startV2({ componentCodeId: 60 });
+    const both = await startInspection({ componentCodeId: 60 });
     expect(both.status).toBe(400);
-    const neither = await post("/api/v1/inspections/v2/start", {
+    const neither = await post("/api/v1/inspections/start", {
       sessionId: 101,
       layer: 1,
       inspectionTypeCode: "GVI",
@@ -122,9 +126,9 @@ describe("inspections v2 routes", () => {
 
   it("starts a component-code inspection on layer 2", async () => {
     await seedWorld();
-    await startV2({});
+    await startInspection({});
 
-    const child = await startV2({ layer: 2, mainComponentId: undefined, componentCodeId: 60 });
+    const child = await startInspection({ layer: 2, mainComponentId: undefined, componentCodeId: 60 });
     expect(child.status).toBe(201);
     const row = (await json(child)).data as Record<string, any>;
     expect(row.componentCodeId).toBe(60);
@@ -142,31 +146,31 @@ describe("inspections v2 routes", () => {
       .data as Record<string, any>;
     const clampNote = form.fields.find((f: Record<string, any>) => f.label === "Clamp note");
 
-    const started = await startV2({});
+    const started = await startInspection({});
     const resultId = (await json(started)).data.resultId as number;
 
-    const missing = await post(`/api/v1/inspections/v2/${resultId}/stop`, {
+    const missing = await post(`/api/v1/inspections/${resultId}/stop`, {
       payload: GVI_PAYLOAD,
       customValues: {},
       masterEndMs: 5000,
     });
     expect(missing.status).toBe(400);
 
-    const wrongType = await post(`/api/v1/inspections/v2/${resultId}/stop`, {
+    const wrongType = await post(`/api/v1/inspections/${resultId}/stop`, {
       payload: GVI_PAYLOAD,
       customValues: { [clampNote.inspectionFormFieldId]: 7 },
       masterEndMs: 5000,
     });
     expect(wrongType.status).toBe(400);
 
-    const unknown = await post(`/api/v1/inspections/v2/${resultId}/stop`, {
+    const unknown = await post(`/api/v1/inspections/${resultId}/stop`, {
       payload: GVI_PAYLOAD,
       customValues: { "999999": "x" },
       masterEndMs: 5000,
     });
     expect(unknown.status).toBe(400);
 
-    const stopped = await post(`/api/v1/inspections/v2/${resultId}/stop`, {
+    const stopped = await post(`/api/v1/inspections/${resultId}/stop`, {
       payload: GVI_PAYLOAD,
       customValues: { [clampNote.inspectionFormFieldId]: "surface corrosion" },
       masterEndMs: 5000,
@@ -176,7 +180,7 @@ describe("inspections v2 routes", () => {
     expect(row.masterEndMs).toBe(5000);
     expect(row.customValues[clampNote.inspectionFormFieldId]).toBe("surface corrosion");
 
-    const doubleStop = await post(`/api/v1/inspections/v2/${resultId}/stop`, {
+    const doubleStop = await post(`/api/v1/inspections/${resultId}/stop`, {
       payload: GVI_PAYLOAD,
       customValues: {},
       masterEndMs: 6000,
@@ -186,10 +190,10 @@ describe("inspections v2 routes", () => {
 
   it("cancels an open inspection and removes the row", async () => {
     await seedWorld();
-    const started = await startV2({});
+    const started = await startInspection({});
     const resultId = (await json(started)).data.resultId as number;
 
-    const cancel = await post(`/api/v1/inspections/v2/${resultId}/cancel`, {});
+    const cancel = await post(`/api/v1/inspections/${resultId}/cancel`, {});
     expect(cancel.status).toBe(200);
 
     const active = (await json(await app.request("/api/v1/sessions/101/inspections/active")))
@@ -197,10 +201,10 @@ describe("inspections v2 routes", () => {
     expect(active).toHaveLength(0);
   });
 
-  it("lists active v2 inspections with layer and target", async () => {
+  it("lists active inspections with layer and target", async () => {
     await seedWorld();
-    await startV2({});
-    await startV2({ layer: 2, mainComponentId: undefined, componentCodeId: 60 });
+    await startInspection({});
+    await startInspection({ layer: 2, mainComponentId: undefined, componentCodeId: 60 });
 
     const active = (await json(await app.request("/api/v1/sessions/101/inspections/active")))
       .data as Array<Record<string, any>>;
@@ -210,7 +214,7 @@ describe("inspections v2 routes", () => {
 
   it("lets an open inspection adopt a form version saved mid-inspection", async () => {
     await seedWorld();
-    const started = await startV2({});
+    const started = await startInspection({});
     const resultId = (await json(started)).data.resultId as number;
 
     // operator edits the form while the inspection is open
@@ -221,7 +225,7 @@ describe("inspections v2 routes", () => {
     )).data as Record<string, any>;
     const midField = saved.fields.find((f: Record<string, any>) => f.label === "Mid-flight note");
 
-    const stopped = await post(`/api/v1/inspections/v2/${resultId}/stop`, {
+    const stopped = await post(`/api/v1/inspections/${resultId}/stop`, {
       payload: GVI_PAYLOAD,
       customValues: { [midField.inspectionFormFieldId]: "added mid-inspection" },
       masterEndMs: 7000
@@ -233,11 +237,11 @@ describe("inspections v2 routes", () => {
   });
 
   // regression: RESTRICT target FKs deadlocked project deletion once results existed
-  it("deletes a project that has v2 results and tree data", async () => {
+  it("deletes a project that has results and tree data", async () => {
     await seedWorld();
-    const started = await startV2({});
+    const started = await startInspection({});
     const resultId = (await json(started)).data.resultId as number;
-    await post(`/api/v1/inspections/v2/${resultId}/stop`, {
+    await post(`/api/v1/inspections/${resultId}/stop`, {
       payload: GVI_PAYLOAD,
       customValues: {},
       masterEndMs: 1000

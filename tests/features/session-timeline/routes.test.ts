@@ -38,7 +38,7 @@ const seedWorld = async () => {
 
 // NOTE: inspection routes are not mounted here; rows are inserted directly so
 // this suite stays read-only over its own fixtures
-const insertV2Result = async (overrides: Partial<typeof schema.result.$inferInsert>) => {
+const insertResult = async (overrides: Partial<typeof schema.result.$inferInsert>) => {
   await testDb.insert(schema.result).values({
     projectId: 1,
     sessionId: 101,
@@ -60,8 +60,8 @@ describe("session timeline routes", () => {
 
   it("returns session rows open and finished with breadcrumbs", async () => {
     await seedWorld();
-    await insertV2Result({ displayNumber: 1, masterStartMs: 0, masterEndMs: 60000 });
-    await insertV2Result({
+    await insertResult({ displayNumber: 1, masterStartMs: 0, masterEndMs: 60000 });
+    await insertResult({
       displayNumber: 2,
       layer: 2,
       mainComponentId: null,
@@ -84,9 +84,9 @@ describe("session timeline routes", () => {
 
   it("returns only finished markers ordered by master start", async () => {
     await seedWorld();
-    await insertV2Result({ displayNumber: 1, layer: 1, masterStartMs: 120000, masterEndMs: 240000 });
-    await insertV2Result({ displayNumber: 2, layer: 2, mainComponentId: null, componentCodeId: 60, masterStartMs: 0, masterEndMs: 60000 });
-    await insertV2Result({ displayNumber: 3, layer: 1, masterStartMs: 300000 });
+    await insertResult({ displayNumber: 1, layer: 1, masterStartMs: 120000, masterEndMs: 240000 });
+    await insertResult({ displayNumber: 2, layer: 2, mainComponentId: null, componentCodeId: 60, masterStartMs: 0, masterEndMs: 60000 });
+    await insertResult({ displayNumber: 3, layer: 1, masterStartMs: 300000 });
 
     const markers = (await json(await app.request("/api/v1/sessions/101/inspection-markers")))
       .data as Array<Record<string, any>>;
@@ -98,8 +98,8 @@ describe("session timeline routes", () => {
 
   it("serves the sidebar for both target kinds", async () => {
     await seedWorld();
-    await insertV2Result({ displayNumber: 1, masterStartMs: 0, masterEndMs: 60000 });
-    await insertV2Result({
+    await insertResult({ displayNumber: 1, masterStartMs: 0, masterEndMs: 60000 });
+    await insertResult({
       displayNumber: 2,
       layer: 2,
       mainComponentId: null,

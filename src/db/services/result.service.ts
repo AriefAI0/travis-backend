@@ -363,8 +363,8 @@ const writeCviDetail = async (
 export const listResults = async (database?: DbOrTx) =>
   listResultRecords(database);
 
-/* ---------- v2 create: task-tree target columns ---------- */
-export type CreateResultV2Input = {
+/* ---------- create: task-tree target columns ---------- */
+export type CreateResultInput = {
   sessionId: number;
   projectId: number;
   inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR";
@@ -376,9 +376,9 @@ export type CreateResultV2Input = {
   remarks?: string | null;
 };
 
-// same ordinal mint + lost-race retry as createResult, v2 column set
-export const createResultV2 = async (
-  data: CreateResultV2Input,
+// per-session ordinal mint; two retries cover a lost race on that unique key
+export const createResult = async (
+  data: CreateResultInput,
   database?: DbOrTx,
 ) => {
   const insertOnce = async (dbOrTx?: DbOrTx) => {
@@ -526,7 +526,7 @@ export const listProjectSummary = async (
     resultId: resultRecord.resultId,
     createdAt: toIsoString(resultRecord.createdAt),
     inspectionTypeCode: resultRecord.inspectionTypeCode,
-    // v2 target ids replace the item-model ids
+    // target ids replace the item-model ids
     mainComponentId: resultRecord.mainComponentId,
     componentCodeId: resultRecord.componentCodeId,
     remarks: resultRecord.remarks,

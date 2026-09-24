@@ -15,7 +15,7 @@ import {
   listVideoClipsByResultId,
 } from "./video.service";
 import {
-  createResultV2,
+  createResult,
   deleteResult,
   getResultById,
   listResultsBySessionId,
@@ -73,10 +73,10 @@ const listCapturingClipIds = async (
 // all-or-nothing: any throw rolls back the session_item and result rows too
 
 /* =========================================================
-   V2 lifecycle — task-tree targets, layers, custom values
-   Open v2 row = layer set and master_end_ms still null.
+   Inspection lifecycle — task-tree targets, layers, custom values
+   Open row = layer set and master_end_ms still null.
 ========================================================= */
-export type StartInspectionV2Input = {
+export type StartInspectionInput = {
   sessionId: number;
   layer: number;
   inspectionTypeCode: InspectionTypeCode;
@@ -86,14 +86,14 @@ export type StartInspectionV2Input = {
   masterStartMs: number;
 };
 
-export type StopInspectionV2Input = {
+export type StopInspectionInput = {
   remarks?: string | null;
   payload: unknown;
   customValues?: Record<string, unknown>;
   masterEndMs: number;
 };
 
-export type ActiveInspectionV2 = {
+export type ActiveInspection = {
   resultId: number;
   layer: number;
   mainComponentId: number | null;
@@ -106,8 +106,8 @@ export type ActiveInspectionV2 = {
 };
 
 // resolve the target > owning project through the task tree chain
-const resolveV2Target = async (
-  input: Pick<StartInspectionV2Input, "mainComponentId" | "componentCodeId">,
+const resolveInspectionTarget = async (
+  input: Pick<StartInspectionInput, "mainComponentId" | "componentCodeId">,
   database?: DbOrTx,
 ): Promise<{ projectId: number; mainComponentId: number | null; componentCodeId: number | null }> => {
   const both = input.mainComponentId !== undefined && input.componentCodeId !== undefined;
@@ -172,15 +172,15 @@ const validateCustomValues = async (
   return values;
 };
 
-// active v2 rows of a session: layer set and end anchor still null
-const listActiveV2Rows = async (sessionId: number, database?: DbOrTx) => {
+// active rows of a session: layer set and end anchor still null
+const listActiveRows = async (sessionId: number, database?: DbOrTx) => {
   const rows = await listResultsBySessionId(sessionId, database);
   return rows.filter((row) => row.layer !== null && row.masterEndMs === null);
 };
 
 // flow: master > target > duplicate > layer > pin form > create — one tx
-export const startInspectionV2 = async (
-  input: StartInspectionV2Input,
+export const startInspection = async (
+  input: StartInspectionInput,
   database?: DbOrTx,
 ) => {
   const run = async (tx: DbOrTx) => {
@@ -188,12 +188,12 @@ export const startInspectionV2 = async (
     const sessionRecord = await getSessionById(input.sessionId, tx);
     if (!sessionRecord) throw notFound(`session ${input.sessionId}`);
 
-    const target = await resolveV2Target(input, tx);
+    const target = await resolveInspectionTarget(input, tx);
     if (target.projectId !== sessionRecord.projectId) {
       throw new AppError(400, "target_project_mismatch", "target belongs to a different project");
     }
 
-    const actives = await listActiveV2Rows(input.sessionId, tx);
+    const actives = await listActiveRows(input.sessionId, tx);
     for (const row of actives) {
       const sameTarget =
         row.mainComponentId === target.mainComponentId &&
@@ -219,7 +219,7 @@ export const startInspectionV2 = async (
       input.inspectionTypeCode,
       tx,
     );
-    const created = await createResultV2(
+    const created = await createResult(
       {
         sessionId: input.sessionId,
         projectId: sessionRecord.projectId,
@@ -241,16 +241,16 @@ export const startInspectionV2 = async (
 };
 
 // flow: fetch > open guard > validate customs > update row > write detail — one tx
-export const stopInspectionV2 = async (
+export const stopInspection = async (
   resultId: number,
-  input: StopInspectionV2Input,
+  input: StopInspectionInput,
   database?: DbOrTx,
 ) => {
   const run = async (tx: DbOrTx) => {
     const result = await getResultById(resultId, tx);
     if (!result) throw notFound(`result ${resultId}`);
     if (result.layer === null) {
-      throw new AppError(409, "inspection_already_stopped", `inspection ${resultId} is not a v2 inspection`);
+      throw new AppError(409, "inspection_already_stopped", `inspection ${resultId} is not a task-tree inspection`);
     }
     if (result.masterEndMs !== null) {
       throw new AppError(409, "inspection_already_stopped", `inspection ${resultId} is already stopped`);
@@ -296,8 +296,8 @@ const removeIngestObjects = async (keyPrefix: string) => {
   }
 };
 
-// cancel removes the open v2 row, its clip, and the clip's uploaded media
-export const cancelInspectionV2 = async (resultId: number, database?: DbOrTx) => {
+// cancel removes the open row, its clip, and the clip's uploaded media
+export const cancelInspection = async (resultId: number, database?: DbOrTx) => {
   const result = await getResultById(resultId, database);
   if (!result) throw notFound(`result ${resultId}`);
   if (result.layer === null) {
@@ -326,15 +326,15 @@ export const cancelInspectionV2 = async (resultId: number, database?: DbOrTx) =>
   return deleted;
 };
 
-// open v2 inspections of a session with clip state — stack restore
-export const listActiveV2BySessionId = async (
+// open inspections of a session with clip state — stack restore
+export const listActiveBySessionId = async (
   sessionId: number,
   database?: DbOrTx,
-): Promise<ActiveInspectionV2[]> => {
+): Promise<ActiveInspection[]> => {
   const sessionRecord = await getSessionById(sessionId, database);
   if (!sessionRecord) throw notFound(`session ${sessionId}`);
 
-  const rows = await listActiveV2Rows(sessionId, database);
+  const rows = await listActiveRows(sessionId, database);
 
   const clipIdByResultId = new Map<number, number>();
   for (const row of rows) {
@@ -392,7 +392,7 @@ export type SessionInspectionRow = {
   breadcrumb: SessionInspectionBreadcrumb | null;
 };
 
-// walk a v2 result's target to the full breadcrumb; labels follow renames
+// walk a result's target to the full breadcrumb; labels follow renames
 const buildBreadcrumb = async (
   mainComponentId: number | null,
   componentCodeId: number | null,
@@ -434,7 +434,7 @@ const buildBreadcrumb = async (
   };
 };
 
-// all v2 rows of a session, open and finished — the workspace event table
+// all rows of a session, open and finished — the workspace event table
 export const listSessionInspectionRows = async (
   sessionId: number,
   database?: DbOrTx,

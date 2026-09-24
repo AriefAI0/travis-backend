@@ -605,11 +605,12 @@ export const saveInspectionFormSchema = z.object({
 });
 export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
 
-/* inspection v2 lifecycle — task-tree targets, layer, master anchors */
-export const startInspectionV2Schema = z
+/* Inspection lifecycle — task-tree targets, layer, master anchors. Layer
+   values are 1 (main) and 2 (one ad-hoc child); a third is refused. */
+export const startInspectionSchema = z
   .object({
     sessionId: id,
-    layer: z.number().int().min(1).max(3),
+    layer: z.number().int().min(1).max(2),
     inspectionTypeCode: inspectionType,
     mainComponentId: id.optional(),
     componentCodeId: id.optional(),
@@ -620,7 +621,7 @@ export const startInspectionV2Schema = z
     (v) => (v.mainComponentId !== undefined) !== (v.componentCodeId !== undefined),
     { message: "exactly one of mainComponentId or componentCodeId is required" },
   );
-export const stopInspectionV2Schema = z.object({
+export const stopInspectionSchema = z.object({
   remarks: optionalText,
   // typed detail payload — discriminated union checked in the service
   payload: z.unknown(),
@@ -757,22 +758,3 @@ export type FmdPayloadInput = z.infer<typeof fmdPayloadSchema>;
 export type ScourPayloadInput = z.infer<typeof scourPayloadSchema>;
 export type GviPayloadInput = z.infer<typeof gviPayloadSchema>;
 export type CviPayloadInput = z.infer<typeof cviPayloadSchema>;
-
-// inspection lifecycle requests
-export const startInspectionSchema = z.object({
-  sessionId: id,
-  itemId: id,
-  inspectionTypeCode: inspectionType,
-  remarks: optionalText,
-});
-
-export const stopInspectionSchema = z.object({
-  remarks: optionalText,
-  payload: inspectionPayloadSchema,
-});
-
-export const activeInspectionQuerySchema = z.object({
-  sessionId: queryId,
-  itemId: queryId,
-  inspectionTypeCode: inspectionType,
-});

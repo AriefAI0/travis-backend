@@ -377,7 +377,7 @@ export const result = pgTable(
     masterStartMs: bigint("master_start_ms", { mode: "number" }),
     masterEndMs: bigint("master_end_ms", { mode: "number" }),
 
-    // runtime stack layer 1-3 (check below); null on legacy rows
+    // runtime stack layer 1-2 (check below); null on legacy rows
     layer: integer("layer"),
 
     // custom form values keyed by inspection_form_field id
@@ -412,7 +412,7 @@ export const result = pgTable(
     ),
     resultLayerCheck: check(
       "result_layer_check",
-      sql`${table.layer} IS NULL OR ${table.layer} BETWEEN 1 AND 3`,
+      sql`${table.layer} IS NULL OR ${table.layer} BETWEEN 1 AND 2`,
     ),
     idxResultInspectionTypeCode: index("idx_result_inspection_type_code").on(
       table.inspectionTypeCode
