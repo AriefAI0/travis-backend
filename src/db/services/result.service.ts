@@ -1,4 +1,4 @@
-import type { CpDetail, CviDetail, FmdDetail, ScourDetail, GviDetail, InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput } from "../../types/api";
+import type { CpDetail, CviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput } from "../../types/api";
 import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
@@ -25,7 +25,7 @@ import {
   listResultImageRecordsByResultId,
   updateResultImageById,
 } from "../repositories/result-image.repository";
-import { result, resultImage } from "../schema";
+import { result, resultImage, resultBsiClampMissingBolt, resultBsiClampMissingWasher, resultBsiHingeMissingBolt, resultBsiHingeMissingWasher } from "../schema";
 
 
 export type CreateResultImageInput = {
@@ -124,6 +124,13 @@ import {
   getResultGviByResultId,
   listResultGviByResultIds,
 } from "../repositories/result-gvi.repository";
+import {
+  createBsiMissingParts,
+  createResultBsi,
+  getResultBsiByResultId,
+  listBsiMissingParts,
+  listResultBsiByResultIds,
+} from "../repositories/result-bsi.repository";
 
 import {
   createResultCvi,
@@ -149,7 +156,7 @@ import {
  * kind that disagrees with the result's inspection type, then writes through.
  */
 export const writeTypedDetail = async (
-  inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR",
+  inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI",
   payload: unknown,
   resultId: number,
   database?: DbOrTx,
@@ -187,6 +194,8 @@ export const writeTypedDetail = async (
       return writeGviDetail(data, resultId, database);
     case "cvi":
       return writeCviDetail(data, resultId, database);
+    case "bsi":
+      return writeBsiDetail(data, resultId, database);
   }
 };
 
@@ -311,12 +320,65 @@ const writeGviDetail = async (
   await createResultGvi(
     {
       resultId,
+      kpRange: payload.kpRange ?? null,
+      depthEl: payload.depthEl ?? null,
       gviCP: payload.gviCP ?? null,
       gviUT: payload.gviUT ?? null,
       condition: payload.condition,
     },
     database,
   );
+};
+
+/**
+ * BSI detail writer — main row plus four missing-part lists, one tx
+ */
+const writeBsiDetail = async (
+  payload: BsiPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  // flow: insert result_bsi > insert missing-part lists, one tx
+  const run = async (tx: DbOrTx): Promise<void> => {
+    const resultBsi = await createResultBsi(
+      {
+        resultId,
+        clampType: payload.clampType,
+        depthEl: payload.depthEl ?? null,
+        clampBoltNutQuantity: payload.clampBoltNutQuantity ?? null,
+        outboardClampCP: payload.outboardClampCP ?? null,
+        cpAnomalyRecommendation: payload.CPAnomalyRecommendation,
+        hingePin: payload.hingePin ?? null,
+        hingeBoltNutQuantity: payload.hingeBoltNutQuantity ?? null,
+        liners: payload.liners ?? null,
+        inboardGapCondition: payload.inboardGapCondition,
+        inboardEstimateGap: payload.inboardEstimateGap ?? null,
+        inboardAlignmentCondition: payload.inboardAlignmentCondition,
+        inboardMisalignedPosition: payload.inboardMisalignedPosition ?? null,
+        inboardAnomalyRecommendation: payload.inboardAnomalyRecommendation,
+        outboardGapCondition: payload.outboardGapCondition,
+        outboardEstimateGap: payload.outboardEstimateGap ?? null,
+        outboardAlignmentCondition: payload.outboardAlignmentCondition,
+        outboardMisalignedPosition: payload.outboardMisalignedPosition ?? null,
+        outboardAnomalyRecommendation: payload.outboardAnomalyRecommendation,
+      },
+      tx,
+    );
+
+    if (!resultBsi) {
+      throw new Error("Failed to create BSI detail");
+    }
+
+    const withOrder = (parts: { position: string }[]) =>
+      parts.map((part, index) => ({ resultId, position: part.position, sortOrder: index }));
+
+    await createBsiMissingParts(resultBsiClampMissingBolt, withOrder(payload.clampMissingBolts), tx);
+    await createBsiMissingParts(resultBsiClampMissingWasher, withOrder(payload.clampMissingWasher), tx);
+    await createBsiMissingParts(resultBsiHingeMissingBolt, withOrder(payload.hingeMissingBolts), tx);
+    await createBsiMissingParts(resultBsiHingeMissingWasher, withOrder(payload.hingeMissingWasher), tx);
+  };
+
+  return database ? run(database) : db.transaction(run);
 };
 
 /**
@@ -367,7 +429,7 @@ export const listResults = async (database?: DbOrTx) =>
 export type CreateResultInput = {
   sessionId: number;
   projectId: number;
-  inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR";
+  inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
   descriptionId?: number;
   partCodeId?: number;
   layer: number;
@@ -458,18 +520,20 @@ export const listProjectSummary = async (
     CP: [],
     FMD: [],
     SCOUR: [],
+    BSI: [],
   };
   for (const resultRecord of results) {
     resultIdsByCode[resultRecord.inspectionTypeCode].push(resultRecord.resultId);
   }
 
-  const [gvi, cvi, mgi, cp, fmd, scour] = await Promise.all([
+  const [gvi, cvi, mgi, cp, fmd, scour, bsi] = await Promise.all([
     listResultGviByResultIds(resultIdsByCode.GVI, database),
     listResultCviByResultIds(resultIdsByCode.CVI, database),
     listResultMgiSummaryByResultIds(resultIdsByCode.MGI, database),
     listResultCpByResultIds(resultIdsByCode.CP, database),
     listResultFmdByResultIds(resultIdsByCode.FMD, database),
     listResultScourByResultIds(resultIdsByCode.SCOUR, database),
+    listResultBsiByResultIds(resultIdsByCode.BSI, database),
   ]);
 
   const detailFor = (
@@ -518,6 +582,10 @@ export const listProjectSummary = async (
         return detail
           ? { noMgObserved: detail.noMgObserved, findingCount: detail.findingCount }
           : null;
+      }
+      case "BSI": {
+        const detail = bsi.get(resultRecord.resultId);
+        return detail ? { clampType: detail.clampType } : null;
       }
     }
   };
@@ -735,6 +803,38 @@ export const getGviDetailByResultId = async (
     ...resultGvi,
     createdAt: toIsoString(resultGvi.createdAt),
     updatedAt: toIsoString(resultGvi.updatedAt),
+  };
+};
+
+/* =========================================================
+   BSI readback — main row plus the four missing-part lists
+   ========================================================= */
+
+export const getBsiDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<BsiDetail | null> => {
+  const resultBsi = await getResultBsiByResultId(resultId, database);
+  if (!resultBsi) {
+    return null;
+  }
+
+  const [clampMissingBolts, clampMissingWashers, hingeMissingBolts, hingeMissingWashers] =
+    await Promise.all([
+      listBsiMissingParts(resultBsiClampMissingBolt, resultId, database),
+      listBsiMissingParts(resultBsiClampMissingWasher, resultId, database),
+      listBsiMissingParts(resultBsiHingeMissingBolt, resultId, database),
+      listBsiMissingParts(resultBsiHingeMissingWasher, resultId, database),
+    ]);
+
+  return {
+    ...resultBsi,
+    clampMissingBolts,
+    clampMissingWashers,
+    hingeMissingBolts,
+    hingeMissingWashers,
+    createdAt: toIsoString(resultBsi.createdAt),
+    updatedAt: toIsoString(resultBsi.updatedAt),
   };
 };
 

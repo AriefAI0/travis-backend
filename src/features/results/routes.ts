@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { DbOrTx } from "../../db/client";
 import {
+  getBsiDetailByResultId,
   getCpDetailByResultId,
   getCviDetailByResultId,
   getFmdDetailByResultId,
@@ -64,6 +65,8 @@ export const resultRoutes = (database?: DbOrTx) => {
     ok(c, await getGviDetailByResultId(parseId(c, "id"), database)));
   routes.get("/api/v1/results/:id/cvi", async (c) =>
     ok(c, await getCviDetailByResultId(parseId(c, "id"), database)));
+  routes.get("/api/v1/results/:id/bsi", async (c) =>
+    ok(c, await getBsiDetailByResultId(parseId(c, "id"), database)));
 
   // batch read: resultId -> image summaries
   routes.post("/api/v1/images/by-result-ids", async (c) => {

@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 /* =================== ENUMERATIONS =================== */
 
-export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
+export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
 
 export const mgiCriteriaPreset = pgEnum("mgi_criteria_preset", [
   "project_default",
@@ -20,6 +20,12 @@ export const scourExposedPile = pgEnum("scour_exposed_pile", ["exposed", "not_ex
 export const gviCondition = pgEnum("gvi_condition", ["ok", "not_ok"]);
 
 export const cviMemberType = pgEnum("cvi_member_type", ["chord", "brace"]);
+
+export const bsiGapCondition = pgEnum("bsi_gap_condition", ["gap", "no_gap"]);
+
+export const bsiAlignmentCondition = pgEnum("bsi_alignment_condition", ["aligned", "misaligned"]);
+
+export const bsiMisalignedPosition = pgEnum("bsi_misaligned_position", ["top", "mid", "bottom"]);
 
 /* =========================================================
    TIMESTAMPS
@@ -493,6 +499,8 @@ export const resultGvi = pgTable(
     resultId: integer("result_id")
       .primaryKey()
       .references(() => result.resultId, { onDelete: "cascade" }),
+    kpRange: text("kp_range"),
+    depthEl: doublePrecision("depth_el"),
     gviCP: integer("gvi_cp"),
     gviUT: integer("gvi_ut"),
     condition: gviCondition("condition").notNull(),
@@ -538,6 +546,122 @@ export const resultCviPosition = pgTable(
   (table) => ({
     idxResultCviPositionResultId: index("idx_result_cvi_position_result_id").on(table.resultId),
   })
+);
+
+/* BSI — Bolted Support Inspection */
+export const resultBsi = pgTable("result_bsi", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  clampType: text("clamp_type"),
+  depthEl: doublePrecision("depth_el"),
+
+  clampBoltNutQuantity: integer("clamp_bolt_nut_quantity"),
+
+  outboardClampCP: doublePrecision("outboard_clamp_cp"),
+  cpAnomalyRecommendation: text("cp_anomaly_recommendation"),
+
+  hingePin: boolean("hinge_pin"),
+  hingeBoltNutQuantity: integer("hinge_bolt_nut_quantity"),
+
+  liners: boolean("liners"),
+
+  inboardGapCondition: bsiGapCondition("inboard_gap_condition").notNull(),
+  inboardEstimateGap: doublePrecision("inboard_estimate_gap"),
+  inboardAlignmentCondition: bsiAlignmentCondition("inboard_alignment_condition").notNull(),
+  inboardMisalignedPosition: bsiMisalignedPosition("inboard_misaligned_position"),
+  inboardAnomalyRecommendation: text("inboard_anomaly_recommendation"),
+
+  outboardGapCondition: bsiGapCondition("outboard_gap_condition").notNull(),
+  outboardEstimateGap: doublePrecision("outboard_estimate_gap"),
+  outboardAlignmentCondition: bsiAlignmentCondition("outboard_alignment_condition").notNull(),
+  outboardMisalignedPosition: bsiMisalignedPosition("outboard_misaligned_position"),
+  outboardAnomalyRecommendation: text("outboard_anomaly_recommendation"),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+// missing-part lists: one row per missing bolt/washer clock position
+export const resultBsiClampMissingBolt = pgTable(
+  "result_bsi_clamp_missing_bolt",
+  {
+    missingBoltId: integer("missing_bolt_id").primaryKey().generatedByDefaultAsIdentity(),
+    resultId: integer("result_id")
+      .notNull()
+      .references(() => resultBsi.resultId, { onDelete: "cascade" }),
+    position: text("position").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultBsiClampMissingBoltResultId: index("idx_result_bsi_clamp_missing_bolt_result_id").on(
+      table.resultId,
+    ),
+  }),
+);
+
+export const resultBsiClampMissingWasher = pgTable(
+  "result_bsi_clamp_missing_washer",
+  {
+    missingWasherId: integer("missing_washer_id").primaryKey().generatedByDefaultAsIdentity(),
+    resultId: integer("result_id")
+      .notNull()
+      .references(() => resultBsi.resultId, { onDelete: "cascade" }),
+    position: text("position").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultBsiClampMissingWasherResultId: index(
+      "idx_result_bsi_clamp_missing_washer_result_id",
+    ).on(table.resultId),
+  }),
+);
+
+export const resultBsiHingeMissingBolt = pgTable(
+  "result_bsi_hinge_missing_bolt",
+  {
+    missingBoltId: integer("missing_bolt_id").primaryKey().generatedByDefaultAsIdentity(),
+    resultId: integer("result_id")
+      .notNull()
+      .references(() => resultBsi.resultId, { onDelete: "cascade" }),
+    position: text("position").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultBsiHingeMissingBoltResultId: index("idx_result_bsi_hinge_missing_bolt_result_id").on(
+      table.resultId,
+    ),
+  }),
+);
+
+export const resultBsiHingeMissingWasher = pgTable(
+  "result_bsi_hinge_missing_washer",
+  {
+    missingWasherId: integer("missing_washer_id").primaryKey().generatedByDefaultAsIdentity(),
+    resultId: integer("result_id")
+      .notNull()
+      .references(() => resultBsi.resultId, { onDelete: "cascade" }),
+    position: text("position").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultBsiHingeMissingWasherResultId: index(
+      "idx_result_bsi_hinge_missing_washer_result_id",
+    ).on(table.resultId),
+  }),
 );
 
 /* =========================================================

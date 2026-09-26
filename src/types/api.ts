@@ -128,7 +128,7 @@ export type ProjectRecord = {
 /* =========================================================
    result (app: src/shared/result.ts)
 ========================================================= */
-export type InspectionTypeCode = "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR";
+export type InspectionTypeCode = "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
 
 export type MgiDetail = {
   resultId: number;
@@ -190,6 +190,8 @@ export type ScourDetail = {
 
 export type GviDetail = {
   resultId: number;
+  kpRange: string | null;
+  depthEl: number | null;
   gviCP: number | null;
   gviUT: number | null;
   condition: "ok" | "not_ok";
@@ -209,6 +211,39 @@ export type CviDetail = {
   memberType: "chord" | "brace";
   positions: CviPositionDetail[];
   cpPotentialMv: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BsiMissingPartDetail = {
+  position: string;
+  sortOrder: number;
+};
+
+export type BsiDetail = {
+  resultId: number;
+  clampType: string | null;
+  depthEl: number | null;
+  clampBoltNutQuantity: number | null;
+  outboardClampCP: number | null;
+  cpAnomalyRecommendation: string | null;
+  hingePin: boolean | null;
+  hingeBoltNutQuantity: number | null;
+  liners: boolean | null;
+  inboardGapCondition: "gap" | "no_gap";
+  inboardEstimateGap: number | null;
+  inboardAlignmentCondition: "aligned" | "misaligned";
+  inboardMisalignedPosition: "top" | "mid" | "bottom" | null;
+  inboardAnomalyRecommendation: string | null;
+  outboardGapCondition: "gap" | "no_gap";
+  outboardEstimateGap: number | null;
+  outboardAlignmentCondition: "aligned" | "misaligned";
+  outboardMisalignedPosition: "top" | "mid" | "bottom" | null;
+  outboardAnomalyRecommendation: string | null;
+  clampMissingBolts: BsiMissingPartDetail[];
+  clampMissingWashers: BsiMissingPartDetail[];
+  hingeMissingBolts: BsiMissingPartDetail[];
+  hingeMissingWashers: BsiMissingPartDetail[];
   createdAt: string;
   updatedAt: string;
 };
@@ -336,6 +371,7 @@ export type ResultSummaryDetail = {
   initialAttempt?: "dry" | "flooded" | "na";
   noMgObserved?: number;
   findingCount?: number;
+  clampType?: string | null;
 };
 
 export type ResultEvidence = {
@@ -442,7 +478,7 @@ const id = z.number().int().positive();
 const optionalText = z.string().min(1).nullable().optional();
 const optionalOrder = z.number().int().nonnegative().optional();
 const itemStatus = z.enum(["not_set", "pending", "complete"]);
-const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
+const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
 
 // projects — Create/UpdateProjectInput share one shape (title required)
 export const projectInputSchema = z.object({
@@ -701,6 +737,8 @@ export const scourPayloadSchema = z.object({
 export const gviPayloadSchema = z.object({
   kind: z.literal("gvi"),
   version: z.literal(1),
+  kpRange: z.string().nullish(),
+  depthEl: z.number().nullish(),
   gviCP: z.number().nullish(),
   gviUT: z.number().nullish(),
   condition: z.enum(["ok", "not_ok"]),
@@ -722,6 +760,36 @@ export const cviPayloadSchema = z.object({
   cpPotentialMv: z.number().nullable(),
 });
 
+// field names mirror the app's bsiTypes.ts payload verbatim (CPAnomalyRecommendation included)
+const bsiMissingPosition = z.object({ position: z.string().min(1) });
+
+export const bsiPayloadSchema = z.object({
+  kind: z.literal("bsi"),
+  version: z.literal(1),
+  clampType: z.string().min(1),
+  depthEl: z.number().nullish(),
+  clampBoltNutQuantity: z.number().int().nullish(),
+  clampMissingBolts: z.array(bsiMissingPosition),
+  clampMissingWasher: z.array(bsiMissingPosition),
+  outboardClampCP: z.number().nullish(),
+  CPAnomalyRecommendation: z.string(),
+  hingePin: z.boolean().nullish(),
+  hingeBoltNutQuantity: z.number().int().nullish(),
+  hingeMissingBolts: z.array(bsiMissingPosition),
+  hingeMissingWasher: z.array(bsiMissingPosition),
+  liners: z.boolean().nullish(),
+  inboardGapCondition: z.enum(["gap", "no_gap"]),
+  inboardEstimateGap: z.number().nullish(),
+  inboardAlignmentCondition: z.enum(["aligned", "misaligned"]),
+  inboardMisalignedPosition: z.enum(["top", "mid", "bottom"]).nullish(),
+  inboardAnomalyRecommendation: z.string(),
+  outboardGapCondition: z.enum(["gap", "no_gap"]),
+  outboardEstimateGap: z.number().nullish(),
+  outboardAlignmentCondition: z.enum(["aligned", "misaligned"]),
+  outboardMisalignedPosition: z.enum(["top", "mid", "bottom"]).nullish(),
+  outboardAnomalyRecommendation: z.string(),
+});
+
 // one payload field, one union — never one API per inspection type
 export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   mgiPayloadSchema,
@@ -730,6 +798,7 @@ export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   scourPayloadSchema,
   gviPayloadSchema,
   cviPayloadSchema,
+  bsiPayloadSchema,
 ]);
 
 export type InspectionPayload = z.infer<typeof inspectionPayloadSchema>;
@@ -739,3 +808,4 @@ export type FmdPayloadInput = z.infer<typeof fmdPayloadSchema>;
 export type ScourPayloadInput = z.infer<typeof scourPayloadSchema>;
 export type GviPayloadInput = z.infer<typeof gviPayloadSchema>;
 export type CviPayloadInput = z.infer<typeof cviPayloadSchema>;
+export type BsiPayloadInput = z.infer<typeof bsiPayloadSchema>;

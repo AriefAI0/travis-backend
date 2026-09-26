@@ -37,6 +37,8 @@ export const formatResultValue = (
       detail.exposedPile === "not_exposed" ? "Not exposed" : "N/A";
     case "MGI":
       return detail.noMgObserved ? "No MG" : `${detail.findingCount ?? 0} findings`;
+    case "BSI":
+      return detail.clampType ?? "—";
     default:
       return "—";
   }

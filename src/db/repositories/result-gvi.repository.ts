@@ -4,6 +4,8 @@ import { resultGvi } from "../schema";
 
 export type CreateResultGviInput = {
   resultId: number;
+  kpRange?: string | null;
+  depthEl?: number | null;
   gviCP?: number | null;
   gviUT?: number | null;
   condition: "ok" | "not_ok";
