@@ -75,6 +75,23 @@ const BUILTIN_FIELDS: Record<string, Array<{ label: string; dataType: FormDataTy
     { label: "Height midpoint", dataType: "decimal" },
     { label: "Height leg 2", dataType: "decimal" },
   ],
+  BSI: [
+    { label: "Clamp type", dataType: "text" },
+    { label: "Depth EL", dataType: "decimal" },
+    { label: "Clamp bolts and nuts quantity", dataType: "integer" },
+    { label: "Outboard clamp CP", dataType: "decimal" },
+    { label: "Hinge pin", dataType: "boolean" },
+    { label: "Hinge bolts and nuts quantity", dataType: "integer" },
+    { label: "Liners", dataType: "boolean" },
+    { label: "Inboard gap condition", dataType: "text" },
+    { label: "Inboard estimate gap", dataType: "decimal" },
+    { label: "Inboard alignment condition", dataType: "text" },
+    { label: "Inboard misaligned position", dataType: "text" },
+    { label: "Outboard gap condition", dataType: "text" },
+    { label: "Outboard estimate gap", dataType: "decimal" },
+    { label: "Outboard alignment condition", dataType: "text" },
+    { label: "Outboard misaligned position", dataType: "text" },
+  ],
 };
 
 export const builtinFieldCount = (inspectionTypeCode: string) =>
