@@ -26,7 +26,7 @@ const seedResultContext = async () => {
   await testDb.insert(schema.taskGroup).values({
     taskGroupId: 1,
     projectId: 1,
-    groupCode: "100",
+    code: "100",
     label: "Rows",
   });
   await testDb.insert(schema.taskCode).values({
@@ -35,17 +35,17 @@ const seedResultContext = async () => {
     code: "101",
     label: "Row A",
   });
-  await testDb.insert(schema.mainComponent).values({
-    mainComponentId: 100,
+  await testDb.insert(schema.description).values({
+    descriptionId: 100,
     taskCodeId: 10,
-    description: "JL-01",
+    label: "JL-01",
   });
   // session_item is gone: v2 results carry their own target
   await testDb.insert(schema.result).values({
     displayNumber: 5001,
     resultId: 5001,
     inspectionTypeCode: "GVI",
-        mainComponentId: 100,
+        descriptionId: 100,
         layer: 1,
         masterStartMs: 0,
     projectId: 1,
@@ -82,15 +82,14 @@ const sessionStem = async (resultId: number, label: string) => {
 // One master and one clip on the seeded result: the home an evidence image
 // takes once the clip exists.
 const seedMasterAndClip = async (startEpoch: number) => {
-  await testDb.insert(schema.masterVideo).values({
-    masterVideoId: 1,
-    sessionId: 101,
-    startEpoch,
-  });
+  await testDb
+    .update(schema.session)
+    .set({ startEpoch })
+    .where(eq(schema.session.sessionId, 101));
   await testDb.insert(schema.videoClip).values({
     clipId: 7,
     resultId: 5001,
-    masterVideoId: 1,
+    sessionId: 101,
     startOffsetMs: 0,
   });
 };
@@ -209,7 +208,7 @@ describe("evidence image routes", () => {
     const first = await json<{ data: Ticket }>(await createImage({ contentType: "image/png" }));
     const second = await json<{ data: Ticket }>(await createImage({ contentType: "image/jpeg" }));
 
-    const res = await app.request("/api/v1/main-components/100/results");
+    const res = await app.request("/api/v1/descriptions/100/results");
     expect(res.status).toBe(200);
     const { data } = await json(res);
     const entry = data.sessions[0].results[0];
@@ -223,7 +222,7 @@ describe("evidence image routes", () => {
 
     // after annotating the FIRST image, its url AND the poster flip leaves
     await app.request(`/api/v1/images/${first.data.imageId}/annotated`, { method: "POST" });
-    const after = await json(await app.request("/api/v1/main-components/100/results"));
+    const after = await json(await app.request("/api/v1/descriptions/100/results"));
     const entryAfter = after.data.sessions[0].results[0];
     expect(entryAfter.images[0].url).toContain(`/${first.data.imageId}-annotated.png`);
     expect(entryAfter.images[1].url).toContain(`/${second.data.imageId}.jpg`);
@@ -242,7 +241,7 @@ describe("evidence image routes", () => {
       hasAnnotated: true,
     });
 
-    const { data } = await json(await app.request("/api/v1/main-components/100/results"));
+    const { data } = await json(await app.request("/api/v1/descriptions/100/results"));
     const entry = data.sessions[0].results[0];
 
     expect(entry.images[0].url).toContain("img_61_annotated.png");
@@ -253,21 +252,20 @@ describe("evidence image routes", () => {
     await seedResultContext();
     await createImage({ contentType: "image/png" });
 
-    await testDb.insert(schema.masterVideo).values({
-      masterVideoId: 1,
-      sessionId: 101,
-      startEpoch: 1000,
-    });
+    await testDb
+      .update(schema.session)
+      .set({ startEpoch: 1000 })
+      .where(eq(schema.session.sessionId, 101));
     // status and stem say nothing about playability any more
     await testDb.insert(schema.videoClip).values({
       clipId: 7,
       resultId: 5001,
-      masterVideoId: 1,
+      sessionId: 101,
       startOffsetMs: 10_000,
       endOffsetMs: 40_000,
     });
 
-    const empty = await json(await app.request("/api/v1/main-components/100/results"));
+    const empty = await json(await app.request("/api/v1/descriptions/100/results"));
     const emptyClip = empty.data.sessions[0].results[0].clips[0];
     expect(emptyClip.videoUrl).toBeNull();
     // the still still follows the finalize run, so it stays null here
@@ -295,7 +293,7 @@ describe("evidence image routes", () => {
       objectKey: "1/1/101/2026/09/20/clips/7/segments/0000000000.ts",
     });
 
-    const open = await json(await app.request("/api/v1/main-components/100/results"));
+    const open = await json(await app.request("/api/v1/descriptions/100/results"));
     const openClip = open.data.sessions[0].results[0].clips[0];
     expect(openClip.videoUrl).toMatch(/^\/api\/v2\/hls\/clip\/7\/index[.]m3u8[?]t=v1[.]/);
     // no clip still producer: the card face stays absent
@@ -312,16 +310,15 @@ describe("evidence image routes", () => {
 
   it("clip thumbnailUrl is null when a finalized clip has no stem", async () => {
     await seedResultContext();
-    await testDb.insert(schema.masterVideo).values({
-      masterVideoId: 1,
-      sessionId: 101,
-      startEpoch: 1000,
-    });
+    await testDb
+      .update(schema.session)
+      .set({ startEpoch: 1000 })
+      .where(eq(schema.session.sessionId, 101));
     // finalized but stem-less: nothing was ever written, so nothing mints
     await testDb.insert(schema.videoClip).values({
       clipId: 8,
       resultId: 5001,
-      masterVideoId: 1,
+      sessionId: 101,
       startOffsetMs: 0,
       endOffsetMs: 5_000,
     });
@@ -334,15 +331,14 @@ describe("evidence image routes", () => {
 
   it("evidence clips carry no still until a clip thumbnail producer exists", async () => {
     await seedResultContext();
-    await testDb.insert(schema.masterVideo).values({
-      masterVideoId: 1,
-      sessionId: 101,
-      startEpoch: 1000,
-    });
+    await testDb
+      .update(schema.session)
+      .set({ startEpoch: 1000 })
+      .where(eq(schema.session.sessionId, 101));
     await testDb.insert(schema.videoClip).values({
       clipId: 9,
       resultId: 5001,
-      masterVideoId: 1,
+      sessionId: 101,
       startOffsetMs: 0,
       endOffsetMs: 5_000,
     });

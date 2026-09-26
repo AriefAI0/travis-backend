@@ -66,23 +66,23 @@ export const listResultRecordsBySessionId = async (
     orderBy: asc(result.resultId),
   });
 
-/** v2 target reads: results pointing at one main component. */
-export const listResultRecordsByMainComponentId = async (
-  mainComponentId: number,
+/** Target reads: results pointing at one description. */
+export const listResultRecordsByDescriptionId = async (
+  descriptionId: number,
   database: DbOrTx = db,
 ) =>
   database.query.result.findMany({
-    where: and(eq(result.mainComponentId, mainComponentId), isNull(result.archivedAt)),
+    where: and(eq(result.descriptionId, descriptionId), isNull(result.archivedAt)),
     orderBy: asc(result.resultId),
   });
 
-/** v2 target reads: results pointing at one component code. */
-export const listResultRecordsByComponentCodeId = async (
-  componentCodeId: number,
+/** Target reads: results pointing at one part code. */
+export const listResultRecordsByPartCodeId = async (
+  partCodeId: number,
   database: DbOrTx = db,
 ) =>
   database.query.result.findMany({
-    where: and(eq(result.componentCodeId, componentCodeId), isNull(result.archivedAt)),
+    where: and(eq(result.partCodeId, partCodeId), isNull(result.archivedAt)),
     orderBy: asc(result.resultId),
   });
 

@@ -1,9 +1,9 @@
-// v2 sidebar: results grouped by session for a main-component or
-// component-code target. Same batched evidence reads as the item sidebar.
+// Sidebar: results grouped by session for a description or part-code target.
+// Same batched evidence reads as the item sidebar.
 import type { DbOrTx } from "../client";
 import {
-  listResultRecordsByComponentCodeId,
-  listResultRecordsByMainComponentId,
+  listResultRecordsByDescriptionId,
+  listResultRecordsByPartCodeId,
 } from "../repositories/result.repository";
 import { listSessionsByIds } from "./session.service";
 import { listVideoClipPlaybackByResultIds } from "./video.service";
@@ -11,8 +11,8 @@ import { listResultImageSummariesByResultIds, mintTimelineThumbnailUrl } from ".
 import { listPlayableClipIds, playbackUrl } from "./recording-playback.service";
 
 export type TargetResultsQuery = {
-  mainComponentId?: number;
-  componentCodeId?: number;
+  descriptionId?: number;
+  partCodeId?: number;
 };
 
 const toIsoString = (value: Date) => value.toISOString();
@@ -22,10 +22,10 @@ export const getTargetResultSidebar = async (
   query: TargetResultsQuery,
   database?: DbOrTx,
 ) => {
-  const results = query.mainComponentId
-    ? await listResultRecordsByMainComponentId(query.mainComponentId, database)
-    : query.componentCodeId
-      ? await listResultRecordsByComponentCodeId(query.componentCodeId, database)
+  const results = query.descriptionId
+    ? await listResultRecordsByDescriptionId(query.descriptionId, database)
+    : query.partCodeId
+      ? await listResultRecordsByPartCodeId(query.partCodeId, database)
       : [];
 
   const sessionIds = [...new Set(results.map((row) => row.sessionId))];
@@ -103,8 +103,8 @@ export const getTargetResultSidebar = async (
 
   return {
     target: {
-      mainComponentId: query.mainComponentId ?? null,
-      componentCodeId: query.componentCodeId ?? null,
+      descriptionId: query.descriptionId ?? null,
+      partCodeId: query.partCodeId ?? null,
     },
     sessions,
   };

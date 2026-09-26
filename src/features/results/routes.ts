@@ -16,7 +16,7 @@ import {
   createImageUploadTicket,
   removeResultImage,
 } from "../../db/services/result-image.service";
-import { listMasterVideosByProjectId } from "../../db/services/video.service";
+import { listSessionRecordingsByProjectId } from "../../db/services/video.service";
 import { getTargetResultSidebar } from "../../db/services/target-results.service";
 import { parseBody, parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
@@ -28,16 +28,16 @@ export const resultRoutes = (database?: DbOrTx) => {
   const routes = new Hono();
 
 
-  // v2 target sidebars: results grouped by session for either target kind
-  routes.get("/api/v1/main-components/:id/results", async (c) =>
-    ok(c, await getTargetResultSidebar({ mainComponentId: parseId(c, "id") }, database)));
-  routes.get("/api/v1/component-codes/:id/results", async (c) =>
-    ok(c, await getTargetResultSidebar({ componentCodeId: parseId(c, "id") }, database)));
+  // target sidebars: results grouped by session for either target kind
+  routes.get("/api/v1/descriptions/:id/results", async (c) =>
+    ok(c, await getTargetResultSidebar({ descriptionId: parseId(c, "id") }, database)));
+  routes.get("/api/v1/part-codes/:id/results", async (c) =>
+    ok(c, await getTargetResultSidebar({ partCodeId: parseId(c, "id") }, database)));
 
   // mirrors the app's result:listProjectRecordings channel
   routes.get("/api/v1/projects/:projectId/recordings", async (c) => {
     const projectId = parseId(c, "projectId");
-    return ok(c, await listMasterVideosByProjectId(projectId, database));
+    return ok(c, await listSessionRecordingsByProjectId(projectId, database));
   });
 
   routes.get("/api/v1/projects/:projectId/results/summary", async (c) => {

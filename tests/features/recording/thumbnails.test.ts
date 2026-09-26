@@ -31,7 +31,7 @@ const source = (
   segmentCount: number,
   options: { closed?: boolean; existingTimestamps?: number[] } = {},
 ): ThumbnailSource => ({
-  masterVideoId: 7,
+  sessionId: 7,
   keyPrefix: KEY_PREFIX,
   durationMs: segmentCount * 2_000,
   closed: options.closed ?? true,
@@ -100,7 +100,7 @@ describe("thumbnail job", () => {
     const result = await runThumbnailJob(7, deps);
 
     expect(result).toMatchObject({
-      masterVideoId: 7,
+      sessionId: 7,
       posterStored: true,
       stills: 9,
       skipped: false,
@@ -206,7 +206,7 @@ describe("thumbnail job", () => {
 
     const result = await runThumbnailJob(7, deps);
 
-    expect(result).toEqual({ masterVideoId: 7, posterStored: false, stills: 0, skipped: true });
+    expect(result).toEqual({ sessionId: 7, posterStored: false, stills: 0, skipped: true });
     expect(stored).toEqual([]);
     expect(rows).toEqual([]);
   });
@@ -381,12 +381,12 @@ describe("thumbnail queue", () => {
   };
 
   // A source that records each run, and holds the ones the predicate picks.
-  const gatedDeps = (runs: number[], gate: (masterVideoId: number) => boolean) => {
+  const gatedDeps = (runs: number[], gate: (sessionId: number) => boolean) => {
     const held: Array<() => void> = [];
     const { deps } = fakeDeps(null, {
-      loadSource: async (masterVideoId) => {
-        runs.push(masterVideoId);
-        if (gate(masterVideoId)) {
+      loadSource: async (sessionId) => {
+        runs.push(sessionId);
+        if (gate(sessionId)) {
           await new Promise<void>((resolve) => held.push(resolve));
         }
         return null;

@@ -1,62 +1,56 @@
 import type {
-  TaskStructureMainComponentNode,
+  TaskStructureDescriptionNode,
   TaskStructureTaskCodeNode,
   TaskStructureTaskGroupNode,
-  TaskStructureTypeBranchNode,
+  TaskStructureTypeNode,
 } from "../../types/api";
 import { AppError } from "../../lib/error";
 import { db, type DbOrTx } from "../client";
 import {
-  createComponentCodeRecord,
-  deleteComponentCodeById,
-  findComponentCodeById,
-  updateComponentCodeById,
-} from "../repositories/component-code.repository";
+  createPartCodeRecord,
+  deletePartCodeById,
+  findPartCodeById,
+  listPartCodeRecordsByTypeId,
+  listPartCodeRecordsByTypeIds,
+  updatePartCodeById,
+} from "../repositories/part-code.repository";
 import {
-  createComponentTypeRecord,
-  deleteComponentTypeById,
-  findComponentTypeById,
-  findComponentTypeByProjectIdAndCode,
-  listComponentTypeRecordsByProjectId,
-  updateComponentTypeById,
-} from "../repositories/component-type.repository";
+  createTypeRecord,
+  deleteTypeById,
+  findTypeById,
+  findTypeByDescriptionIdAndCode,
+  listTypeCatalogByProjectId,
+  listTypeRecordsByDescriptionId,
+  listTypeRecordsByDescriptionIds,
+  updateTypeById,
+} from "../repositories/type.repository";
 import {
-  createMainComponentRecord,
-  deleteMainComponentById,
-  findMainComponentById,
-  updateMainComponentById,
-} from "../repositories/main-component.repository";
-import {
-  createMainComponentTypeRecord,
-  deleteMainComponentTypeById,
-  findMainComponentTypeById,
-  listMainComponentTypeRecordsByComponentTypeId,
-  listMainComponentTypeRecordsByMainComponentIds,
-  updateMainComponentTypeById,
-} from "../repositories/main-component-type.repository";
+  createDescriptionRecord,
+  deleteDescriptionById,
+  findDescriptionById,
+  listDescriptionRecordsByTaskCodeId,
+  listDescriptionRecordsByTaskCodeIds,
+  updateDescriptionById,
+} from "../repositories/description.repository";
 import {
   createTaskCodeRecord,
   deleteTaskCodeById,
   findTaskCodeById,
+  listTaskCodeRecordsByTaskGroupId,
+  listTaskCodeRecordsByTaskGroupIds,
   updateTaskCodeById,
 } from "../repositories/task-code.repository";
 import {
   createTaskGroupRecord,
   deleteTaskGroupById,
   findTaskGroupById,
+  listTaskGroupRecordsByProjectId,
   updateTaskGroupById,
 } from "../repositories/task-group.repository";
-import {
-  listComponentCodeRecordsByMainComponentTypeIds,
-  listComponentCodeRecordsByMainComponentTypeId,
-} from "../repositories/component-code.repository";
-import { listMainComponentRecordsByTaskCodeId, listMainComponentRecordsByTaskCodeIds } from "../repositories/main-component.repository";
-import { listTaskCodeRecordsByTaskGroupId, listTaskCodeRecordsByTaskGroupIds } from "../repositories/task-code.repository";
-import { listTaskGroupRecordsByProjectId } from "../repositories/task-group.repository";
 
 export type CreateTaskGroupInput = {
   projectId: number;
-  groupCode: string;
+  code: string;
   label: string;
   displayOrder?: number;
 };
@@ -68,20 +62,20 @@ export type CreateTaskCodeInput = {
   displayOrder?: number;
 };
 
-export type CreateMainComponentInput = {
+export type CreateDescriptionInput = {
   taskCodeId: number;
-  description: string;
+  label: string;
   displayOrder?: number;
 };
 
-export type AttachMainComponentTypeInput = {
-  mainComponentId: number;
-  typeCode: string;
+export type CreateTypeInput = {
+  descriptionId: number;
+  code: string;
   label: string;
 };
 
-export type CreateComponentCodeInput = {
-  mainComponentTypeId: number;
+export type CreatePartCodeInput = {
+  typeId: number;
   code: string;
   label?: string | null;
   displayOrder?: number;
@@ -98,74 +92,67 @@ const normalizeOptional = (value?: string | null) => {
   return trimmed ? trimmed : null;
 };
 
-/* ---------- tree read (batched: 6 queries for the whole project) ---------- */
+/* ---------- tree read (batched: 5 queries for the whole project) ---------- */
 export const listProjectTaskStructureTree = async (
   projectId: number,
   database?: DbOrTx,
 ): Promise<TaskStructureTaskGroupNode[]> => {
-  const [groups, catalog] = await Promise.all([
-    listTaskGroupRecordsByProjectId(projectId, database),
-    listComponentTypeRecordsByProjectId(projectId, undefined, database),
-  ]);
+  const groups = await listTaskGroupRecordsByProjectId(projectId, database);
 
   const taskCodes = await listTaskCodeRecordsByTaskGroupIds(
     groups.map((g) => g.taskGroupId),
     database,
   );
-  const mainComponents = await listMainComponentRecordsByTaskCodeIds(
+  const descriptions = await listDescriptionRecordsByTaskCodeIds(
     taskCodes.map((c) => c.taskCodeId),
     database,
   );
-  const branches = await listMainComponentTypeRecordsByMainComponentIds(
-    mainComponents.map((m) => m.mainComponentId),
+  const types = await listTypeRecordsByDescriptionIds(
+    descriptions.map((d) => d.descriptionId),
     database,
   );
-  const componentCodes = await listComponentCodeRecordsByMainComponentTypeIds(
-    branches.map((b) => b.mainComponentTypeId),
+  const partCodes = await listPartCodeRecordsByTypeIds(
+    types.map((t) => t.typeId),
     database,
   );
 
-  const catalogById = new Map(catalog.map((t) => [t.componentTypeId, t]));
-  const codesByBranch = new Map<number, typeof componentCodes>();
-  for (const code of componentCodes) {
-    const bucket = codesByBranch.get(code.mainComponentTypeId) ?? [];
-    bucket.push(code);
-    codesByBranch.set(code.mainComponentTypeId, bucket);
+  const partCodesByType = new Map<number, typeof partCodes>();
+  for (const part of partCodes) {
+    const bucket = partCodesByType.get(part.typeId) ?? [];
+    bucket.push(part);
+    partCodesByType.set(part.typeId, bucket);
   }
 
-  const branchesByComponent = new Map<number, TaskStructureTypeBranchNode[]>();
-  for (const branch of branches) {
-    const type = catalogById.get(branch.componentTypeId);
-    if (!type) continue; // archived catalog row: branch hidden from the tree
-    const node: TaskStructureTypeBranchNode = {
-      mainComponentTypeId: branch.mainComponentTypeId,
-      componentTypeId: branch.componentTypeId,
-      typeCode: type.typeCode,
-      label: type.label,
-      displayOrder: branch.displayOrder,
-      componentCodes: (codesByBranch.get(branch.mainComponentTypeId) ?? []).map((code) => ({
-        componentCodeId: code.componentCodeId,
-        code: code.code,
-        label: code.label,
-        displayOrder: code.displayOrder,
+  const typesByDescription = new Map<number, TaskStructureTypeNode[]>();
+  for (const typeRow of types) {
+    const node: TaskStructureTypeNode = {
+      typeId: typeRow.typeId,
+      code: typeRow.code,
+      label: typeRow.label,
+      displayOrder: typeRow.displayOrder,
+      partCodes: (partCodesByType.get(typeRow.typeId) ?? []).map((part) => ({
+        partCodeId: part.partCodeId,
+        code: part.code,
+        label: part.label,
+        displayOrder: part.displayOrder,
       })),
     };
-    const bucket = branchesByComponent.get(branch.mainComponentId) ?? [];
+    const bucket = typesByDescription.get(typeRow.descriptionId) ?? [];
     bucket.push(node);
-    branchesByComponent.set(branch.mainComponentId, bucket);
+    typesByDescription.set(typeRow.descriptionId, bucket);
   }
 
-  const componentsByTaskCode = new Map<number, TaskStructureMainComponentNode[]>();
-  for (const comp of mainComponents) {
-    const node: TaskStructureMainComponentNode = {
-      mainComponentId: comp.mainComponentId,
-      description: comp.description,
-      displayOrder: comp.displayOrder,
-      types: branchesByComponent.get(comp.mainComponentId) ?? [],
+  const descriptionsByTaskCode = new Map<number, TaskStructureDescriptionNode[]>();
+  for (const row of descriptions) {
+    const node: TaskStructureDescriptionNode = {
+      descriptionId: row.descriptionId,
+      label: row.label,
+      displayOrder: row.displayOrder,
+      types: typesByDescription.get(row.descriptionId) ?? [],
     };
-    const bucket = componentsByTaskCode.get(comp.taskCodeId) ?? [];
+    const bucket = descriptionsByTaskCode.get(row.taskCodeId) ?? [];
     bucket.push(node);
-    componentsByTaskCode.set(comp.taskCodeId, bucket);
+    descriptionsByTaskCode.set(row.taskCodeId, bucket);
   }
 
   const codesByGroup = new Map<number, TaskStructureTaskCodeNode[]>();
@@ -175,7 +162,7 @@ export const listProjectTaskStructureTree = async (
       code: taskCode.code,
       label: taskCode.label,
       displayOrder: taskCode.displayOrder,
-      mainComponents: componentsByTaskCode.get(taskCode.taskCodeId) ?? [],
+      descriptions: descriptionsByTaskCode.get(taskCode.taskCodeId) ?? [],
     };
     const bucket = codesByGroup.get(taskCode.taskGroupId) ?? [];
     bucket.push(node);
@@ -184,7 +171,7 @@ export const listProjectTaskStructureTree = async (
 
   return groups.map((group) => ({
     taskGroupId: group.taskGroupId,
-    groupCode: group.groupCode,
+    code: group.code,
     label: group.label,
     displayOrder: group.displayOrder,
     taskCodes: codesByGroup.get(group.taskGroupId) ?? [],
@@ -196,7 +183,7 @@ export const createTaskGroup = async (data: CreateTaskGroupInput, database?: DbO
   createTaskGroupRecord(
     {
       projectId: data.projectId,
-      groupCode: normalizeRequired(data.groupCode, "Group code"),
+      code: normalizeRequired(data.code, "Group code"),
       label: normalizeRequired(data.label, "Group label"),
       displayOrder: data.displayOrder ?? 0,
     },
@@ -208,12 +195,11 @@ export const getTaskGroupById = (taskGroupId: number, database?: DbOrTx) =>
 
 export const updateTaskGroup = async (
   taskGroupId: number,
-  data: Partial<{ groupCode: string; label: string; displayOrder: number }>,
+  data: Partial<{ code: string; label: string; displayOrder: number }>,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updateTaskGroupById>[1]> = {};
-  if (data.groupCode !== undefined)
-    next.groupCode = normalizeRequired(data.groupCode, "Group code");
+  if (data.code !== undefined) next.code = normalizeRequired(data.code, "Group code");
   if (data.label !== undefined) next.label = normalizeRequired(data.label, "Group label");
   if (data.displayOrder !== undefined) next.displayOrder = data.displayOrder;
   return updateTaskGroupById(taskGroupId, next, database);
@@ -252,192 +238,137 @@ export const updateTaskCode = async (
 export const deleteTaskCode = (taskCodeId: number, database?: DbOrTx) =>
   deleteTaskCodeById(taskCodeId, database);
 
-/* ---------- main component ---------- */
-export const createMainComponent = async (
-  data: CreateMainComponentInput,
+/* ---------- description ---------- */
+export const createDescription = async (
+  data: CreateDescriptionInput,
   database?: DbOrTx,
 ) =>
-  createMainComponentRecord(
+  createDescriptionRecord(
     {
       taskCodeId: data.taskCodeId,
-      description: normalizeRequired(data.description, "Description"),
+      label: normalizeRequired(data.label, "Description"),
       displayOrder: data.displayOrder ?? 0,
     },
     database,
   );
 
-export const getMainComponentById = (mainComponentId: number, database?: DbOrTx) =>
-  findMainComponentById(mainComponentId, database);
+export const getDescriptionById = (descriptionId: number, database?: DbOrTx) =>
+  findDescriptionById(descriptionId, database);
 
-export const updateMainComponent = async (
-  mainComponentId: number,
-  data: Partial<{ description: string; displayOrder: number }>,
+export const updateDescription = async (
+  descriptionId: number,
+  data: Partial<{ label: string; displayOrder: number }>,
   database?: DbOrTx,
 ) => {
-  const next: Partial<Parameters<typeof updateMainComponentById>[1]> = {};
-  if (data.description !== undefined)
-    next.description = normalizeRequired(data.description, "Description");
+  const next: Partial<Parameters<typeof updateDescriptionById>[1]> = {};
+  if (data.label !== undefined) next.label = normalizeRequired(data.label, "Description");
   if (data.displayOrder !== undefined) next.displayOrder = data.displayOrder;
-  return updateMainComponentById(mainComponentId, next, database);
+  return updateDescriptionById(descriptionId, next, database);
 };
 
-export const deleteMainComponent = (mainComponentId: number, database?: DbOrTx) =>
-  deleteMainComponentById(mainComponentId, database);
+export const deleteDescription = (descriptionId: number, database?: DbOrTx) =>
+  deleteDescriptionById(descriptionId, database);
 
-/* ---------- type branch + project catalog ---------- */
-// resolve the owning project through main component > task code > task group
-const resolveProjectIdForMainComponent = async (
-  mainComponentId: number,
-  database?: DbOrTx,
-): Promise<number> => {
-  const comp = await findMainComponentById(mainComponentId, database);
-  if (!comp) throw new Error("Parent task code does not exist");
-  const taskCode = await findTaskCodeById(comp.taskCodeId, database);
-  if (!taskCode) throw new Error("Parent task code does not exist");
-  const group = await findTaskGroupById(taskCode.taskGroupId, database);
-  if (!group) throw new Error("Parent task code does not exist");
-  return group.projectId;
-};
-
-// attach a type branch; the catalog value is created on first use, reused after
-export const attachMainComponentType = async (
-  data: AttachMainComponentTypeInput,
-  database?: DbOrTx,
-) => {
-  const projectId = await resolveProjectIdForMainComponent(data.mainComponentId, database);
-  const typeCode = normalizeRequired(data.typeCode, "Type code");
+/* ---------- type (owned by one description) ---------- */
+export const createType = async (data: CreateTypeInput, database?: DbOrTx) => {
+  const code = normalizeRequired(data.code, "Type code");
   const label = normalizeRequired(data.label, "Type label");
 
-  const existing = await findComponentTypeByProjectIdAndCode(projectId, typeCode, database);
-  const catalogRow =
-    existing ?? (await createComponentTypeRecord({ projectId, typeCode, label }, database));
-  if (!catalogRow) throw new Error("Failed to resolve the component type");
+  const existing = await findTypeByDescriptionIdAndCode(data.descriptionId, code, database);
+  if (existing) {
+    throw new AppError(409, "wrong_state", "That type code already exists under this description");
+  }
 
-  return createMainComponentTypeRecord(
+  return createTypeRecord(
     {
-      mainComponentId: data.mainComponentId,
-      componentTypeId: catalogRow.componentTypeId,
+      descriptionId: data.descriptionId,
+      code,
+      label,
       displayOrder: 0,
     },
     database,
   );
 };
 
-export const getMainComponentTypeById = (mainComponentTypeId: number, database?: DbOrTx) =>
-  findMainComponentTypeById(mainComponentTypeId, database);
+export const getTypeById = (typeId: number, database?: DbOrTx) =>
+  findTypeById(typeId, database);
 
-export const updateMainComponentType = async (
-  mainComponentTypeId: number,
-  data: Partial<{ componentTypeId: number; displayOrder: number }>,
+// rename in place: stable id, code and label change together
+export const updateType = async (
+  typeId: number,
+  data: Partial<{ code: string; label: string; displayOrder: number }>,
   database?: DbOrTx,
-) => updateMainComponentTypeById(mainComponentTypeId, data, database);
+) => {
+  const next: Partial<Parameters<typeof updateTypeById>[1]> = {};
+  if (data.code !== undefined) next.code = normalizeRequired(data.code, "Type code");
+  if (data.label !== undefined) next.label = normalizeRequired(data.label, "Type label");
+  if (data.displayOrder !== undefined) next.displayOrder = data.displayOrder;
+  return updateTypeById(typeId, next, database);
+};
 
-export const deleteMainComponentType = (mainComponentTypeId: number, database?: DbOrTx) =>
-  deleteMainComponentTypeById(mainComponentTypeId, database);
+export const deleteType = (typeId: number, database?: DbOrTx) =>
+  deleteTypeById(typeId, database);
 
-export const listComponentTypes = (
-  projectId: number,
-  query?: string,
-  database?: DbOrTx,
-) => listComponentTypeRecordsByProjectId(projectId, query, database);
+// project-wide type vocabulary for autocomplete: distinct code+label pairs
+export const listTypeCatalog = (projectId: number, database?: DbOrTx) =>
+  listTypeCatalogByProjectId(projectId, database);
 
-export const getComponentTypeById = (componentTypeId: number, database?: DbOrTx) =>
-  findComponentTypeById(componentTypeId, database);
-
-// The label media keys and breadcrumbs use for a result's v2 target: the main
-// component description, else the component code.
+// The label media keys and breadcrumbs use for a result's target: the
+// description label, else the part code.
 export const resolveTargetLabel = async (
-  target: { mainComponentId: number | null; componentCodeId: number | null },
+  target: { descriptionId: number | null; partCodeId: number | null },
   database?: DbOrTx,
 ): Promise<string> => {
-  if (target.mainComponentId !== null) {
-    const component = await findMainComponentById(target.mainComponentId, database);
-    return component?.description ?? `component-${target.mainComponentId}`;
+  if (target.descriptionId !== null) {
+    const row = await findDescriptionById(target.descriptionId, database);
+    return row?.label ?? `description-${target.descriptionId}`;
   }
-  if (target.componentCodeId !== null) {
-    const code = await findComponentCodeById(target.componentCodeId, database);
-    return code?.code ?? `code-${target.componentCodeId}`;
+  if (target.partCodeId !== null) {
+    const row = await findPartCodeById(target.partCodeId, database);
+    return row?.code ?? `part-${target.partCodeId}`;
   }
   throw new AppError(400, "validation_error", "result has no inspection target");
 };
 
-export const createComponentType = async (
-  projectId: number,
-  data: { typeCode: string; label: string },
+/* ---------- part code ---------- */
+export const createPartCode = async (
+  data: CreatePartCodeInput,
   database?: DbOrTx,
 ) =>
-  createComponentTypeRecord(
+  createPartCodeRecord(
     {
-      projectId,
-      typeCode: normalizeRequired(data.typeCode, "Type code"),
-      label: normalizeRequired(data.label, "Type label"),
-    },
-    database,
-  );
-
-// rename in place: stable id, code and label change together
-export const renameComponentType = async (
-  componentTypeId: number,
-  data: { typeCode: string; label: string },
-  database?: DbOrTx,
-) => {
-  const next = {
-    typeCode: normalizeRequired(data.typeCode, "Type code"),
-    label: normalizeRequired(data.label, "Type label"),
-  };
-  const renamed = await updateComponentTypeById(componentTypeId, next, database);
-  if (!renamed) throw new Error("Component type does not exist");
-  return renamed;
-};
-
-// catalog delete: refuse while branches reference the type
-export const deleteComponentType = async (componentTypeId: number, database?: DbOrTx) => {
-  const inUse = await listMainComponentTypeRecordsByComponentTypeId(componentTypeId, database);
-  if (inUse.length > 0) {
-    throw new AppError(409, "wrong_state", "Type is in use by main components");
-  }
-  return deleteComponentTypeById(componentTypeId, database);
-};
-
-/* ---------- component code ---------- */
-export const createComponentCode = async (
-  data: CreateComponentCodeInput,
-  database?: DbOrTx,
-) =>
-  createComponentCodeRecord(
-    {
-      mainComponentTypeId: data.mainComponentTypeId,
-      code: normalizeRequired(data.code, "Component code"),
+      typeId: data.typeId,
+      code: normalizeRequired(data.code, "Part code"),
       label: normalizeOptional(data.label),
       displayOrder: data.displayOrder ?? 0,
     },
     database,
   );
 
-export const getComponentCodeById = (componentCodeId: number, database?: DbOrTx) =>
-  findComponentCodeById(componentCodeId, database);
+export const getPartCodeById = (partCodeId: number, database?: DbOrTx) =>
+  findPartCodeById(partCodeId, database);
 
-export const updateComponentCode = async (
-  componentCodeId: number,
+export const updatePartCode = async (
+  partCodeId: number,
   data: Partial<{ code: string; label?: string | null; displayOrder: number }>,
   database?: DbOrTx,
 ) => {
-  const next: Partial<Parameters<typeof updateComponentCodeById>[1]> = {};
-  if (data.code !== undefined) next.code = normalizeRequired(data.code, "Component code");
+  const next: Partial<Parameters<typeof updatePartCodeById>[1]> = {};
+  if (data.code !== undefined) next.code = normalizeRequired(data.code, "Part code");
   if (data.label !== undefined) next.label = normalizeOptional(data.label);
   if (data.displayOrder !== undefined) next.displayOrder = data.displayOrder;
-  return updateComponentCodeById(componentCodeId, next, database);
+  return updatePartCodeById(partCodeId, next, database);
 };
 
-export const deleteComponentCode = (componentCodeId: number, database?: DbOrTx) =>
-  deleteComponentCodeById(componentCodeId, database);
+export const deletePartCode = (partCodeId: number, database?: DbOrTx) =>
+  deletePartCodeById(partCodeId, database);
 
 /* ---------- convenience single-parent lists ---------- */
 export const listTaskCodesByGroupId = (taskGroupId: number, database?: DbOrTx) =>
   listTaskCodeRecordsByTaskGroupId(taskGroupId, database);
 
-export const listMainComponentsByTaskCodeId = (taskCodeId: number, database?: DbOrTx) =>
-  listMainComponentRecordsByTaskCodeId(taskCodeId, database);
+export const listDescriptionsByTaskCodeId = (taskCodeId: number, database?: DbOrTx) =>
+  listDescriptionRecordsByTaskCodeId(taskCodeId, database);
 
-export const listComponentCodesByTypeId = (mainComponentTypeId: number, database?: DbOrTx) =>
-  listComponentCodeRecordsByMainComponentTypeId(mainComponentTypeId, database);
+export const listPartCodesByTypeId = (typeId: number, database?: DbOrTx) =>
+  listPartCodeRecordsByTypeId(typeId, database);

@@ -368,8 +368,8 @@ export type CreateResultInput = {
   sessionId: number;
   projectId: number;
   inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR";
-  mainComponentId?: number;
-  componentCodeId?: number;
+  descriptionId?: number;
+  partCodeId?: number;
   layer: number;
   masterStartMs: number;
   inspectionFormId: number;
@@ -388,8 +388,8 @@ export const createResult = async (
         sessionId: data.sessionId,
         projectId: data.projectId,
         inspectionTypeCode: data.inspectionTypeCode,
-        mainComponentId: data.mainComponentId ?? null,
-        componentCodeId: data.componentCodeId ?? null,
+        descriptionId: data.descriptionId ?? null,
+        partCodeId: data.partCodeId ?? null,
         layer: data.layer,
         masterStartMs: data.masterStartMs,
         inspectionFormId: data.inspectionFormId,
@@ -527,8 +527,8 @@ export const listProjectSummary = async (
     createdAt: toIsoString(resultRecord.createdAt),
     inspectionTypeCode: resultRecord.inspectionTypeCode,
     // target ids replace the item-model ids
-    mainComponentId: resultRecord.mainComponentId,
-    componentCodeId: resultRecord.componentCodeId,
+    descriptionId: resultRecord.descriptionId,
+    partCodeId: resultRecord.partCodeId,
     remarks: resultRecord.remarks,
     resultValue: formatResultValue(
       resultRecord.inspectionTypeCode,

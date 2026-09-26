@@ -24,7 +24,7 @@ const seedResultContext = async () => {
   await testDb.insert(schema.taskGroup).values({
     taskGroupId: 1,
     projectId: 1,
-    groupCode: "100",
+    code: "100",
     label: "Rows",
   });
   await testDb.insert(schema.taskCode).values({
@@ -33,17 +33,17 @@ const seedResultContext = async () => {
     code: "101",
     label: "Row A",
   });
-  await testDb.insert(schema.mainComponent).values({
-    mainComponentId: 100,
+  await testDb.insert(schema.description).values({
+    descriptionId: 100,
     taskCodeId: 10,
-    description: "I",
+    label: "I",
   });
   // session_item is gone: v2 results carry their own target
   await testDb.insert(schema.result).values({
     displayNumber: 5001,
     resultId: 5001,
     inspectionTypeCode: "GVI",
-        mainComponentId: 100,
+        descriptionId: 100,
         layer: 1,
         masterStartMs: 0,
     projectId: 1,

@@ -10,11 +10,7 @@ import {
 import { json } from "../../helpers/json";
 import { recordingRoutes } from "../../../src/features/recording/routes";
 import * as schema from "../../../src/db/schema";
-import {
-  createMasterVideo,
-  createVideoClip,
-  updateVideoClip,
-} from "../../../src/db/services/video.service";
+import { createVideoClip, updateVideoClip } from "../../../src/db/services/video.service";
 
 const app = appFor(testDb, recordingRoutes);
 
@@ -48,7 +44,7 @@ const seedContext = async (p: {
   await testDb.insert(schema.taskGroup).values({
     taskGroupId: p.asset,
     projectId: p.project,
-    groupCode: "100",
+    code: "100",
     label: "Rows",
   });
   await testDb.insert(schema.taskCode).values({
@@ -57,17 +53,17 @@ const seedContext = async (p: {
     code: "101",
     label: "Row A",
   });
-  await testDb.insert(schema.mainComponent).values({
-    mainComponentId: p.item,
+  await testDb.insert(schema.description).values({
+    descriptionId: p.item,
     taskCodeId: p.component,
-    description: "I",
+    label: "I",
   });
   // session_item is gone: v2 results carry their own target
   await testDb.insert(schema.result).values({
     displayNumber: p.sessionItem,
     resultId: p.sessionItem + 1, // unique per context
     inspectionTypeCode: "GVI",
-        mainComponentId: p.item,
+        descriptionId: p.item,
         layer: 1,
         masterStartMs: 0,
     projectId: p.project,
@@ -94,14 +90,14 @@ describe("recordings routes", () => {
   it("master visibility: unfinished follows the open ingest, not a status", async () => {
     await seedContext(baseContext);
 
-    const master = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_755_684_000
-      },
-      testDb,
-    );
-    const masterVideoId = master!.masterVideoId;
+    await testDb
+      .update(schema.session)
+      .set({ startEpoch: 1_755_684_000 })
+      .where(eq(schema.session.sessionId, 101));
+    const master = await testDb.query.session.findFirst({
+      where: eq(schema.session.sessionId, 101),
+    });
+    const sessionId = master!.sessionId;
 
     // no ingest yet: nothing to sweep
     const idle = await app.request("/api/v1/recordings/unfinished");
@@ -112,7 +108,7 @@ describe("recordings routes", () => {
       .insert(schema.recordingIngest)
       .values({
         kind: "master",
-        masterVideoId,
+        sessionId,
         ticketHash: "d".repeat(64),
         keyDate: "2026-09-20",
         keyPrefix: KEY_PREFIX,
@@ -124,7 +120,7 @@ describe("recordings routes", () => {
 
     // playback answers before any segment lands; an empty master has no HLS URL
     const empty = await app.request(
-      `/api/v1/recordings/${masterVideoId}/playback?projectId=1`,
+      `/api/v1/recordings/${sessionId}/playback?projectId=1`,
     );
     expect(empty.status).toBe(200);
     expect((await json(empty)).data.hlsUrl).toBeNull();
@@ -141,18 +137,21 @@ describe("recordings routes", () => {
 
   it("playback returns a scoped HLS URL as soon as segment zero is committed", async () => {
     await seedContext(baseContext);
-    const master = await createMasterVideo(
-      { sessionId: 101, startEpoch: 1_755_684_000},
-      testDb,
-    );
-    const masterVideoId = master!.masterVideoId;
+    await testDb
+      .update(schema.session)
+      .set({ startEpoch: 1_755_684_000 })
+      .where(eq(schema.session.sessionId, 101));
+    const master = await testDb.query.session.findFirst({
+      where: eq(schema.session.sessionId, 101),
+    });
+    const sessionId = master!.sessionId;
 
     // one open ingest with one contiguous segment: playable mid-capture
     const [ingest] = await testDb
       .insert(schema.recordingIngest)
       .values({
         kind: "master",
-        masterVideoId,
+        sessionId,
         ticketHash: "a".repeat(64),
         keyDate: "2026-09-20",
         keyPrefix: KEY_PREFIX,
@@ -165,14 +164,14 @@ describe("recordings routes", () => {
       checksumSha256: "b".repeat(64),
       sizeBytes: 1024,
       durationMs: 2000,
-      objectKey: `1/1/101/2026/09/20/master/${masterVideoId}/segments/0000000000.ts`,
+      objectKey: `1/1/101/2026/09/20/master/${sessionId}/segments/0000000000.ts`,
     });
 
     const open = await json<{ data: { hlsUrl: string } }>(
-      await app.request(`/api/v1/recordings/${masterVideoId}/playback?projectId=1`),
+      await app.request(`/api/v1/recordings/${sessionId}/playback?projectId=1`),
     );
     expect(open.data.hlsUrl).toMatch(
-      new RegExp(`^/api/v2/hls/master/${masterVideoId}/index[.]m3u8[?]t=[^&]+$`),
+      new RegExp(`^/api/v2/hls/master/${sessionId}/index[.]m3u8[?]t=[^&]+$`),
     );
     expect(open.data.hlsUrl).toContain("t=v1.");
 
@@ -183,25 +182,28 @@ describe("recordings routes", () => {
       .where(eq(schema.recordingIngest.ingestId, ingest!.ingestId));
 
     const closed = await json<{ data: { hlsUrl: string } }>(
-      await app.request(`/api/v1/recordings/${masterVideoId}/playback?projectId=1`),
+      await app.request(`/api/v1/recordings/${sessionId}/playback?projectId=1`),
     );
-    expect(closed.data.hlsUrl).toContain(`/api/v2/hls/master/${masterVideoId}/index.m3u8`);
+    expect(closed.data.hlsUrl).toContain(`/api/v2/hls/master/${sessionId}/index.m3u8`);
   });
 
   it("playback carries live status and duration plus minted media urls", async () => {
     await seedContext(baseContext);
-    const master = await createMasterVideo(
-      { sessionId: 101, startEpoch: 1_755_684_000 },
-      testDb,
-    );
-    const masterVideoId = master!.masterVideoId;
+    await testDb
+      .update(schema.session)
+      .set({ startEpoch: 1_755_684_000 })
+      .where(eq(schema.session.sessionId, 101));
+    const master = await testDb.query.session.findFirst({
+      where: eq(schema.session.sessionId, 101),
+    });
+    const sessionId = master!.sessionId;
 
     // open ingest: two committed segments, 2 s each, live duration on the row
     const [ingest] = await testDb
       .insert(schema.recordingIngest)
       .values({
         kind: "master",
-        masterVideoId,
+        sessionId,
         ticketHash: "f".repeat(64),
         keyDate: "2026-09-20",
         keyPrefix: KEY_PREFIX,
@@ -222,7 +224,7 @@ describe("recordings routes", () => {
 
     // one stored still, and one clip whose own ingest already holds segment zero
     await testDb.insert(schema.timelineThumbnail).values({
-      masterVideoId,
+      sessionId,
       timestampMs: 0,
       storageStem: `${KEY_PREFIX}/timeline/000000000.jpg`,
       width: 320,
@@ -232,7 +234,7 @@ describe("recordings routes", () => {
     const clip = await createVideoClip(
       {
         resultId: baseContext.sessionItem + 1,
-        masterVideoId,
+        sessionId,
         startOffsetMs: 0,
         endOffsetMs: 4000,
       },
@@ -265,7 +267,7 @@ describe("recordings routes", () => {
         thumbnails: { timestampMs: number; url: string | null }[];
         events: { clipId: number; videoUrl: string | null; thumbnailUrl: string | null }[];
       };
-    }>(await app.request(`/api/v1/recordings/${masterVideoId}/playback?projectId=1`));
+    }>(await app.request(`/api/v1/recordings/${sessionId}/playback?projectId=1`));
 
     expect(data.recordingStatus).toBe("recording");
     // the master row has no duration until close: the open ingest supplies it
@@ -283,24 +285,27 @@ describe("recordings routes", () => {
       .where(eq(schema.recordingIngest.ingestId, ingest!.ingestId));
 
     const closed = await json<{ data: { recordingStatus: string } }>(
-      await app.request(`/api/v1/recordings/${masterVideoId}/playback?projectId=1`),
+      await app.request(`/api/v1/recordings/${sessionId}/playback?projectId=1`),
     );
     expect(closed.data.recordingStatus).toBe("finalized");
   });
 
   it("an event with no playable clip ingest gets a null videoUrl", async () => {
     await seedContext(baseContext);
-    const master = await createMasterVideo(
-      { sessionId: 101, startEpoch: 1_755_684_000, endEpoch: 1_755_684_300 },
-      testDb,
-    );
-    const masterVideoId = master!.masterVideoId;
+    await testDb
+      .update(schema.session)
+      .set({ startEpoch: 1_755_684_000 , endEpoch: 1_755_684_300 })
+      .where(eq(schema.session.sessionId, 101));
+    const master = await testDb.query.session.findFirst({
+      where: eq(schema.session.sessionId, 101),
+    });
+    const sessionId = master!.sessionId;
 
     // a clip with no ingest at all: nothing to play yet
     await createVideoClip(
       {
         resultId: baseContext.sessionItem + 1,
-        masterVideoId,
+        sessionId,
         startOffsetMs: 0,
         endOffsetMs: 4000,
       },
@@ -309,7 +314,7 @@ describe("recordings routes", () => {
 
     const { data } = await json<{
       data: { recordingStatus: string; events: { videoUrl: string | null }[] };
-    }>(await app.request(`/api/v1/recordings/${masterVideoId}/playback?projectId=1`));
+    }>(await app.request(`/api/v1/recordings/${sessionId}/playback?projectId=1`));
 
     // no ingest at all reads as finalized, and the event stays unplayable
     expect(data.recordingStatus).toBe("finalized");
@@ -319,13 +324,16 @@ describe("recordings routes", () => {
 
   it("playback stays unplayable for a closed master with no segments", async () => {
     await seedContext(baseContext);
-    const master = await createMasterVideo(
-      { sessionId: 101, startEpoch: 1_755_684_000},
-      testDb,
-    );
+    await testDb
+      .update(schema.session)
+      .set({ startEpoch: 1_755_684_000 })
+      .where(eq(schema.session.sessionId, 101));
+    const master = await testDb.query.session.findFirst({
+      where: eq(schema.session.sessionId, 101),
+    });
     await testDb.insert(schema.recordingIngest).values({
       kind: "master",
-      masterVideoId: master!.masterVideoId,
+      sessionId: master!.sessionId,
       ticketHash: "c".repeat(64),
       keyDate: "2026-09-20",
       keyPrefix: KEY_PREFIX,
@@ -334,7 +342,7 @@ describe("recordings routes", () => {
     });
 
     const res = await json<{ data: { hlsUrl: string | null } }>(
-      await app.request(`/api/v1/recordings/${master!.masterVideoId}/playback?projectId=1`),
+      await app.request(`/api/v1/recordings/${master!.sessionId}/playback?projectId=1`),
     );
     expect(res.data.hlsUrl).toBeNull();
   });
@@ -351,16 +359,13 @@ describe("recordings routes", () => {
     });
 
     for (const sessionId of [101, 202]) {
-      const master = await createMasterVideo(
-        {
-          sessionId,
-          startEpoch: 1_755_684_000
-        },
-        testDb,
-      );
+      await testDb
+        .update(schema.session)
+        .set({ startEpoch: 1_755_684_000 })
+        .where(eq(schema.session.sessionId, sessionId));
       await testDb.insert(schema.recordingIngest).values({
         kind: "master",
-        masterVideoId: master!.masterVideoId,
+        sessionId,
         ticketHash: "e".repeat(64),
         keyDate: "2026-09-20",
         keyPrefix: KEY_PREFIX,
@@ -387,19 +392,18 @@ describe("recordings routes", () => {
     await seedContext(baseContext);
 
     // clip range validation needs an existing master video
-    const master = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_755_684_000,
-        endEpoch: 1_755_684_300
-      },
-      testDb,
-    );
+    await testDb
+      .update(schema.session)
+      .set({ startEpoch: 1_755_684_000 , endEpoch: 1_755_684_300 })
+      .where(eq(schema.session.sessionId, 101));
+    const master = await testDb.query.session.findFirst({
+      where: eq(schema.session.sessionId, 101),
+    });
     const resultId = baseContext.sessionItem + 1;
     const clip = await createVideoClip(
       {
         resultId,
-        masterVideoId: master!.masterVideoId,
+        sessionId: master!.sessionId,
         startOffsetMs: 0,
         endOffsetMs: null, // open clip
       },

@@ -3,21 +3,17 @@ import type { MasterVideoPlaybackData } from "../../types/api";
 import { mintTimelineThumbnailUrl } from "./result-media.service";
 import { and, asc, count, eq, sql } from "drizzle-orm";
 import {
-  createMasterVideoRecord,
-  deleteMasterVideoById,
-  findMasterVideoById,
-  findMasterVideoRecordWithOpenIngestBySessionId,
-  listMasterVideoRecords,
-  listMasterVideoRecordsByProjectId,
-  listMasterVideoRecordsBySessionId,
-  listMasterVideoRecordsWithOpenIngest,
-  updateMasterVideoById,
-} from "../repositories/master-video.repository";
+  findSessionById,
+  findSessionWithOpenIngestBySessionId,
+  listSessionRecordingRowsByProjectId,
+  listSessionsWithOpenIngest,
+  updateSessionById,
+} from "../repositories/session.repository";
 import {
-  createMasterVideoTimelineThumbnailRecords,
-  deleteMasterVideoTimelineThumbnailRecordsByMasterVideoId,
-  listFirstTimelineThumbnailKeysByMasterVideoIds,
-  listMasterVideoTimelineThumbnailRecordsByMasterVideoId,
+  createTimelineThumbnailRecords,
+  deleteTimelineThumbnailRecordsBySessionId,
+  listFirstTimelineThumbnailKeysBySessionIds,
+  listTimelineThumbnailRecordsBySessionId,
 } from "../repositories/timeline-thumbnail.repository";
 import {
   createVideoClipRecord,
@@ -27,15 +23,14 @@ import {
   listActiveVideoClipRecords,
   listVideoClipPlaybackRowsByResultIds,
   listVideoClipRecords,
-  listVideoClipRecordsByMasterVideoId,
+  listVideoClipRecordsBySessionId,
   listVideoClipRecordsByResultId,
   updateVideoClipById,
   type VideoClipPlaybackRow,
 } from "../repositories/video-clip.repository";
 import {
-  componentCode,
-  mainComponent,
-  masterVideo,
+  description,
+  partCode,
   result,
   resultImage,
   session,
@@ -48,21 +43,15 @@ import {
 } from "./recording-playback.service";
 import { findPlayableIngestRecord } from "../repositories/recording-ingest.repository";
 
-export type CreateMasterVideoInput = {
-  sessionId: number;
-  startEpoch: number;
-  endEpoch?: number | null;
-};
-
 export type CreateVideoClipInput = {
   resultId: number;
-  masterVideoId: number;
+  sessionId: number;
   startOffsetMs: number;
   endOffsetMs?: number | null;
 };
 
-export type CreateMasterVideoTimelineThumbnailInput = {
-  masterVideoId: number;
+export type CreateTimelineThumbnailInput = {
+  sessionId: number;
   timestampMs: number;
   width: number;
   height: number;
@@ -74,10 +63,10 @@ export type CreateMasterVideoTimelineThumbnailInput = {
 export type VideoClipPlayback = {
   clipId: number;
   resultId: number;
-  masterVideoId: number;
-  masterVideoStartEpoch: number;
-  masterVideoEndEpoch: number | null;
-  masterVideoDurationMs: number | null;
+  sessionId: number;
+  sessionStartEpoch: number | null;
+  sessionEndEpoch: number | null;
+  masterDurationMs: number | null;
   startOffsetMs: number;
   endOffsetMs: number | null;
   durationMs: number | null;
@@ -87,13 +76,12 @@ export type VideoClipPlayback = {
   thumbnailKey: string | null;
 };
 
-export type ProjectMasterVideo = {
-  masterVideoId: number;
+export type ProjectSessionRecording = {
   sessionId: number;
   sessionName: string | null;
   // per-project ordinal: what a recording card labels itself with
-  sessionDisplayNumber: number | null;
-  startEpoch: number;
+  sessionDisplayNumber: number;
+  startEpoch: number | null;
   endEpoch: number | null;
   durationMs: number | null;
   // presigned card still from the timeline job; null until it has run
@@ -114,12 +102,12 @@ type PlaybackEventRow = {
   thumbnailKey: string | null;
 };
 
-const validateMasterVideoTimeRange = (
+const validateRecordingTimeRange = (
   startEpoch: number,
   endEpoch?: number | null,
 ) => {
   if (!Number.isInteger(startEpoch) || startEpoch < 0) {
-    throw new Error("Master video startEpoch must be a non-negative integer");
+    throw new Error("Recording startEpoch must be a non-negative integer");
   }
 
   if (endEpoch === undefined || endEpoch === null) {
@@ -127,7 +115,7 @@ const validateMasterVideoTimeRange = (
   }
 
   if (!Number.isInteger(endEpoch) || endEpoch <= startEpoch) {
-    throw new Error("Master video endEpoch must be greater than startEpoch");
+    throw new Error("Recording endEpoch must be greater than startEpoch");
   }
 };
 
@@ -141,40 +129,14 @@ const normalizeRequiredText = (value: string, fieldName: string) => {
   return trimmedValue;
 };
 
-const normalizeMasterVideoUpdate = (
-  data: Partial<typeof masterVideo.$inferInsert>,
-): Partial<typeof masterVideo.$inferInsert> => {
-  const nextData: Partial<typeof masterVideo.$inferInsert> = {};
-
-  if ("sessionId" in data) {
-    nextData.sessionId = data.sessionId;
-  }
-
-  if ("startEpoch" in data) {
-    nextData.startEpoch = data.startEpoch;
-  }
-
-  if ("endEpoch" in data) {
-    nextData.endEpoch = data.endEpoch;
-  }
-
-  if ("durationMs" in data) {
-    nextData.durationMs = data.durationMs;
-  }
-
-  nextData.lastUpdatedAt = new Date();
-
-  return nextData;
-};
-
-const getMasterVideoDurationMs = (
-  video: typeof masterVideo.$inferSelect,
+const getRecordingDurationMs = (
+  row: Pick<typeof session.$inferSelect, "startEpoch" | "endEpoch">,
 ) => {
-  if (video.endEpoch === null) {
+  if (row.endEpoch === null || row.startEpoch === null) {
     return null;
   }
 
-  return (video.endEpoch - video.startEpoch) * 1000;
+  return (row.endEpoch - row.startEpoch) * 1000;
 };
 
 const validateVideoClipOffsets = (
@@ -194,11 +156,11 @@ const validateVideoClipOffsets = (
   }
 };
 
-const validateMasterVideoTimelineThumbnail = (
-  data: CreateMasterVideoTimelineThumbnailInput,
+const validateTimelineThumbnail = (
+  data: CreateTimelineThumbnailInput,
 ) => {
-  if (!Number.isInteger(data.masterVideoId) || data.masterVideoId < 1) {
-    throw new Error("Master video id must be a positive integer");
+  if (!Number.isInteger(data.sessionId) || data.sessionId < 1) {
+    throw new Error("Session id must be a positive integer");
   }
 
   if (!Number.isInteger(data.timestampMs) || data.timestampMs < 0) {
@@ -225,74 +187,77 @@ const validateMasterVideoTimelineThumbnail = (
 const validateVideoClipRange = async (
   data: Pick<
     typeof videoClip.$inferInsert,
-    "masterVideoId" | "startOffsetMs" | "endOffsetMs"
+    "sessionId" | "startOffsetMs" | "endOffsetMs"
   >,
   database?: DbOrTx,
 ) => {
   validateVideoClipOffsets(data.startOffsetMs, data.endOffsetMs);
 
-  const selectedMasterVideo = await findMasterVideoById(
-    data.masterVideoId,
-    database,
-  );
+  const sessionRow = await findSessionById(data.sessionId, database);
 
-  if (!selectedMasterVideo) {
-    throw new Error(`Master video ${data.masterVideoId} does not exist`);
+  if (!sessionRow) {
+    throw new Error(`Session ${data.sessionId} does not exist`);
   }
 
-  const masterVideoDurationMs = getMasterVideoDurationMs(selectedMasterVideo);
+  const durationMs = getRecordingDurationMs(sessionRow);
 
   if (
     data.endOffsetMs !== null &&
     data.endOffsetMs !== undefined &&
-    masterVideoDurationMs !== null &&
-    data.endOffsetMs > masterVideoDurationMs
+    durationMs !== null &&
+    data.endOffsetMs > durationMs
   ) {
-    throw new Error("Video clip endOffsetMs exceeds master video duration");
+    throw new Error("Video clip endOffsetMs exceeds the session recording duration");
   }
 };
 
-export const createMasterVideo = async (
-  data: CreateMasterVideoInput,
+// admission stamps the recording start on the session row (the session IS the master)
+export const stampSessionRecordingStart = async (
+  data: { sessionId: number; startEpoch: number },
   database?: DbOrTx,
 ) => {
-  validateMasterVideoTimeRange(data.startEpoch, data.endEpoch);
+  validateRecordingTimeRange(data.startEpoch);
 
-  return createMasterVideoRecord(
+  return updateSessionById(
+    data.sessionId,
+    { startEpoch: data.startEpoch, recordingUpdatedAt: new Date() },
+    database,
+  );
+};
+
+// the ingest close stamps the end anchor and final duration on the session row
+export const stampSessionRecordingEnd = async (
+  sessionId: number,
+  data: { endEpoch: number; durationMs?: number | null },
+  database?: DbOrTx,
+) => {
+  const sessionRow = await findSessionById(sessionId, database);
+  if (!sessionRow) return null;
+
+  validateRecordingTimeRange(sessionRow.startEpoch ?? 0, data.endEpoch);
+
+  return updateSessionById(
+    sessionId,
     {
-      sessionId: data.sessionId,
-      startEpoch: data.startEpoch,
-      endEpoch: data.endEpoch ?? null,
-      lastUpdatedAt: new Date(),
+      endEpoch: data.endEpoch,
+      durationMs: data.durationMs ?? null,
+      recordingUpdatedAt: new Date(),
     },
     database,
   );
 };
 
-export const listMasterVideos = async (database?: DbOrTx) =>
-  listMasterVideoRecords(database);
-
-export const getMasterVideoById = async (
-  masterVideoId: number,
-  database?: DbOrTx,
-) => findMasterVideoById(masterVideoId, database);
-
-export const listMasterVideosBySessionId = async (
-  sessionId: number,
-  database?: DbOrTx,
-) => listMasterVideoRecordsBySessionId(sessionId, database);
-
-export const listMasterVideosByProjectId = async (
+export const listSessionRecordingsByProjectId = async (
   projectId: number,
   database?: DbOrTx,
-): Promise<ProjectMasterVideo[]> => {
+): Promise<ProjectSessionRecording[]> => {
   if (!Number.isInteger(projectId) || projectId < 1) {
     throw new Error("Project id must be a positive integer");
   }
 
-  const rows = await listMasterVideoRecordsByProjectId(projectId, database);
-  const thumbnailKeys = await listFirstTimelineThumbnailKeysByMasterVideoIds(
-    rows.map((row) => row.masterVideoId),
+  const rows = await listSessionRecordingRowsByProjectId(projectId, database);
+  const thumbnailKeys = await listFirstTimelineThumbnailKeysBySessionIds(
+    rows.map((row) => row.sessionId),
     database,
   );
 
@@ -301,53 +266,46 @@ export const listMasterVideosByProjectId = async (
     rows.map(async (row) => ({
       ...row,
       thumbnailUrl: await mintTimelineThumbnailUrl(
-        thumbnailKeys.get(row.masterVideoId) ?? null,
+        thumbnailKeys.get(row.sessionId) ?? null,
       ),
     })),
   );
 };
 
-export const getMasterVideoPlaybackData = async (
+export const getSessionPlaybackData = async (
   projectId: number,
-  masterVideoId: number,
+  sessionId: number,
   database?: DbOrTx,
 ): Promise<MasterVideoPlaybackData | null> => {
   if (!Number.isInteger(projectId) || projectId < 1) {
     throw new Error("Project id must be a positive integer");
   }
 
-  if (!Number.isInteger(masterVideoId) || masterVideoId < 1) {
-    throw new Error("Master video id must be a positive integer");
+  if (!Number.isInteger(sessionId) || sessionId < 1) {
+    throw new Error("Session id must be a positive integer");
   }
 
-  const selectedMasterVideo = await (database ?? db)
+  const selectedSession = await (database ?? db)
     .select({
-      masterVideoId: masterVideo.masterVideoId,
-      sessionId: masterVideo.sessionId,
+      sessionId: session.sessionId,
       sessionName: session.name,
       sessionDisplayNumber: session.displayNumber,
-      startEpoch: masterVideo.startEpoch,
-      endEpoch: masterVideo.endEpoch,
-      durationMs: masterVideo.durationMs,
+      startEpoch: session.startEpoch,
+      endEpoch: session.endEpoch,
+      durationMs: session.durationMs,
     })
-    .from(masterVideo)
-    .innerJoin(session, eq(session.sessionId, masterVideo.sessionId))
+    .from(session)
     .where(
       and(
-        eq(masterVideo.masterVideoId, masterVideoId),
+        eq(session.sessionId, sessionId),
         eq(session.projectId, projectId),
       ),
     )
     .limit(1).then((rows) => rows[0] ?? null);
 
-  if (!selectedMasterVideo) {
+  if (!selectedSession) {
     return null;
   }
-
-  const sessionMasterVideos = await listMasterVideoRecordsBySessionId(
-    selectedMasterVideo.sessionId,
-    database,
-  );
 
   // no recording-status gate: the bundle is a read, and playability comes from
   // the stored segments.
@@ -357,11 +315,11 @@ export const getMasterVideoPlaybackData = async (
       clipId: videoClip.clipId,
       resultId: result.resultId,
       inspectionTypeCode: result.inspectionTypeCode,
-      // the v2 target replaces the item chain: the main component description
-      // names it, and the component code is the sub-label when the target is a code
-      itemLabel: sql<string>`coalesce(${mainComponent.description}, ${componentCode.code}, '')`,
-      assetName: sql<string>`coalesce(${mainComponent.description}, ${componentCode.code}, '')`,
-      componentName: sql<string>`coalesce(${componentCode.code}, '')`,
+      // the target: the description label names it, the part code is the
+      // sub-label when the target is a code
+      itemLabel: sql<string>`coalesce(${description.label}, ${partCode.code}, '')`,
+      assetName: sql<string>`coalesce(${description.label}, ${partCode.code}, '')`,
+      componentName: sql<string>`coalesce(${partCode.code}, '')`,
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
       remarks: result.remarks,
@@ -370,16 +328,16 @@ export const getMasterVideoPlaybackData = async (
     })
     .from(videoClip)
     .innerJoin(result, eq(result.resultId, videoClip.resultId))
-    .leftJoin(mainComponent, eq(mainComponent.mainComponentId, result.mainComponentId))
-    .leftJoin(componentCode, eq(componentCode.componentCodeId, result.componentCodeId))
+    .leftJoin(description, eq(description.descriptionId, result.descriptionId))
+    .leftJoin(partCode, eq(partCode.partCodeId, result.partCodeId))
     .leftJoin(resultImage, eq(resultImage.resultId, result.resultId))
-    .where(eq(videoClip.masterVideoId, masterVideoId))
+    .where(eq(videoClip.sessionId, sessionId))
     .groupBy(
       videoClip.clipId,
       result.resultId,
       result.inspectionTypeCode,
-      mainComponent.description,
-      componentCode.code,
+      description.label,
+      partCode.code,
       videoClip.startOffsetMs,
       videoClip.endOffsetMs,
       result.remarks,
@@ -395,16 +353,15 @@ export const getMasterVideoPlaybackData = async (
   const imagesByResultId =
     await listResultImageSummariesByResultIds(eventResultIds, database);
 
-  const timelineThumbnails =
-    await listMasterVideoTimelineThumbnailRecordsByMasterVideoId(
-      masterVideoId,
-      database,
-    );
+  const timelineThumbnails = await listTimelineThumbnailRecordsBySessionId(
+    sessionId,
+    database,
+  );
 
   // The ingest is the status: open means the capture is still running, and its
   // duration is the only number that grows before close.
   const playableIngest = await findPlayableIngestRecord(
-    { kind: "master", id: masterVideoId },
+    { kind: "master", id: sessionId },
     database,
   );
 
@@ -415,27 +372,14 @@ export const getMasterVideoPlaybackData = async (
   );
 
   return {
-    ...selectedMasterVideo,
-    durationMs: selectedMasterVideo.durationMs ?? playableIngest?.durationMs ?? null,
+    ...selectedSession,
+    durationMs: selectedSession.durationMs ?? playableIngest?.durationMs ?? null,
     recordingStatus: playableIngest?.closedAt === null ? "recording" : "finalized",
-    sessionRecordings: [...sessionMasterVideos]
-      // copy first: sort mutates in place
-      .sort((firstSource, secondSource) =>
-        firstSource.startEpoch === secondSource.startEpoch
-          ? firstSource.masterVideoId - secondSource.masterVideoId
-          : firstSource.startEpoch - secondSource.startEpoch
-      )
-      .map((sourceVideo) => ({
-        masterVideoId: sourceVideo.masterVideoId,
-        startEpoch: sourceVideo.startEpoch,
-        endEpoch: sourceVideo.endEpoch,
-        durationMs: sourceVideo.durationMs,
-      })),
     // presigned per read: the strip renders these directly
     thumbnails: await Promise.all(
       timelineThumbnails.map(async (thumbnail) => ({
         thumbnailId: thumbnail.thumbnailId,
-        masterVideoId: thumbnail.masterVideoId,
+        sessionId: thumbnail.sessionId,
         timestampMs: thumbnail.timestampMs,
         storageStem: thumbnail.storageStem,
         width: thumbnail.width,
@@ -468,37 +412,34 @@ export const getMasterVideoPlaybackData = async (
   };
 };
 
-export const replaceMasterVideoTimelineThumbnails = async (
-  masterVideoId: number,
-  thumbnails: CreateMasterVideoTimelineThumbnailInput[],
+export const replaceSessionTimelineThumbnails = async (
+  sessionId: number,
+  thumbnails: CreateTimelineThumbnailInput[],
   database?: DbOrTx,
 ) => {
-  if (!Number.isInteger(masterVideoId) || masterVideoId < 1) {
-    throw new Error("Master video id must be a positive integer");
+  if (!Number.isInteger(sessionId) || sessionId < 1) {
+    throw new Error("Session id must be a positive integer");
   }
 
-  const selectedMasterVideo = await findMasterVideoById(masterVideoId, database);
+  const sessionRow = await findSessionById(sessionId, database);
 
-  if (!selectedMasterVideo) {
-    throw new Error(`Master video ${masterVideoId} does not exist`);
+  if (!sessionRow) {
+    throw new Error(`Session ${sessionId} does not exist`);
   }
 
-  thumbnails.forEach(validateMasterVideoTimelineThumbnail);
+  thumbnails.forEach(validateTimelineThumbnail);
 
-  if (thumbnails.some((thumbnail) => thumbnail.masterVideoId !== masterVideoId)) {
-    throw new Error("Thumbnail masterVideoId must match target master video");
+  if (thumbnails.some((thumbnail) => thumbnail.sessionId !== sessionId)) {
+    throw new Error("Thumbnail sessionId must match the target session");
   }
 
   // flow: delete old thumbnails > insert new set, one tx
   const run = async (tx: DbOrTx) => {
-    await deleteMasterVideoTimelineThumbnailRecordsByMasterVideoId(
-      masterVideoId,
-      tx,
-    );
+    await deleteTimelineThumbnailRecordsBySessionId(sessionId, tx);
 
-    return createMasterVideoTimelineThumbnailRecords(
+    return createTimelineThumbnailRecords(
       thumbnails.map((thumbnail) => ({
-        masterVideoId,
+        sessionId,
         timestampMs: thumbnail.timestampMs,
         width: thumbnail.width,
         height: thumbnail.height,
@@ -515,34 +456,6 @@ export const replaceMasterVideoTimelineThumbnails = async (
   return database ? run(database) : db.transaction(run);
 };
 
-export const updateMasterVideo = async (
-  masterVideoId: number,
-  data: Partial<typeof masterVideo.$inferInsert>,
-  database?: DbOrTx,
-) => {
-  const existingMasterVideo = await findMasterVideoById(masterVideoId, database);
-
-  if (!existingMasterVideo) {
-    return null;
-  }
-
-  validateMasterVideoTimeRange(
-    data.startEpoch ?? existingMasterVideo.startEpoch,
-    data.endEpoch === undefined ? existingMasterVideo.endEpoch : data.endEpoch,
-  );
-
-  return updateMasterVideoById(
-    masterVideoId,
-    normalizeMasterVideoUpdate(data),
-    database,
-  );
-};
-
-export const deleteMasterVideo = async (
-  masterVideoId: number,
-  database?: DbOrTx,
-) => deleteMasterVideoById(masterVideoId, database);
-
 export const createVideoClip = async (
   data: CreateVideoClipInput,
   database?: DbOrTx,
@@ -552,7 +465,7 @@ export const createVideoClip = async (
   return createVideoClipRecord(
     {
       resultId: data.resultId,
-      masterVideoId: data.masterVideoId,
+      sessionId: data.sessionId,
       startOffsetMs: data.startOffsetMs,
       endOffsetMs: data.endOffsetMs ?? null,
       lastUpdatedAt: new Date(),
@@ -561,16 +474,16 @@ export const createVideoClip = async (
   );
 };
 
-// open ingests are the whole signal: a master is unfinished while its ingest
-// row has not closed. The idle sweep closes them, so this drains on its own.
-export const listUnfinishedMasterVideos = async (database?: DbOrTx) =>
-  listMasterVideoRecordsWithOpenIngest(database);
+// open ingests are the whole signal: a session is unfinished while its master
+// ingest row has not closed. The idle sweep closes them, so this drains alone.
+export const listUnfinishedSessions = async (database?: DbOrTx) =>
+  listSessionsWithOpenIngest(database);
 
 // the master a session is capturing now; null when nothing is open
 export const findRecordingMasterBySessionId = async (
   sessionId: number,
   database?: DbOrTx,
-) => findMasterVideoRecordWithOpenIngestBySessionId(sessionId, database);
+) => findSessionWithOpenIngestBySessionId(sessionId, database);
 
 export const listVideoClips = async (database?: DbOrTx) =>
   listVideoClipRecords(database);
@@ -591,16 +504,16 @@ const toVideoClipPlayback = (playbackRow: VideoClipPlaybackRow): VideoClipPlayba
 
   return {
     ...playbackRow,
-    masterVideoDurationMs:
-      playbackRow.masterVideoEndEpoch === null
+    masterDurationMs:
+      playbackRow.sessionEndEpoch === null || playbackRow.sessionStartEpoch === null
         ? null
-        : (playbackRow.masterVideoEndEpoch - playbackRow.masterVideoStartEpoch) * 1000,
+        : (playbackRow.sessionEndEpoch - playbackRow.sessionStartEpoch) * 1000,
     durationMs,
-    startEpochMs: (playbackRow.masterVideoStartEpoch ?? 0) * 1000 + playbackRow.startOffsetMs,
+    startEpochMs: (playbackRow.sessionStartEpoch ?? 0) * 1000 + playbackRow.startOffsetMs,
     endEpochMs:
       playbackRow.endOffsetMs === null
         ? null
-        : (playbackRow.masterVideoStartEpoch ?? 0) * 1000 + playbackRow.endOffsetMs,
+        : (playbackRow.sessionStartEpoch ?? 0) * 1000 + playbackRow.endOffsetMs,
   };
 };
 
@@ -632,42 +545,17 @@ export const listVideoClipPlaybackByResultIds = async (
   return clipsByResultId;
 };
 
-export const listVideoClipsByMasterVideoId = async (
-  masterVideoId: number,
+export const listVideoClipsBySessionId = async (
+  sessionId: number,
   database?: DbOrTx,
-) => listVideoClipRecordsByMasterVideoId(masterVideoId, database);
+) => listVideoClipRecordsBySessionId(sessionId, database);
 
 export const getVideoClipPlaybackById = async (
   clipId: number,
   database?: DbOrTx,
 ): Promise<VideoClipPlayback | null> => {
   const playbackRow = await findVideoClipPlaybackRowById(clipId, database);
-
-  if (!playbackRow) {
-    return null;
-  }
-
-  const durationMs =
-    playbackRow.endOffsetMs === null
-      ? null
-      : playbackRow.endOffsetMs - playbackRow.startOffsetMs;
-
-  return {
-    ...playbackRow,
-    masterVideoDurationMs:
-      playbackRow.masterVideoEndEpoch === null
-        ? null
-        : (playbackRow.masterVideoEndEpoch -
-            playbackRow.masterVideoStartEpoch) *
-          1000,
-    durationMs,
-    startEpochMs:
-      playbackRow.masterVideoStartEpoch * 1000 + playbackRow.startOffsetMs,
-    endEpochMs:
-      playbackRow.endOffsetMs === null
-        ? null
-        : playbackRow.masterVideoStartEpoch * 1000 + playbackRow.endOffsetMs,
-  };
+  return playbackRow ? toVideoClipPlayback(playbackRow) : null;
 };
 
 export const updateVideoClip = async (
@@ -683,7 +571,7 @@ export const updateVideoClip = async (
 
   await validateVideoClipRange(
     {
-      masterVideoId: data.masterVideoId ?? existingVideoClip.masterVideoId,
+      sessionId: data.sessionId ?? existingVideoClip.sessionId,
       startOffsetMs: data.startOffsetMs ?? existingVideoClip.startOffsetMs,
       endOffsetMs:
         data.endOffsetMs === undefined

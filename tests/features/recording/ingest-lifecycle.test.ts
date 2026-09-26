@@ -35,7 +35,7 @@ const seedDomain = async () => {
   await testDb.insert(schema.taskGroup).values({
     taskGroupId: 9300,
     projectId: 9300,
-    groupCode: "100",
+    code: "100",
     label: "Rows",
   });
   await testDb.insert(schema.taskCode).values({
@@ -44,17 +44,17 @@ const seedDomain = async () => {
     code: "101",
     label: "Row A",
   });
-  await testDb.insert(schema.mainComponent).values({
-    mainComponentId: 9300,
+  await testDb.insert(schema.description).values({
+    descriptionId: 9300,
     taskCodeId: 9300,
-    description: "I",
+    label: "I",
   });
   // session_item is gone: v2 results carry their own target
   await testDb.insert(schema.result).values({
     displayNumber: 9300,
     resultId: 9300,
     inspectionTypeCode: "GVI",
-        mainComponentId: 9300,
+        descriptionId: 9300,
         layer: 1,
         masterStartMs: 0,
     projectId: 9300,
@@ -175,8 +175,8 @@ describe("direct ingest lifecycle", () => {
 
     const [master] = await testDb
       .select()
-      .from(schema.masterVideo)
-      .where(eq(schema.masterVideo.masterVideoId, admission.domain.masterVideoId));
+      .from(schema.session)
+      .where(eq(schema.session.sessionId, admission.domain.sessionId));
     expect(master!.durationMs).toBe(4500);
     expect(master!.endEpoch).toBe(START_EPOCH + 4);
 
@@ -236,7 +236,7 @@ describe("direct ingest lifecycle", () => {
       {
         kind: "clip",
         resultId: 9300,
-        masterVideoId: master.domain.masterVideoId,
+        sessionId: master.domain.sessionId,
         startOffsetMs: 30_000,
       },
       testDb,

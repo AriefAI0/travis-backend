@@ -27,7 +27,7 @@ const seedDomain = async () => {
   await testDb.insert(schema.taskGroup).values({
     taskGroupId: 9200,
     projectId: 9200,
-    groupCode: "100",
+    code: "100",
     label: "Rows",
   });
   await testDb.insert(schema.taskCode).values({
@@ -36,17 +36,17 @@ const seedDomain = async () => {
     code: "101",
     label: "Row A",
   });
-  await testDb.insert(schema.mainComponent).values({
-    mainComponentId: 9200,
+  await testDb.insert(schema.description).values({
+    descriptionId: 9200,
     taskCodeId: 9200,
-    description: "I",
+    label: "I",
   });
   // session_item is gone: v2 results carry their own target
   await testDb.insert(schema.result).values({
     displayNumber: 9200,
     resultId: 9200,
     inspectionTypeCode: "GVI",
-        mainComponentId: 9200,
+        descriptionId: 9200,
         layer: 1,
         masterStartMs: 0,
     projectId: 9200,
@@ -119,7 +119,6 @@ describe("direct ingest admission", () => {
     expect(admission.segmentTargetMs).toBe(SEGMENT_TARGET_MS);
     expect(admission.domain).toEqual({
       kind: "master",
-      masterVideoId: expect.any(Number),
       sessionId: expect.any(Number),
       projectId: 9200,
     });
@@ -127,15 +126,15 @@ describe("direct ingest admission", () => {
 
     const [master] = await testDb
       .select()
-      .from(schema.masterVideo)
-      .where(sql`${schema.masterVideo.masterVideoId} = ${admission.domain.masterVideoId}`);
+      .from(schema.session)
+      .where(sql`${schema.session.sessionId} = ${admission.domain.sessionId}`);
     expect(master!.sessionId).toBe(admission.domain.sessionId);
     expect(master!.startEpoch).toBe(LATE_NIGHT_EPOCH);
 
     const [ingest] = await testDb.select().from(schema.recordingIngest);
     expect(ingest!.ingestId).toBe(admission.ingestId);
     expect(ingest!.kind).toBe("master");
-    expect(ingest!.masterVideoId).toBe(admission.domain.masterVideoId);
+    expect(ingest!.sessionId).toBe(admission.domain.sessionId);
     expect(ingest!.clipId).toBeNull();
     expect(ingest!.keyDate).toBe("2026-09-20");
     // readable prefix, frozen here: project slug, display number, UTC start
@@ -156,7 +155,7 @@ describe("direct ingest admission", () => {
       {
         kind: "clip",
         resultId: 9200,
-        masterVideoId: master.domain.masterVideoId,
+        sessionId: master.domain.sessionId,
         startOffsetMs: 4000,
       },
       testDb,
@@ -167,8 +166,7 @@ describe("direct ingest admission", () => {
       kind: "clip",
       clipId: expect.any(Number),
       resultId: 9200,
-      masterVideoId: master.domain.masterVideoId,
-      sessionId: 9200,
+      sessionId: master.domain.sessionId,
       projectId: 9200,
     });
 
@@ -185,7 +183,7 @@ describe("direct ingest admission", () => {
       .where(sql`${schema.recordingIngest.ingestId} = ${clip.ingestId}`);
     expect(ingest!.kind).toBe("clip");
     expect(ingest!.clipId).toBe(clip.domain.clipId);
-    expect(ingest!.masterVideoId).toBeNull();
+    expect(ingest!.sessionId).toBeNull();
     // the clip inherits the master's key date, not its own wall clock
     expect(ingest!.keyDate).toBe("2026-09-20");
     // and its folder nests under the same session root, naming the item. The
@@ -205,7 +203,7 @@ describe("direct ingest admission", () => {
     const body = {
       kind: "clip" as const,
       resultId: 9200,
-      masterVideoId: master.domain.masterVideoId,
+      sessionId: master.domain.sessionId,
       startOffsetMs: 4000,
     };
 
@@ -259,14 +257,14 @@ describe("direct ingest admission", () => {
 
     await expect(
       admitIngest(
-        { kind: "clip", resultId: 9999, masterVideoId: master.domain.masterVideoId, startOffsetMs: 0 },
+        { kind: "clip", resultId: 9999, sessionId: master.domain.sessionId, startOffsetMs: 0 },
         testDb,
       ),
     ).rejects.toThrow(/Result not found/i);
 
     await expect(
-      admitIngest({ kind: "clip", resultId: 9200, masterVideoId: 9999, startOffsetMs: 0 }, testDb),
-    ).rejects.toThrow(/Master video not found/i);
+      admitIngest({ kind: "clip", resultId: 9200, sessionId: 9999, startOffsetMs: 0 }, testDb),
+    ).rejects.toThrow(/Session not found/i);
 
     const ingests = await testDb.select().from(schema.recordingIngest);
     expect(ingests).toHaveLength(1); // the master only

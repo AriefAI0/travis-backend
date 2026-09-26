@@ -24,12 +24,11 @@ import {
 } from "./result.service";
 import { getCurrentInspectionForm } from "./inspection-form.service";
 import {
-  getComponentCodeById,
-  getComponentTypeById,
-  getMainComponentById,
-  getMainComponentTypeById,
+  getDescriptionById,
+  getPartCodeById,
   getTaskCodeById,
   getTaskGroupById,
+  getTypeById,
 } from "./task-structure.service";
 
 
@@ -80,8 +79,8 @@ export type StartInspectionInput = {
   sessionId: number;
   layer: number;
   inspectionTypeCode: InspectionTypeCode;
-  mainComponentId?: number;
-  componentCodeId?: number;
+  descriptionId?: number;
+  partCodeId?: number;
   remarks?: string | null;
   masterStartMs: number;
 };
@@ -96,8 +95,8 @@ export type StopInspectionInput = {
 export type ActiveInspection = {
   resultId: number;
   layer: number;
-  mainComponentId: number | null;
-  componentCodeId: number | null;
+  descriptionId: number | null;
+  partCodeId: number | null;
   inspectionTypeCode: InspectionTypeCode;
   remarks: string | null;
   masterStartMs: number | null;
@@ -107,32 +106,32 @@ export type ActiveInspection = {
 
 // resolve the target > owning project through the task tree chain
 const resolveInspectionTarget = async (
-  input: Pick<StartInspectionInput, "mainComponentId" | "componentCodeId">,
+  input: Pick<StartInspectionInput, "descriptionId" | "partCodeId">,
   database?: DbOrTx,
-): Promise<{ projectId: number; mainComponentId: number | null; componentCodeId: number | null }> => {
-  const both = input.mainComponentId !== undefined && input.componentCodeId !== undefined;
-  const neither = input.mainComponentId === undefined && input.componentCodeId === undefined;
+): Promise<{ projectId: number; descriptionId: number | null; partCodeId: number | null }> => {
+  const both = input.descriptionId !== undefined && input.partCodeId !== undefined;
+  const neither = input.descriptionId === undefined && input.partCodeId === undefined;
   if (both || neither) {
-    throw new AppError(400, "validation_error", "exactly one of mainComponentId or componentCodeId is required");
+    throw new AppError(400, "validation_error", "exactly one of descriptionId or partCodeId is required");
   }
 
-  if (input.mainComponentId !== undefined) {
-    const comp = await getMainComponentById(input.mainComponentId, database);
-    if (!comp) throw notFound(`main component ${input.mainComponentId}`);
+  if (input.descriptionId !== undefined) {
+    const comp = await getDescriptionById(input.descriptionId, database);
+    if (!comp) throw notFound(`description ${input.descriptionId}`);
     const taskCode = await getTaskCodeById(comp.taskCodeId, database);
     const group = taskCode ? await getTaskGroupById(taskCode.taskGroupId, database) : null;
     if (!taskCode || !group) throw notFound(`task code ${comp.taskCodeId}`);
-    return { projectId: group.projectId, mainComponentId: comp.mainComponentId, componentCodeId: null };
+    return { projectId: group.projectId, descriptionId: comp.descriptionId, partCodeId: null };
   }
 
-  const code = await getComponentCodeById(input.componentCodeId!, database);
-  if (!code) throw notFound(`component code ${input.componentCodeId}`);
-  const branch = await getMainComponentTypeById(code.mainComponentTypeId, database);
-  const comp = branch ? await getMainComponentById(branch.mainComponentId, database) : null;
+  const code = await getPartCodeById(input.partCodeId!, database);
+  if (!code) throw notFound(`part code ${input.partCodeId}`);
+  const type = await getTypeById(code.typeId, database);
+  const comp = type ? await getDescriptionById(type.descriptionId, database) : null;
   const taskCode = comp ? await getTaskCodeById(comp.taskCodeId, database) : null;
   const group = taskCode ? await getTaskGroupById(taskCode.taskGroupId, database) : null;
-  if (!branch || !comp || !taskCode || !group) throw notFound(`component code ${input.componentCodeId}`);
-  return { projectId: group.projectId, mainComponentId: null, componentCodeId: code.componentCodeId };
+  if (!type || !comp || !taskCode || !group) throw notFound(`part code ${input.partCodeId}`);
+  return { projectId: group.projectId, descriptionId: null, partCodeId: code.partCodeId };
 };
 
 // check custom values against the pinned form version; returns the cleaned map
@@ -196,8 +195,8 @@ export const startInspection = async (
     const actives = await listActiveRows(input.sessionId, tx);
     for (const row of actives) {
       const sameTarget =
-        row.mainComponentId === target.mainComponentId &&
-        row.componentCodeId === target.componentCodeId;
+        row.descriptionId === target.descriptionId &&
+        row.partCodeId === target.partCodeId;
       if (sameTarget && row.inspectionTypeCode === input.inspectionTypeCode) {
         throw new AppError(
           409,
@@ -224,8 +223,8 @@ export const startInspection = async (
         sessionId: input.sessionId,
         projectId: sessionRecord.projectId,
         inspectionTypeCode: input.inspectionTypeCode,
-        mainComponentId: target.mainComponentId ?? undefined,
-        componentCodeId: target.componentCodeId ?? undefined,
+        descriptionId: target.descriptionId ?? undefined,
+        partCodeId: target.partCodeId ?? undefined,
         layer: input.layer,
         masterStartMs: input.masterStartMs,
         inspectionFormId: form.inspectionFormId,
@@ -301,7 +300,7 @@ export const cancelInspection = async (resultId: number, database?: DbOrTx) => {
   const result = await getResultById(resultId, database);
   if (!result) throw notFound(`result ${resultId}`);
   if (result.layer === null) {
-    throw new AppError(409, "inspection_already_stopped", `inspection ${resultId} is not a v2 inspection`);
+    throw new AppError(409, "inspection_already_stopped", `inspection ${resultId} is not a task-tree inspection`);
   }
   if (result.masterEndMs !== null) {
     throw new AppError(
@@ -351,8 +350,8 @@ export const listActiveBySessionId = async (
     return {
       resultId: row.resultId,
       layer: row.layer!,
-      mainComponentId: row.mainComponentId,
-      componentCodeId: row.componentCodeId,
+      descriptionId: row.descriptionId,
+      partCodeId: row.partCodeId,
       inspectionTypeCode: row.inspectionTypeCode,
       remarks: row.remarks,
       masterStartMs: row.masterStartMs,
@@ -369,9 +368,9 @@ export const listActiveBySessionId = async (
 export type SessionInspectionBreadcrumb = {
   taskGroup: { code: string; label: string };
   taskCode: { code: string; label: string };
-  mainComponent: { description: string };
-  componentType: { code: string; label: string } | null;
-  componentCode: { code: string; label: string | null } | null;
+  description: { label: string };
+  type: { code: string; label: string } | null;
+  partCode: { code: string; label: string | null } | null;
 };
 
 export type SessionInspectionRow = {
@@ -384,9 +383,9 @@ export type SessionInspectionRow = {
   masterEndMs: number | null;
   createdAt: Date;
   target: {
-    kind: "main_component" | "component_code";
-    mainComponentId: number | null;
-    componentCodeId: number | null;
+    kind: "description" | "part_code";
+    descriptionId: number | null;
+    partCodeId: number | null;
     label: string;
   };
   breadcrumb: SessionInspectionBreadcrumb | null;
@@ -394,43 +393,37 @@ export type SessionInspectionRow = {
 
 // walk a result's target to the full breadcrumb; labels follow renames
 const buildBreadcrumb = async (
-  mainComponentId: number | null,
-  componentCodeId: number | null,
+  descriptionId: number | null,
+  partCodeId: number | null,
   database?: DbOrTx,
 ): Promise<{ breadcrumb: SessionInspectionBreadcrumb; label: string }> => {
-  type ComponentCodeRow = Awaited<ReturnType<typeof getComponentCodeById>>;
-  type BranchRow = Awaited<ReturnType<typeof getMainComponentTypeById>>;
+  type PartCodeRow = Awaited<ReturnType<typeof getPartCodeById>>;
+  type TypeRow = Awaited<ReturnType<typeof getTypeById>>;
 
-  let componentCode: ComponentCodeRow = null;
-  let branch: BranchRow = null;
-  if (componentCodeId !== null) {
-    componentCode = await getComponentCodeById(componentCodeId, database);
-    branch = componentCode
-      ? await getMainComponentTypeById(componentCode.mainComponentTypeId, database)
-      : null;
+  let partCode: PartCodeRow = null;
+  let type: TypeRow = null;
+  if (partCodeId !== null) {
+    partCode = await getPartCodeById(partCodeId, database);
+    type = partCode ? await getTypeById(partCode.typeId, database) : null;
   }
-  const mainComponentIdResolved =
-    mainComponentId ?? (branch ? branch.mainComponentId : null);
-  const comp = mainComponentIdResolved
-    ? await getMainComponentById(mainComponentIdResolved, database)
+  const descriptionIdResolved =
+    descriptionId ?? (type ? type.descriptionId : null);
+  const comp = descriptionIdResolved
+    ? await getDescriptionById(descriptionIdResolved, database)
     : null;
   const taskCode = comp ? await getTaskCodeById(comp.taskCodeId, database) : null;
   const group = taskCode ? await getTaskGroupById(taskCode.taskGroupId, database) : null;
   if (!comp || !taskCode || !group) throw notFound(`target of result`);
 
-  const catalog = branch ? await getComponentTypeById(branch.componentTypeId, database) : null;
-
   return {
     breadcrumb: {
-      taskGroup: { code: group.groupCode, label: group.label },
+      taskGroup: { code: group.code, label: group.label },
       taskCode: { code: taskCode.code, label: taskCode.label },
-      mainComponent: { description: comp.description },
-      componentType: catalog ? { code: catalog.typeCode, label: catalog.label } : null,
-      componentCode: componentCode
-        ? { code: componentCode.code, label: componentCode.label }
-        : null,
+      description: { label: comp.label },
+      type: type ? { code: type.code, label: type.label } : null,
+      partCode: partCode ? { code: partCode.code, label: partCode.label } : null,
     },
-    label: componentCode ? componentCode.code : comp.description,
+    label: partCode ? partCode.code : comp.label,
   };
 };
 
@@ -449,8 +442,8 @@ export const listSessionInspectionRows = async (
   return Promise.all(
     rows.map(async (row) => {
       const { breadcrumb, label } = await buildBreadcrumb(
-        row.mainComponentId,
-        row.componentCodeId,
+        row.descriptionId,
+        row.partCodeId,
         database,
       );
       return {
@@ -463,9 +456,9 @@ export const listSessionInspectionRows = async (
         masterEndMs: row.masterEndMs,
         createdAt: row.createdAt,
         target: {
-          kind: row.componentCodeId !== null ? "component_code" : "main_component",
-          mainComponentId: row.mainComponentId,
-          componentCodeId: row.componentCodeId,
+          kind: row.partCodeId !== null ? "part_code" : "description",
+          descriptionId: row.descriptionId,
+          partCodeId: row.partCodeId,
           label,
         },
         breadcrumb,

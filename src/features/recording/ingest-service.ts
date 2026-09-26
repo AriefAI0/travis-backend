@@ -12,14 +12,10 @@ import {
   mediaDatePath,
   segmentLeafV2,
 } from "../../lib/minio_storage/paths";
-import { masterVideo, recordingIngest, recordingIngestSegment, videoClip } from "../../db/schema";
+import { recordingIngest, recordingIngestSegment, session as sessionTable, videoClip } from "../../db/schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
-import {
-  createMasterVideoRecord,
-  findMasterVideoById,
-} from "../../db/repositories/master-video.repository";
+import { findSessionById, updateSessionById } from "../../db/repositories/session.repository";
 import { findProjectById } from "../../db/repositories/project.repository";
-import { findSessionById } from "../../db/repositories/session.repository";
 import {
   createVideoClipRecord,
   findVideoClipById,
@@ -42,16 +38,16 @@ export type AdmitMasterInput = {
 export type AdmitClipInput = {
   kind: "clip";
   resultId: number;
-  masterVideoId: number;
+  sessionId: number;
   startOffsetMs: number;
 };
 
 export type AdmitIngestInput = AdmitMasterInput | AdmitClipInput;
 
-// domain rows the ingest feeds; no client id appears in any of them
+// domain rows the ingest feeds; no client id appears in any of them.
+// The session IS the master recording, so the master domain is the session.
 export type MasterIngestDomain = {
   kind: "master";
-  masterVideoId: number;
   sessionId: number;
   projectId: number;
 };
@@ -60,7 +56,6 @@ export type ClipIngestDomain = {
   kind: "clip";
   clipId: number;
   resultId: number;
-  masterVideoId: number;
   sessionId: number;
   projectId: number;
 };
@@ -90,7 +85,7 @@ export function ticketMatches(ticket: string, storedHash: string): boolean {
   return presented.length === stored.length && timingSafeEqual(presented, stored);
 }
 
-// flow: project > session row > master row > ingest row. The session is minted per master.
+// flow: project > session row (stamped as the master) > ingest row
 const admitMaster = async (
   input: AdmitMasterInput,
   tx: DbOrTx,
@@ -105,10 +100,12 @@ const admitMaster = async (
   if (!project) throw notFound("Project");
 
   const session = (await createSession({ projectId: input.projectId }, tx))!;
-  const master = (await createMasterVideoRecord(
-    { sessionId: session.sessionId, startEpoch: input.startEpoch },
+  // the session row carries the master anchors: start stamped at admission
+  await updateSessionById(
+    session.sessionId,
+    { startEpoch: input.startEpoch, startedAt, recordingUpdatedAt: new Date() },
     tx,
-  ))!;
+  );
 
   // frozen here: the display numbers exist only once the rows returned
   const keyPrefix = buildMasterKeyPrefix({
@@ -122,7 +119,7 @@ const admitMaster = async (
     ...(await insertIngest(
       {
         kind: "master",
-        masterVideoId: master.masterVideoId,
+        sessionId: session.sessionId,
         keyDate: mediaDatePath(startedAt),
         keyPrefix,
       },
@@ -130,27 +127,24 @@ const admitMaster = async (
     )),
     domain: {
       kind: "master",
-      masterVideoId: master.masterVideoId,
-      sessionId: master.sessionId,
+      sessionId: session.sessionId,
       projectId: session.projectId,
     },
   };
 };
 
-// flow: result + master checks > clip row (one per result) > open-ingest check > ingest row
+// flow: result + session checks > clip row (one per result) > open-ingest check > ingest row
 const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmission> => {
   const result = await findResultById(input.resultId, tx);
   if (!result) throw notFound("Result");
 
-  const master = await findMasterVideoById(input.masterVideoId, tx);
-  if (!master) throw notFound("Master video");
+  const session = await findSessionById(input.sessionId, tx);
+  if (!session) throw notFound("Session");
 
   // the clip folder carries the item label and the inspection type
-  const session = await findSessionById(master.sessionId, tx);
-  if (!session) throw notFound("Session");
   const project = await findProjectById(session.projectId, tx);
   if (!project) throw notFound("Project");
-  // the v2 target label names the clip folder
+  // the target label names the clip folder
   const targetLabel = await resolveTargetLabel(result, tx);
 
   // uq_video_clip_result_id: one clip per result, so a re-record reuses the row
@@ -160,7 +154,7 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
     (await createVideoClipRecord(
       {
         resultId: input.resultId,
-        masterVideoId: input.masterVideoId,
+        sessionId: input.sessionId,
         startOffsetMs: input.startOffsetMs,
       },
       tx,
@@ -176,7 +170,7 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
     projectNumber: project.displayNumber,
     projectTitle: project.title,
     displayNumber: session.displayNumber ?? session.sessionId,
-    startEpoch: master.startEpoch,
+    startEpoch: session.startEpoch ?? Math.floor(Date.now() / 1000),
     resultNumber: result.displayNumber,
     itemLabel: targetLabel,
     inspectionType: result.inspectionTypeCode,
@@ -188,7 +182,7 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
         kind: "clip",
         clipId: clip.clipId,
         // clip keys reuse the master date, never the clip's own wall clock
-        keyDate: mediaDatePath(new Date(master.startEpoch * 1000)),
+        keyDate: mediaDatePath(new Date((session.startEpoch ?? Math.floor(Date.now() / 1000)) * 1000)),
         keyPrefix,
       },
       tx,
@@ -197,8 +191,7 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
       kind: "clip",
       clipId: clip.clipId,
       resultId: clip.resultId,
-      masterVideoId: clip.masterVideoId,
-      sessionId: result.sessionId,
+      sessionId: clip.sessionId,
       projectId: result.projectId,
     },
   };
@@ -207,7 +200,7 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
 // the ingest row is the whole ledger header; the raw ticket stops at the caller
 const insertIngest = async (
   target:
-    | { kind: "master"; masterVideoId: number; keyDate: string; keyPrefix: string }
+    | { kind: "master"; sessionId: number; keyDate: string; keyPrefix: string }
     | { kind: "clip"; clipId: number; keyDate: string; keyPrefix: string },
   tx: DbOrTx,
 ): Promise<{ ingestId: number; ticket: string; segmentTargetMs: number }> => {
@@ -216,7 +209,7 @@ const insertIngest = async (
     .insert(recordingIngest)
     .values({
       kind: target.kind,
-      masterVideoId: target.kind === "master" ? target.masterVideoId : null,
+      sessionId: target.kind === "master" ? target.sessionId : null,
       clipId: target.kind === "clip" ? target.clipId : null,
       ticketHash: hashTicket(ticket),
       keyDate: target.keyDate,
@@ -233,14 +226,11 @@ const loadDomain = async (
   database: DbOrTx,
 ): Promise<IngestDomain> => {
   if (ingest.kind === "master") {
-    const master = await findMasterVideoById(ingest.masterVideoId!, database);
-    if (!master) throw notFound("Master video");
-    const session = await findSessionById(master.sessionId, database);
+    const session = await findSessionById(ingest.sessionId!, database);
     if (!session) throw notFound("Session");
     return {
       kind: "master",
-      masterVideoId: master.masterVideoId,
-      sessionId: master.sessionId,
+      sessionId: session.sessionId,
       projectId: session.projectId,
     };
   }
@@ -253,8 +243,7 @@ const loadDomain = async (
     kind: "clip",
     clipId: clip.clipId,
     resultId: clip.resultId,
-    masterVideoId: clip.masterVideoId,
-    sessionId: result.sessionId,
+    sessionId: clip.sessionId,
     projectId: result.projectId,
   };
 };
@@ -309,17 +298,18 @@ const stampDomainClose = async (
 ) => {
   const now = new Date();
   if (ingest.kind === "master") {
-    const master = await findMasterVideoById(ingest.masterVideoId!, tx);
-    if (!master) return;
+    const session = await findSessionById(ingest.sessionId!, tx);
+    if (!session) return;
     await tx
-      .update(masterVideo)
+      .update(sessionTable)
       .set({
         durationMs: summary.durationMs,
         // epoch seconds: the sub-second tail would lie about the media
-        endEpoch: master.startEpoch + Math.floor(summary.durationMs / 1000),
-        lastUpdatedAt: now,
+        endEpoch: (session.startEpoch ?? 0) + Math.floor(summary.durationMs / 1000),
+        endedAt: now,
+        recordingUpdatedAt: now,
       })
-      .where(eq(masterVideo.masterVideoId, master.masterVideoId));
+      .where(eq(sessionTable.sessionId, session.sessionId));
     return;
   }
 
@@ -338,7 +328,7 @@ const runClose = async (
   ingestId: number,
   guard: { ticket?: string; idleCutoff?: Date },
   tx: DbOrTx,
-): Promise<{ result: IngestCloseResult; thumbnailMasterVideoId: number | null } | null> => {
+): Promise<{ result: IngestCloseResult; thumbnailSessionId: number | null } | null> => {
   const ingest = await lockIngest(ingestId, tx);
   if (!ingest) throw notFound("Ingest");
   if (guard.ticket !== undefined && !ticketMatches(guard.ticket, ingest.ticketHash)) {
@@ -355,7 +345,7 @@ const runClose = async (
         closedAt: ingest.closedAt,
         replayed: true,
       },
-      thumbnailMasterVideoId: null,
+      thumbnailSessionId: null,
     };
   }
 
@@ -384,7 +374,7 @@ const runClose = async (
       replayed: false,
     },
     // one master close is one thumbnail job; a clip has no filmstrip
-    thumbnailMasterVideoId: ingest.kind === "master" ? ingest.masterVideoId : null,
+    thumbnailSessionId: ingest.kind === "master" ? ingest.sessionId : null,
   };
 };
 
@@ -392,7 +382,7 @@ const runClose = async (
 // real job: the worker owns MinIO and FFmpeg, and an ingest test should touch
 // neither.
 export type ThumbnailDispatch = {
-  master: (masterVideoId: number) => void;
+  master: (sessionId: number) => void;
   clip: (clipId: number) => void;
 };
 
@@ -409,8 +399,8 @@ export const closeIngest = async (
   const run = async (tx: DbOrTx) =>
     (await runClose(input.ingestId, { ticket: input.ticket }, tx))!;
   const closed = database ? await run(database) : await db.transaction(run);
-  if (closed.thumbnailMasterVideoId !== null) {
-    (input.dispatch ?? defaultThumbnailDispatch).master(closed.thumbnailMasterVideoId);
+  if (closed.thumbnailSessionId !== null) {
+    (input.dispatch ?? defaultThumbnailDispatch).master(closed.thumbnailSessionId);
   }
   return closed.result;
 };
@@ -426,8 +416,8 @@ export const closeIdleIngest = async (
   const closed = database ? await run(database) : await db.transaction(run);
   if (closed === null) return null;
   // A swept close mints the same thumbnails an explicit one does.
-  if (closed.thumbnailMasterVideoId !== null) {
-    dispatch.master(closed.thumbnailMasterVideoId);
+  if (closed.thumbnailSessionId !== null) {
+    dispatch.master(closed.thumbnailSessionId);
   }
   return closed.result;
 };
@@ -605,7 +595,7 @@ export type SegmentStoreOutcome = {
   replayed: boolean;
   // The target, so the caller can queue that recording's stills after commit.
   kind: "master" | "clip";
-  masterVideoId: number | null;
+  sessionId: number | null;
   clipId: number | null;
 };
 
@@ -711,7 +701,7 @@ export const storeIngestSegment = async (
         durationMs: ingest.durationMs ?? 0,
         replayed: true,
         kind: ingest.kind,
-        masterVideoId: ingest.masterVideoId,
+        sessionId: ingest.sessionId,
         clipId: ingest.clipId,
       };
     }
@@ -751,7 +741,7 @@ export const storeIngestSegment = async (
       durationMs: summary.durationMs,
       replayed: false,
       kind: ingest.kind,
-      masterVideoId: ingest.masterVideoId,
+      sessionId: ingest.sessionId,
       clipId: ingest.clipId,
     };
   };

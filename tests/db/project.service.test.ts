@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 
 import {
@@ -132,7 +133,7 @@ describe("project.service", () => {
 
     const group = await testDb
       .insert(schema.taskGroup)
-      .values({ projectId, groupCode: "100", label: "Rows" })
+      .values({ projectId, code: "100", label: "Rows" })
       .returning()
       .then((rows) => rows[0]!);
     const taskCode = await testDb
@@ -141,13 +142,13 @@ describe("project.service", () => {
       .returning()
       .then((rows) => rows[0]!);
     const componentA = await testDb
-      .insert(schema.mainComponent)
-      .values({ taskCodeId: taskCode.taskCodeId, description: "A" })
+      .insert(schema.description)
+      .values({ taskCodeId: taskCode.taskCodeId, label: "A" })
       .returning()
       .then((rows) => rows[0]!);
     const componentB = await testDb
-      .insert(schema.mainComponent)
-      .values({ taskCodeId: taskCode.taskCodeId, description: "B" })
+      .insert(schema.description)
+      .values({ taskCodeId: taskCode.taskCodeId, label: "B" })
       .returning()
       .then((rows) => rows[0]!);
     const sessionRecord = await testDb
@@ -166,7 +167,7 @@ describe("project.service", () => {
       projectId,
       sessionId: sessionRecord.sessionId,
       inspectionTypeCode: "GVI",
-      mainComponentId: componentA.mainComponentId,
+      descriptionId: componentA.descriptionId,
       layer: 1,
       masterStartMs: 0,
       masterEndMs: 5000,
@@ -177,7 +178,7 @@ describe("project.service", () => {
       projectId,
       sessionId: sessionRecord.sessionId,
       inspectionTypeCode: "GVI",
-      mainComponentId: componentB.mainComponentId,
+      descriptionId: componentB.descriptionId,
       layer: 2,
       masterStartMs: 0,
       displayNumber: 2,
@@ -269,7 +270,7 @@ describe("project.service", () => {
 
       const group = await testDb
         .insert(schema.taskGroup)
-        .values({ projectId: project!.projectId, groupCode: "100", label: "Rows" })
+        .values({ projectId: project!.projectId, code: "100", label: "Rows" })
         .returning()
         .then((rows) => rows[0]!);
 
@@ -280,29 +281,24 @@ describe("project.service", () => {
         .then((rows) => rows[0]!);
 
       const component = await testDb
-        .insert(schema.mainComponent)
-        .values({ taskCodeId: taskCode.taskCodeId, description: "Row A" })
+        .insert(schema.description)
+        .values({ taskCodeId: taskCode.taskCodeId, label: "Row A" })
         .returning()
         .then((rows) => rows[0]!);
 
-      const componentType = await testDb
-        .insert(schema.componentType)
-        .values({ projectId: project!.projectId, typeCode: "VDM", label: "Vertical Diagonal Member" })
-        .returning()
-        .then((rows) => rows[0]!);
-
-      const branch = await testDb
-        .insert(schema.mainComponentType)
+      const type = await testDb
+        .insert(schema.type)
         .values({
-          mainComponentId: component.mainComponentId,
-          componentTypeId: componentType.componentTypeId,
+          descriptionId: component.descriptionId,
+          code: "VDM",
+          label: "Vertical Diagonal Member",
         })
         .returning()
         .then((rows) => rows[0]!);
 
-      const componentCode = await testDb
-        .insert(schema.componentCode)
-        .values({ mainComponentTypeId: branch.mainComponentTypeId, code: "101-105" })
+      const partCodeRow = await testDb
+        .insert(schema.partCode)
+        .values({ typeId: type.typeId, code: "101-105" })
         .returning()
         .then((rows) => rows[0]!);
 
@@ -312,9 +308,11 @@ describe("project.service", () => {
         .returning()
         .then((rows) => rows[0]!);
 
+      // the session row carries the master anchors now
       const master = await testDb
-        .insert(schema.masterVideo)
-        .values({ sessionId: session.sessionId, startEpoch: 1000 })
+        .update(schema.session)
+        .set({ startEpoch: 1000 })
+        .where(eq(schema.session.sessionId, session.sessionId))
         .returning()
         .then((rows) => rows[0]!);
 
@@ -326,7 +324,7 @@ describe("project.service", () => {
           inspectionTypeCode: "GVI",
           projectId: project!.projectId,
           sessionId: session.sessionId,
-          componentCodeId: componentCode.componentCodeId,
+          partCodeId: partCodeRow.partCodeId,
           layer: 1,
           masterStartMs: 0,
           inspectionFormId: form.inspectionFormId,
@@ -339,7 +337,7 @@ describe("project.service", () => {
         .insert(schema.videoClip)
         .values({
           resultId: result.resultId,
-          masterVideoId: master.masterVideoId,
+          sessionId: master.sessionId,
           startOffsetMs: 0,
         })
         .returning()
@@ -349,8 +347,8 @@ describe("project.service", () => {
       expect(clip.resultId).toBe(result.resultId);
       expect(clip.clipId).toBeGreaterThan(0);
       expect(master.sessionId).toBe(session.sessionId);
-      expect(componentCode.mainComponentTypeId).toBe(branch.mainComponentTypeId);
-      expect(branch.mainComponentId).toBe(component.mainComponentId);
+      expect(partCodeRow.typeId).toBe(type.typeId);
+      expect(type.descriptionId).toBe(component.descriptionId);
     });
   });
 });

@@ -1,52 +1,49 @@
 import { Hono } from "hono";
 import type { DbOrTx } from "../../db/client";
 import {
-  attachMainComponentType,
-  createComponentCode,
-  createComponentType,
-  createMainComponent,
+  createDescription,
+  createPartCode,
   createTaskCode,
   createTaskGroup,
-  deleteComponentCode,
-  deleteComponentType,
-  deleteMainComponent,
-  deleteMainComponentType,
+  createType,
+  deleteDescription,
+  deletePartCode,
   deleteTaskCode,
   deleteTaskGroup,
-  getComponentCodeById,
-  getMainComponentById,
-  getMainComponentTypeById,
+  deleteType,
+  getDescriptionById,
+  getPartCodeById,
   getTaskCodeById,
   getTaskGroupById,
-  listComponentTypes,
+  getTypeById,
+  listPartCodesByTypeId,
   listProjectTaskStructureTree,
-  renameComponentType,
-  updateComponentCode,
-  updateMainComponent,
-  updateMainComponentType,
+  listTaskCodesByGroupId,
+  listTypeCatalog,
+  updateDescription,
+  updatePartCode,
   updateTaskCode,
   updateTaskGroup,
+  updateType,
 } from "../../db/services/task-structure.service";
 import { notFound } from "../../lib/error";
 import { compactUpdate, parseBody, parseId, parseQuery } from "../../lib/parse";
 import { ok } from "../../lib/response";
 import {
-  attachMainComponentTypeSchema,
-  componentTypeQuerySchema,
-  createComponentCodeSchema,
-  createComponentTypeSchema,
-  createMainComponentSchema,
+  createDescriptionSchema,
+  createPartCodeSchema,
   createTaskCodeSchema,
   createTaskGroupSchema,
-  updateComponentCodeSchema,
-  updateComponentTypeSchema,
-  updateMainComponentSchema,
-  updateMainComponentTypeSchema,
+  createTypeSchema,
+  typeCatalogQuerySchema,
+  updateDescriptionSchema,
+  updatePartCodeSchema,
   updateTaskCodeSchema,
   updateTaskGroupSchema,
+  updateTypeSchema,
 } from "../../types/api";
 
-// task tree reads + per-level CRUD + project type catalog (parse > service > ok)
+// task tree reads + per-level CRUD (parse > service > ok)
 export const taskStructureRoutes = (database?: DbOrTx) => {
   const routes = new Hono();
 
@@ -105,104 +102,86 @@ export const taskStructureRoutes = (database?: DbOrTx) => {
     return ok(c, row);
   });
 
-  /* main components */
-  routes.post("/api/v1/main-components", async (c) => {
-    const input = await parseBody(c, createMainComponentSchema);
-    return ok(c, await createMainComponent(input, database), 201);
+  /* descriptions */
+  routes.post("/api/v1/descriptions", async (c) => {
+    const input = await parseBody(c, createDescriptionSchema);
+    return ok(c, await createDescription(input, database), 201);
   });
 
-  routes.get("/api/v1/main-components/:id", async (c) => {
-    const row = await getMainComponentById(parseId(c, "id"), database);
-    if (!row) throw notFound("Main component");
+  routes.get("/api/v1/descriptions/:id", async (c) => {
+    const row = await getDescriptionById(parseId(c, "id"), database);
+    if (!row) throw notFound("Description");
     return ok(c, row);
   });
 
-  routes.patch("/api/v1/main-components/:id", async (c) => {
-    const input = compactUpdate(await parseBody(c, updateMainComponentSchema));
-    const row = await updateMainComponent(parseId(c, "id"), input, database);
-    if (!row) throw notFound("Main component");
+  routes.patch("/api/v1/descriptions/:id", async (c) => {
+    const input = compactUpdate(await parseBody(c, updateDescriptionSchema));
+    const row = await updateDescription(parseId(c, "id"), input, database);
+    if (!row) throw notFound("Description");
     return ok(c, row);
   });
 
-  routes.delete("/api/v1/main-components/:id", async (c) => {
-    const row = await deleteMainComponent(parseId(c, "id"), database);
-    if (!row) throw notFound("Main component");
+  routes.delete("/api/v1/descriptions/:id", async (c) => {
+    const row = await deleteDescription(parseId(c, "id"), database);
+    if (!row) throw notFound("Description");
     return ok(c, row);
   });
 
-  /* type branches (catalog value created on first use) */
-  routes.post("/api/v1/main-component-types", async (c) => {
-    const input = await parseBody(c, attachMainComponentTypeSchema);
-    return ok(c, await attachMainComponentType(input, database), 201);
+  /* types (owned by one description) */
+  routes.post("/api/v1/types", async (c) => {
+    const input = await parseBody(c, createTypeSchema);
+    return ok(c, await createType(input, database), 201);
   });
 
-  routes.get("/api/v1/main-component-types/:id", async (c) => {
-    const row = await getMainComponentTypeById(parseId(c, "id"), database);
-    if (!row) throw notFound("Main component type");
+  routes.get("/api/v1/types/:id", async (c) => {
+    const row = await getTypeById(parseId(c, "id"), database);
+    if (!row) throw notFound("Type");
     return ok(c, row);
   });
 
-  routes.patch("/api/v1/main-component-types/:id", async (c) => {
-    const input = compactUpdate(await parseBody(c, updateMainComponentTypeSchema));
-    const row = await updateMainComponentType(parseId(c, "id"), input, database);
-    if (!row) throw notFound("Main component type");
+  routes.patch("/api/v1/types/:id", async (c) => {
+    const input = compactUpdate(await parseBody(c, updateTypeSchema));
+    const row = await updateType(parseId(c, "id"), input, database);
+    if (!row) throw notFound("Type");
     return ok(c, row);
   });
 
-  routes.delete("/api/v1/main-component-types/:id", async (c) => {
-    const row = await deleteMainComponentType(parseId(c, "id"), database);
-    if (!row) throw notFound("Main component type");
+  routes.delete("/api/v1/types/:id", async (c) => {
+    const row = await deleteType(parseId(c, "id"), database);
+    if (!row) throw notFound("Type");
     return ok(c, row);
   });
 
-  /* project type catalog: autocomplete + rename in place */
-  routes.get("/api/v1/projects/:projectId/component-types", async (c) => {
+  /* part codes */
+  routes.post("/api/v1/part-codes", async (c) => {
+    const input = await parseBody(c, createPartCodeSchema);
+    return ok(c, await createPartCode(input, database), 201);
+  });
+
+  routes.get("/api/v1/part-codes/:id", async (c) => {
+    const row = await getPartCodeById(parseId(c, "id"), database);
+    if (!row) throw notFound("Part code");
+    return ok(c, row);
+  });
+
+  routes.patch("/api/v1/part-codes/:id", async (c) => {
+    const input = compactUpdate(await parseBody(c, updatePartCodeSchema));
+    const row = await updatePartCode(parseId(c, "id"), input, database);
+    if (!row) throw notFound("Part code");
+    return ok(c, row);
+  });
+
+  routes.delete("/api/v1/part-codes/:id", async (c) => {
+    const row = await deletePartCode(parseId(c, "id"), database);
+    if (!row) throw notFound("Part code");
+    return ok(c, row);
+  });
+
+  /* project type vocabulary: autocomplete from the tree, no catalog table */
+  routes.get("/api/v1/projects/:projectId/type-catalog", async (c) => {
     const projectId = parseId(c, "projectId");
-    const { q } = parseQuery(c, componentTypeQuerySchema);
-    return ok(c, await listComponentTypes(projectId, q, database));
-  });
-
-  routes.post("/api/v1/projects/:projectId/component-types", async (c) => {
-    const projectId = parseId(c, "projectId");
-    const input = await parseBody(c, createComponentTypeSchema);
-    return ok(c, await createComponentType(projectId, input, database), 201);
-  });
-
-  routes.patch("/api/v1/component-types/:id", async (c) => {
-    const input = await parseBody(c, updateComponentTypeSchema);
-    const row = await renameComponentType(parseId(c, "id"), input, database);
-    return ok(c, row);
-  });
-
-  routes.delete("/api/v1/component-types/:id", async (c) => {
-    const row = await deleteComponentType(parseId(c, "id"), database);
-    if (!row) throw notFound("Component type");
-    return ok(c, row);
-  });
-
-  /* component codes */
-  routes.post("/api/v1/component-codes", async (c) => {
-    const input = await parseBody(c, createComponentCodeSchema);
-    return ok(c, await createComponentCode(input, database), 201);
-  });
-
-  routes.get("/api/v1/component-codes/:id", async (c) => {
-    const row = await getComponentCodeById(parseId(c, "id"), database);
-    if (!row) throw notFound("Component code");
-    return ok(c, row);
-  });
-
-  routes.patch("/api/v1/component-codes/:id", async (c) => {
-    const input = compactUpdate(await parseBody(c, updateComponentCodeSchema));
-    const row = await updateComponentCode(parseId(c, "id"), input, database);
-    if (!row) throw notFound("Component code");
-    return ok(c, row);
-  });
-
-  routes.delete("/api/v1/component-codes/:id", async (c) => {
-    const row = await deleteComponentCode(parseId(c, "id"), database);
-    if (!row) throw notFound("Component code");
-    return ok(c, row);
+    parseQuery(c, typeCatalogQuerySchema);
+    return ok(c, await listTypeCatalog(projectId, database));
   });
 
   return routes;

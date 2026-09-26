@@ -176,16 +176,21 @@ describe("playlist snapshot", () => {
     finalSequence?: number;
     sequences: { sequence: number; durationMs?: number }[];
   }) => {
+    const [project] = await testDb
+      .insert(schema.project)
+      .values({ displayNumber: 1, title: "HLS fixture" })
+      .returning({ projectId: schema.project.projectId });
+
     const [master] = await testDb
-      .insert(schema.masterVideo)
-      .values({ sessionId: PROJECT_ID, startEpoch: 1_760_000_000 })
-      .returning({ masterVideoId: schema.masterVideo.masterVideoId });
+      .insert(schema.session)
+      .values({ projectId: project!.projectId, displayNumber: 1, startEpoch: 1_760_000_000 })
+      .returning({ sessionId: schema.session.sessionId });
 
     const [ingest] = await testDb
       .insert(schema.recordingIngest)
       .values({
         kind: "master",
-        masterVideoId: master!.masterVideoId,
+        sessionId: master!.sessionId,
         ticketHash: "a".repeat(64),
         keyDate: "2026-09-20",
         keyPrefix: KEY_PREFIX,
@@ -205,16 +210,16 @@ describe("playlist snapshot", () => {
       });
     }
 
-    return { masterVideoId: master!.masterVideoId, ingestId: ingest!.ingestId };
+    return { sessionId: master!.sessionId, ingestId: ingest!.ingestId };
   };
 
   test("an open ingest serves its contiguous prefix as a live playlist", async () => {
-    const { masterVideoId } = await seedIngest({
+    const { sessionId } = await seedIngest({
       closed: false,
       sequences: [{ sequence: 0 }, { sequence: 1 }, { sequence: 3 }],
     });
 
-    const source = await readPlaylistSource({ kind: "master", id: masterVideoId }, testDb);
+    const source = await readPlaylistSource({ kind: "master", id: sessionId }, testDb);
 
     expect(source.closed).toBe(false);
     expect(source.segments.map((row) => row.sequence)).toEqual([0, 1]);
@@ -222,20 +227,20 @@ describe("playlist snapshot", () => {
   });
 
   test("a closed ingest stops at its frozen range", async () => {
-    const { masterVideoId } = await seedIngest({
+    const { sessionId } = await seedIngest({
       closed: false,
       sequences: [{ sequence: 0 }, { sequence: 1 }, { sequence: 2 }],
     });
-    const source = await readPlaylistSource({ kind: "master", id: masterVideoId }, testDb);
+    const source = await readPlaylistSource({ kind: "master", id: sessionId }, testDb);
     expect(source.closed).toBe(false);
 
     // close it at sequence 1; the stored sequence 2 is now a straggler
     await testDb
       .update(schema.recordingIngest)
       .set({ closedAt: new Date(), finalSequence: 1 })
-      .where(eq(schema.recordingIngest.masterVideoId, masterVideoId));
+      .where(eq(schema.recordingIngest.sessionId, sessionId));
 
-    const closed = await readPlaylistSource({ kind: "master", id: masterVideoId }, testDb);
+    const closed = await readPlaylistSource({ kind: "master", id: sessionId }, testDb);
     expect(closed.closed).toBe(true);
     expect(closed.segments.map((row) => row.sequence)).toEqual([0, 1]);
     expect(closed.mediaSequence).toBe(0);
@@ -243,23 +248,29 @@ describe("playlist snapshot", () => {
   });
 
   test("an empty ingest renders an empty playlist, not an error", async () => {
-    const { masterVideoId } = await seedIngest({ closed: false, sequences: [] });
-    const source = await readPlaylistSource({ kind: "master", id: masterVideoId }, testDb);
+    const { sessionId } = await seedIngest({ closed: false, sequences: [] });
+    const source = await readPlaylistSource({ kind: "master", id: sessionId }, testDb);
     expect(source.segments).toEqual([]);
     expect(buildPlaylist(source, uri).split("\n").filter((line) => line.startsWith("seg/"))).toEqual([]);
   });
 
   test("a recording with no ingest at all is 404", async () => {
-    await testDb.insert(schema.masterVideo).values({ sessionId: PROJECT_ID, startEpoch: 1 });
-    const [master] = await testDb.select().from(schema.masterVideo);
+    const [project] = await testDb
+      .insert(schema.project)
+      .values({ displayNumber: 1, title: "HLS fixture" })
+      .returning({ projectId: schema.project.projectId });
+    await testDb
+      .insert(schema.session)
+      .values({ displayNumber: 1, projectId: project!.projectId, startEpoch: 1 });
+    const [master] = await testDb.select().from(schema.session);
 
     await expect(
-      readPlaylistSource({ kind: "master", id: master!.masterVideoId }, testDb),
+      readPlaylistSource({ kind: "master", id: master!.sessionId }, testDb),
     ).rejects.toThrow(/Ingest not found/i);
   });
 
   test("a live ingest wins over an older closed one", async () => {
-    const { masterVideoId } = await seedIngest({
+    const { sessionId } = await seedIngest({
       closed: true,
       finalSequence: 0,
       sequences: [{ sequence: 0 }],
@@ -268,7 +279,7 @@ describe("playlist snapshot", () => {
       .insert(schema.recordingIngest)
       .values({
         kind: "master",
-        masterVideoId,
+        sessionId,
         ticketHash: "d".repeat(64),
         keyDate: "2026-09-20",
         keyPrefix: KEY_PREFIX,
@@ -283,7 +294,7 @@ describe("playlist snapshot", () => {
       objectKey: "live/0.ts",
     });
 
-    const source = await readPlaylistSource({ kind: "master", id: masterVideoId }, testDb);
+    const source = await readPlaylistSource({ kind: "master", id: sessionId }, testDb);
     expect(source.closed).toBe(false);
     expect(source.targetDurationSeconds).toBe(3);
   });

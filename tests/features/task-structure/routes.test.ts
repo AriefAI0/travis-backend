@@ -26,14 +26,14 @@ const patch = async (path: string, body: unknown) =>
     body: JSON.stringify(body),
   });
 
-// full chain: project > group > task code > main component > type branch > component code
+// full chain: project > group > task code > description > type > part code
 const seedChain = async () => {
   const projectId = (await json(await post("/api/v1/projects", { title: "Alpha" }))).data
     .projectId as number;
 
   const groupRes = await post("/api/v1/task-groups", {
     projectId,
-    groupCode: "100",
+    code: "100",
     label: "Row inspections",
   });
   expect(groupRes.status).toBe(201);
@@ -47,29 +47,29 @@ const seedChain = async () => {
   expect(codeRes.status).toBe(201);
   const taskCodeId = (await json(codeRes)).data.taskCodeId as number;
 
-  const compRes = await post("/api/v1/main-components", {
+  const descriptionRes = await post("/api/v1/descriptions", {
     taskCodeId,
-    description: "Row A",
+    label: "Row A",
   });
-  expect(compRes.status).toBe(201);
-  const mainComponentId = (await json(compRes)).data.mainComponentId as number;
+  expect(descriptionRes.status).toBe(201);
+  const descriptionId = (await json(descriptionRes)).data.descriptionId as number;
 
-  const branchRes = await post("/api/v1/main-component-types", {
-    mainComponentId,
-    typeCode: "VDM",
+  const typeRes = await post("/api/v1/types", {
+    descriptionId,
+    code: "VDM",
     label: "Vertical Diagonal Member",
   });
-  expect(branchRes.status).toBe(201);
-  const mainComponentTypeId = (await json(branchRes)).data.mainComponentTypeId as number;
+  expect(typeRes.status).toBe(201);
+  const typeId = (await json(typeRes)).data.typeId as number;
 
-  const codeRowRes = await post("/api/v1/component-codes", {
-    mainComponentTypeId,
+  const partRes = await post("/api/v1/part-codes", {
+    typeId,
     code: "101-105",
   });
-  expect(codeRowRes.status).toBe(201);
-  const componentCodeId = (await json(codeRowRes)).data.componentCodeId as number;
+  expect(partRes.status).toBe(201);
+  const partCodeId = (await json(partRes)).data.partCodeId as number;
 
-  return { projectId, taskGroupId, taskCodeId, mainComponentId, mainComponentTypeId, componentCodeId };
+  return { projectId, taskGroupId, taskCodeId, descriptionId, typeId, partCodeId };
 };
 
 const seedProject = async () => {
@@ -77,7 +77,7 @@ const seedProject = async () => {
   return (await json(res)).data.projectId as number;
 };
 
-// flow: seed chain > tree read > catalog rules > cascade
+// flow: seed chain > tree read > type rules > cascade
 describe("task structure routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
@@ -86,9 +86,9 @@ describe("task structure routes", () => {
   it("builds the tree and returns it nested", async () => {
     const { projectId } = await seedChain();
 
-    // anode-style branch: main component with no type children
+    // anode-style branch: description with no type children
     const anodeGroup = await json(
-      await post("/api/v1/task-groups", { projectId, groupCode: "800", label: "Anodes" }),
+      await post("/api/v1/task-groups", { projectId, code: "800", label: "Anodes" }),
     );
     const anodeCode = await json(
       await post("/api/v1/task-codes", {
@@ -97,9 +97,9 @@ describe("task structure routes", () => {
         label: "Anode A-1",
       }),
     );
-    await post("/api/v1/main-components", {
+    await post("/api/v1/descriptions", {
       taskCodeId: anodeCode.data.taskCodeId,
-      description: "Anode A-1",
+      label: "Anode A-1",
     });
 
     const treeRes = await app.request(`/api/v1/projects/${projectId}/task-structure`);
@@ -107,82 +107,74 @@ describe("task structure routes", () => {
     const tree = (await json(treeRes)).data as Array<Record<string, any>>;
 
     expect(tree).toHaveLength(2);
-    expect(tree[0]!.groupCode).toBe("100");
+    expect(tree[0]!.code).toBe("100");
     expect(tree[0]!.taskCodes[0]!.code).toBe("101");
-    expect(tree[0]!.taskCodes[0]!.mainComponents[0]!.description).toBe("Row A");
-    expect(tree[0]!.taskCodes[0]!.mainComponents[0]!.types[0]!.typeCode).toBe("VDM");
-    expect(tree[0]!.taskCodes[0]!.mainComponents[0]!.types[0]!.componentCodes[0]!.code).toBe("101-105");
-    expect(tree[1]!.groupCode).toBe("800");
-    expect(tree[1]!.taskCodes[0]!.mainComponents[0]!.types).toEqual([]);
+    expect(tree[0]!.taskCodes[0]!.descriptions[0]!.label).toBe("Row A");
+    expect(tree[0]!.taskCodes[0]!.descriptions[0]!.types[0]!.code).toBe("VDM");
+    expect(tree[0]!.taskCodes[0]!.descriptions[0]!.types[0]!.partCodes[0]!.code).toBe("101-105");
+    expect(tree[1]!.code).toBe("800");
+    expect(tree[1]!.taskCodes[0]!.descriptions[0]!.types).toEqual([]);
   });
 
   it("rejects a duplicate group code within the project", async () => {
     const projectId = await seedProject();
-    await post("/api/v1/task-groups", { projectId, groupCode: "100", label: "First" });
+    await post("/api/v1/task-groups", { projectId, code: "100", label: "First" });
 
-    const dup = await post("/api/v1/task-groups", { projectId, groupCode: "100", label: "Second" });
+    const dup = await post("/api/v1/task-groups", { projectId, code: "100", label: "Second" });
     expect(dup.status).toBe(409);
   });
 
-  it("creates the catalog type once and reuses it across components", async () => {
+  it("refuses the same type code twice under one description", async () => {
+    const { descriptionId } = await seedChain();
+
+    const dup = await post("/api/v1/types", {
+      descriptionId,
+      code: "VDM",
+      label: "Vertical Diagonal Member",
+    });
+    expect(dup.status).toBe(409);
+
+    // the same code under a DIFFERENT description is fine: local vocabulary
+    const { taskCodeId } = { taskCodeId: (await seedChain()).taskCodeId };
+    const comp2 = await json(await post("/api/v1/descriptions", { taskCodeId, label: "Row B" }));
+    const elsewhere = await post("/api/v1/types", {
+      descriptionId: comp2.data.descriptionId,
+      code: "VDM",
+      label: "Vertical Diagonal Member",
+    });
+    expect(elsewhere.status).toBe(201);
+  });
+
+  it("type-catalog lists distinct code+label pairs across the tree", async () => {
     const { projectId, taskCodeId } = await seedChain();
 
-    const comp2 = await json(
-      await post("/api/v1/main-components", { taskCodeId, description: "Row B" }),
-    );
-    await post("/api/v1/main-component-types", {
-      mainComponentId: comp2.data.mainComponentId,
-      typeCode: "VDM",
+    const comp2 = await json(await post("/api/v1/descriptions", { taskCodeId, label: "Row B" }));
+    await post("/api/v1/types", {
+      descriptionId: comp2.data.descriptionId,
+      code: "VDM",
       label: "Vertical Diagonal Member",
     });
 
-    const catalogRes = await app.request(`/api/v1/projects/${projectId}/component-types`);
+    const catalogRes = await app.request(`/api/v1/projects/${projectId}/type-catalog`);
     const catalog = (await json(catalogRes)).data as Array<Record<string, any>>;
     expect(catalog).toHaveLength(1);
+    expect(catalog[0]!.code).toBe("VDM");
   });
 
-  it("renames a catalog type in place and the tree follows", async () => {
-    const { projectId } = await seedChain();
+  it("renames a type in place and the tree follows", async () => {
+    const { projectId, typeId } = await seedChain();
 
-    const catalog = (await json(
-      await app.request(`/api/v1/projects/${projectId}/component-types`),
-    )).data as Array<Record<string, any>>;
-    const typeId = catalog[0]!.componentTypeId;
-
-    const renamed = await patch(`/api/v1/component-types/${typeId}`, {
-      typeCode: "VHM",
+    const renamed = await patch(`/api/v1/types/${typeId}`, {
+      code: "VHM",
       label: "Vertical Horizontal Member",
     });
     expect(renamed.status).toBe(200);
-    expect((await json(renamed)).data.componentTypeId).toBe(typeId);
+    expect((await json(renamed)).data.typeId).toBe(typeId);
 
     const tree = (await json(
       await app.request(`/api/v1/projects/${projectId}/task-structure`),
     )).data as Array<Record<string, any>>;
-    expect(tree[0]!.taskCodes[0]!.mainComponents[0]!.types[0]!.typeCode).toBe("VHM");
-  });
-
-  it("refuses to delete an in-use catalog type and deletes an unused one", async () => {
-    const { projectId } = await seedChain();
-
-    const catalog = (await json(
-      await app.request(`/api/v1/projects/${projectId}/component-types`),
-    )).data as Array<Record<string, any>>;
-    const inUseId = catalog[0]!.componentTypeId;
-
-    const refused = await app.request(`/api/v1/component-types/${inUseId}`, { method: "DELETE" });
-    expect(refused.status).toBe(409);
-
-    const created = await json(
-      await post(`/api/v1/projects/${projectId}/component-types`, {
-        typeCode: "UNUSED",
-        label: "Unused type",
-      }),
-    );
-    const deleted = await app.request(`/api/v1/component-types/${created.data.componentTypeId}`, {
-      method: "DELETE",
-    });
-    expect(deleted.status).toBe(200);
+    expect(tree[0]!.taskCodes[0]!.descriptions[0]!.types[0]!.code).toBe("VHM");
   });
 
   it("deleting a task group cascades the whole subtree", async () => {
@@ -195,19 +187,5 @@ describe("task structure routes", () => {
       await app.request(`/api/v1/projects/${projectId}/task-structure`),
     )).data as unknown[];
     expect(tree).toHaveLength(0);
-  });
-
-  it("filters the type catalog by query", async () => {
-    const { projectId } = await seedChain();
-    await post(`/api/v1/projects/${projectId}/component-types`, {
-      typeCode: "VHM",
-      label: "Vertical Horizontal Member",
-    });
-
-    const filtered = (await json(
-      await app.request(`/api/v1/projects/${projectId}/component-types?q=vh`),
-    )).data as Array<Record<string, any>>;
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0]!.typeCode).toBe("VHM");
   });
 });

@@ -1,63 +1,64 @@
 import { and, asc, eq, inArray, isNotNull, notExists, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
-import { masterVideo, recordingIngest, recordingIngestSegment, timelineThumbnail } from "../schema";
+import { recordingIngest, recordingIngestSegment, session, timelineThumbnail } from "../schema";
 
-// Every master holding at least one segment, open or closed. The job derives its
-// own due set, so a master already drawn on the current grid costs one source
-// read and reports nothing. Asking the grid rather than the row count is what
-// backfills a recording thumbnailed by an earlier, coarser interval.
-export const listMasterVideoIdsWithThumbnailWork = async (
+// Every session recording holding at least one segment, open or closed. The job
+// derives its own due set, so a session already drawn on the current grid costs
+// one source read and reports nothing. Asking the grid rather than the row
+// count is what backfills a recording thumbnailed by an earlier, coarser
+// interval.
+export const listSessionIdsWithThumbnailWork = async (
   database: DbOrTx = db,
 ): Promise<number[]> =>
   (
     await database
-      .selectDistinct({ masterVideoId: recordingIngest.masterVideoId })
+      .selectDistinct({ sessionId: recordingIngest.sessionId })
       .from(recordingIngest)
       .innerJoin(
         recordingIngestSegment,
         eq(recordingIngestSegment.ingestId, recordingIngest.ingestId),
       )
-      .where(isNotNull(recordingIngest.masterVideoId))
-  ).map((row) => row.masterVideoId!);
+      .where(isNotNull(recordingIngest.sessionId))
+  ).map((row) => row.sessionId!);
 
-// The grid points a master already has, for the job's due-set subtraction.
-export const listTimelineThumbnailTimestampsByMasterVideoId = async (
-  masterVideoId: number,
+// The grid points a session already has, for the job's due-set subtraction.
+export const listTimelineThumbnailTimestampsBySessionId = async (
+  sessionId: number,
   database: DbOrTx = db,
 ): Promise<number[]> =>
   (
     await database
       .select({ timestampMs: timelineThumbnail.timestampMs })
       .from(timelineThumbnail)
-      .where(eq(timelineThumbnail.masterVideoId, masterVideoId))
+      .where(eq(timelineThumbnail.sessionId, sessionId))
   ).map((row) => row.timestampMs);
 
-// Closed masters with no timeline rows: the boot scan's whole signal, so a
-// crash mid-thumbnail simply re-runs on the next start. A master counts as
+// Closed sessions with no timeline rows: the boot scan's whole signal, so a
+// crash mid-thumbnail simply re-runs on the next start. A session counts as
 // closed once its end epoch is stamped, which the ingest close does.
-export const listMasterVideoIdsMissingTimelineThumbnails = async (
+export const listSessionIdsMissingTimelineThumbnails = async (
   database: DbOrTx = db,
 ): Promise<number[]> =>
   (
     await database
-      .select({ masterVideoId: masterVideo.masterVideoId })
-      .from(masterVideo)
+      .select({ sessionId: session.sessionId })
+      .from(session)
       .where(
         and(
-          isNotNull(masterVideo.endEpoch),
+          isNotNull(session.endEpoch),
           notExists(
             database
               .select({ present: sql`1` })
               .from(timelineThumbnail)
-              .where(eq(timelineThumbnail.masterVideoId, masterVideo.masterVideoId)),
+              .where(eq(timelineThumbnail.sessionId, session.sessionId)),
           ),
         ),
       )
-      .orderBy(asc(masterVideo.masterVideoId))
-  ).map((row) => row.masterVideoId);
+      .orderBy(asc(session.sessionId))
+  ).map((row) => row.sessionId);
 
-export const createMasterVideoTimelineThumbnailRecords = async (
+export const createTimelineThumbnailRecords = async (
   data: (typeof timelineThumbnail.$inferInsert)[],
   database: DbOrTx = db,
 ) => {
@@ -68,52 +69,52 @@ export const createMasterVideoTimelineThumbnailRecords = async (
   return database.insert(timelineThumbnail).values(data).returning();
 };
 
-// Card face for a master list: the earliest still per master, one batched
+// Card face for a session list: the earliest still per session, one batched
 // query. The key column holds the object key the thumbnail job wrote.
-export const listFirstTimelineThumbnailKeysByMasterVideoIds = async (
-  masterVideoIdList: number[],
+export const listFirstTimelineThumbnailKeysBySessionIds = async (
+  sessionIdList: number[],
   database: DbOrTx = db,
 ): Promise<Map<number, string>> => {
-  const keysByMasterVideoId = new Map<number, string>();
+  const keysBySessionId = new Map<number, string>();
 
-  if (masterVideoIdList.length === 0) {
-    return keysByMasterVideoId;
+  if (sessionIdList.length === 0) {
+    return keysBySessionId;
   }
 
   const rows = await database
     .select({
-      masterVideoId: timelineThumbnail.masterVideoId,
+      sessionId: timelineThumbnail.sessionId,
       storageStem: timelineThumbnail.storageStem,
       timestampMs: timelineThumbnail.timestampMs,
     })
     .from(timelineThumbnail)
-    .where(inArray(timelineThumbnail.masterVideoId, masterVideoIdList))
-    .orderBy(asc(timelineThumbnail.masterVideoId), asc(timelineThumbnail.timestampMs));
+    .where(inArray(timelineThumbnail.sessionId, sessionIdList))
+    .orderBy(asc(timelineThumbnail.sessionId), asc(timelineThumbnail.timestampMs));
 
   for (const row of rows) {
-    // ordered by timestamp, so the first row per master wins
-    if (!keysByMasterVideoId.has(row.masterVideoId)) {
-      keysByMasterVideoId.set(row.masterVideoId, row.storageStem);
+    // ordered by timestamp, so the first row per session wins
+    if (!keysBySessionId.has(row.sessionId)) {
+      keysBySessionId.set(row.sessionId, row.storageStem);
     }
   }
 
-  return keysByMasterVideoId;
+  return keysBySessionId;
 };
 
-export const listMasterVideoTimelineThumbnailRecordsByMasterVideoId = async (
-  masterVideoId: number,
+export const listTimelineThumbnailRecordsBySessionId = async (
+  sessionId: number,
   database: DbOrTx = db,
 ) =>
   database.query.timelineThumbnail.findMany({
-    where: eq(timelineThumbnail.masterVideoId, masterVideoId),
+    where: eq(timelineThumbnail.sessionId, sessionId),
     orderBy: asc(timelineThumbnail.timestampMs),
   });
 
-export const deleteMasterVideoTimelineThumbnailRecordsByMasterVideoId = async (
-  masterVideoId: number,
+export const deleteTimelineThumbnailRecordsBySessionId = async (
+  sessionId: number,
   database: DbOrTx = db,
 ) =>
   database
     .delete(timelineThumbnail)
-    .where(eq(timelineThumbnail.masterVideoId, masterVideoId))
+    .where(eq(timelineThumbnail.sessionId, sessionId))
     .returning();

@@ -2,13 +2,13 @@ import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import {
-  componentCode,
-  mainComponent,
-  mainComponentType,
+  description,
+  partCode,
   project,
   result,
   taskCode,
   taskGroup,
+  type,
 } from "../schema";
 
 // Field names are kept from the item-model era so the app contract holds; the
@@ -103,25 +103,25 @@ export const listProjectDashboardRows = async (
     database
       .select({
         projectId: taskGroup.projectId,
-        value: count(sql`count(distinct ${mainComponent.mainComponentId})`),
+        value: count(sql`count(distinct ${description.descriptionId})`),
       })
-      .from(mainComponent)
-      .innerJoin(taskCode, eq(taskCode.taskCodeId, mainComponent.taskCodeId))
+      .from(description)
+      .innerJoin(taskCode, eq(taskCode.taskCodeId, description.taskCodeId))
       .innerJoin(taskGroup, eq(taskGroup.taskGroupId, taskCode.taskGroupId))
       .groupBy(taskGroup.projectId),
 
     database
       .select({
         projectId: taskGroup.projectId,
-        value: count(sql`count(distinct ${componentCode.componentCodeId})`),
+        value: count(sql`count(distinct ${partCode.partCodeId})`),
       })
-      .from(componentCode)
+      .from(partCode)
       .innerJoin(
-        mainComponentType,
-        eq(mainComponentType.mainComponentTypeId, componentCode.mainComponentTypeId),
+        type,
+        eq(type.typeId, partCode.typeId),
       )
-      .innerJoin(mainComponent, eq(mainComponent.mainComponentId, mainComponentType.mainComponentId))
-      .innerJoin(taskCode, eq(taskCode.taskCodeId, mainComponent.taskCodeId))
+      .innerJoin(description, eq(description.descriptionId, type.descriptionId))
+      .innerJoin(taskCode, eq(taskCode.taskCodeId, description.taskCodeId))
       .innerJoin(taskGroup, eq(taskGroup.taskGroupId, taskCode.taskGroupId))
       .groupBy(taskGroup.projectId),
 
@@ -130,7 +130,7 @@ export const listProjectDashboardRows = async (
       .select({
         projectId: result.projectId,
         value: count(
-          sql`count(distinct (coalesce(${result.mainComponentId}, -1), coalesce(${result.componentCodeId}, -1)))`,
+          sql`count(distinct (coalesce(${result.descriptionId}, -1), coalesce(${result.partCodeId}, -1)))`,
         ),
       })
       .from(result)

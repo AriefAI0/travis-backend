@@ -24,7 +24,7 @@ const seedDomain = async () => {
   await testDb.insert(schema.taskGroup).values({
     taskGroupId: PROJECT_ID,
     projectId: PROJECT_ID,
-    groupCode: "100",
+    code: "100",
     label: "Rows",
   });
   await testDb.insert(schema.taskCode).values({
@@ -33,17 +33,17 @@ const seedDomain = async () => {
     code: "101",
     label: "Row A",
   });
-  await testDb.insert(schema.mainComponent).values({
-    mainComponentId: PROJECT_ID,
+  await testDb.insert(schema.description).values({
+    descriptionId: PROJECT_ID,
     taskCodeId: PROJECT_ID,
-    description: "I",
+    label: "I",
   });
   // session_item is gone: v2 results carry their own target
   await testDb.insert(schema.result).values({
     displayNumber: PROJECT_ID,
     resultId: PROJECT_ID,
     inspectionTypeCode: "GVI",
-        mainComponentId: PROJECT_ID,
+        descriptionId: PROJECT_ID,
         layer: 1,
         masterStartMs: 0,
     projectId: PROJECT_ID,
@@ -75,8 +75,8 @@ describe("direct ingest routes", () => {
   // Still queueing is recorded, never run: the worker owns MinIO and FFmpeg.
   const dispatched: Array<{ kind: "master" | "clip"; id: number }> = [];
   const dispatch = {
-    master: (masterVideoId: number) => {
-      dispatched.push({ kind: "master", id: masterVideoId });
+    master: (sessionId: number) => {
+      dispatched.push({ kind: "master", id: sessionId });
     },
     clip: (clipId: number) => {
       dispatched.push({ kind: "clip", id: clipId });
@@ -173,8 +173,8 @@ describe("direct ingest routes", () => {
     expect(first.body).toMatchObject({ replayed: false, sequence: 0, contiguousSequence: 0 });
     expect(puts).toHaveLength(1);
     // one advancing commit queues that master's stills, once
-    const domain = admission.body.domain as { masterVideoId: number };
-    expect(dispatched).toEqual([{ kind: "master", id: domain.masterVideoId }]);
+    const domain = admission.body.domain as { sessionId: number };
+    expect(dispatched).toEqual([{ kind: "master", id: domain.sessionId }]);
 
     const replay = await read(await postSegment(ingestId, ticket, body));
     expect(replay.status).toBe(200);
@@ -281,7 +281,7 @@ describe("direct ingest routes", () => {
       contiguousSequence: 1,
       finalSequence: 1,
       segmentCount: 2,
-      domain: { kind: "master", masterVideoId: expect.any(Number) },
+      domain: { kind: "master", sessionId: expect.any(Number) },
     });
   });
 

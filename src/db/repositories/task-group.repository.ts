@@ -27,11 +27,11 @@ export const findTaskGroupById = async (taskGroupId: number, database: DbOrTx = 
 
 export const findTaskGroupByProjectIdAndCode = async (
   projectId: number,
-  groupCode: string,
+  code: string,
   database: DbOrTx = db,
 ) =>
   (await database.query.taskGroup.findFirst({
-    where: and(eq(taskGroup.projectId, projectId), eq(taskGroup.groupCode, groupCode)),
+    where: and(eq(taskGroup.projectId, projectId), eq(taskGroup.code, code)),
   })) ?? null;
 
 export const updateTaskGroupById = async (

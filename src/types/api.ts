@@ -298,12 +298,11 @@ export type ResultMgiWithFindings = {
 };
 
 export type ProjectRecordingListItem = {
-  masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
   // per-project ordinal: the recording card's title when the name is null
-  sessionDisplayNumber: number | null;
-  startEpoch: number; // epoch seconds, as stored
+  sessionDisplayNumber: number;
+  startEpoch: number | null; // epoch seconds, as stored
   endEpoch: number | null;
   durationMs: number | null;
   // presigned card still from the timeline job; null until it has run
@@ -314,8 +313,8 @@ export type ProjectResultSummaryRow = {
   resultId: number;
   createdAt: string;
   inspectionTypeCode: InspectionTypeCode;
-  mainComponentId: number | null;
-  componentCodeId: number | null;
+  descriptionId: number | null;
+  partCodeId: number | null;
   remarks: string | null;
   resultValue: string;
 };
@@ -349,7 +348,7 @@ export type ResultEvidence = {
 ========================================================= */
 export type MasterVideoTimelineThumbnail = {
   thumbnailId: number;
-  masterVideoId: number;
+  sessionId: number;
   timestampMs: number;
   storageStem: string;
   width: number;
@@ -378,21 +377,12 @@ export type MasterVideoPlaybackEvent = {
   thumbnailUrl: string | null;
 };
 
-// session sibling of the opened master video (not a camera-angle source)
-export type MasterVideoSessionRecording = {
-  masterVideoId: number;
-  startEpoch: number;
-  endEpoch: number | null;
-  durationMs: number | null;
-};
-
 export type MasterVideoPlaybackData = {
-  masterVideoId: number;
   sessionId: number;
   sessionName: string | null;
   // per-project ordinal: the playback header's label when the name is null
   sessionDisplayNumber: number | null;
-  startEpoch: number;
+  startEpoch: number | null;
   endEpoch: number | null;
   // master row duration at close, else the open ingest's live duration
   durationMs: number | null;
@@ -401,7 +391,6 @@ export type MasterVideoPlaybackData = {
   // relative playback path carrying a scoped token; null until segment zero is
   // committed. Optional by design: the route mints it, the service never mints.
   hlsUrl?: string | null;
-  sessionRecordings: MasterVideoSessionRecording[];
   thumbnails: MasterVideoTimelineThumbnail[];
   events: MasterVideoPlaybackEvent[];
 };
@@ -486,29 +475,28 @@ export const updateItemSchema = z.object({
 
 /* =========================================================
    task tree — response nodes (Project > Task Group > Task Code
-   > Main Component > Type branch > Component Code)
+   > Description > Type > Part Code)
 ========================================================= */
-export type TaskStructureComponentCodeNode = {
-  componentCodeId: number;
+export type TaskStructurePartCodeNode = {
+  partCodeId: number;
   code: string;
   label: string | null;
   displayOrder: number;
 };
 
-export type TaskStructureTypeBranchNode = {
-  mainComponentTypeId: number;
-  componentTypeId: number;
-  typeCode: string;
+export type TaskStructureTypeNode = {
+  typeId: number;
+  code: string;
   label: string;
   displayOrder: number;
-  componentCodes: TaskStructureComponentCodeNode[];
+  partCodes: TaskStructurePartCodeNode[];
 };
 
-export type TaskStructureMainComponentNode = {
-  mainComponentId: number;
-  description: string;
+export type TaskStructureDescriptionNode = {
+  descriptionId: number;
+  label: string;
   displayOrder: number;
-  types: TaskStructureTypeBranchNode[];
+  types: TaskStructureTypeNode[];
 };
 
 export type TaskStructureTaskCodeNode = {
@@ -516,12 +504,12 @@ export type TaskStructureTaskCodeNode = {
   code: string;
   label: string;
   displayOrder: number;
-  mainComponents: TaskStructureMainComponentNode[];
+  descriptions: TaskStructureDescriptionNode[];
 };
 
 export type TaskStructureTaskGroupNode = {
   taskGroupId: number;
-  groupCode: string;
+  code: string;
   label: string;
   displayOrder: number;
   taskCodes: TaskStructureTaskCodeNode[];
@@ -530,12 +518,12 @@ export type TaskStructureTaskGroupNode = {
 /* task tree — request schemas */
 export const createTaskGroupSchema = z.object({
   projectId: id,
-  groupCode: z.string().min(1),
+  code: z.string().min(1),
   label: z.string().min(1),
   displayOrder: optionalOrder,
 });
 export const updateTaskGroupSchema = z.object({
-  groupCode: z.string().min(1).optional(),
+  code: z.string().min(1).optional(),
   label: z.string().min(1).optional(),
   displayOrder: optionalOrder,
 });
@@ -550,46 +538,39 @@ export const updateTaskCodeSchema = z.object({
   label: z.string().min(1).optional(),
   displayOrder: optionalOrder,
 });
-export const createMainComponentSchema = z.object({
+export const createDescriptionSchema = z.object({
   taskCodeId: id,
-  description: z.string().min(1),
+  label: z.string().min(1),
   displayOrder: optionalOrder,
 });
-export const updateMainComponentSchema = z.object({
-  description: z.string().min(1).optional(),
+export const updateDescriptionSchema = z.object({
+  label: z.string().min(1).optional(),
   displayOrder: optionalOrder,
 });
-// attach a type branch: catalog value is created on first use, reused after
-export const attachMainComponentTypeSchema = z.object({
-  mainComponentId: id,
-  typeCode: z.string().min(1),
+// create a type under a description; same code under it is refused
+export const createTypeSchema = z.object({
+  descriptionId: id,
+  code: z.string().min(1),
   label: z.string().min(1),
 });
-export const updateMainComponentTypeSchema = z.object({
-  componentTypeId: id.optional(),
+export const updateTypeSchema = z.object({
+  code: z.string().min(1).optional(),
+  label: z.string().min(1).optional(),
   displayOrder: optionalOrder,
 });
-export const createComponentCodeSchema = z.object({
-  mainComponentTypeId: id,
+export const createPartCodeSchema = z.object({
+  typeId: id,
   code: z.string().min(1),
   label: optionalText,
   displayOrder: optionalOrder,
 });
-export const updateComponentCodeSchema = z.object({
+export const updatePartCodeSchema = z.object({
   code: z.string().min(1).optional(),
   label: optionalText,
   displayOrder: optionalOrder,
 });
-// project type catalog: autocomplete + rename in place (stable id)
-export const createComponentTypeSchema = z.object({
-  typeCode: z.string().min(1),
-  label: z.string().min(1),
-});
-export const updateComponentTypeSchema = z.object({
-  typeCode: z.string().min(1),
-  label: z.string().min(1),
-});
-export const componentTypeQuerySchema = z.object({ q: z.string().min(1).optional() });
+// project type vocabulary: distinct code+label pairs from the tree, for autocomplete
+export const typeCatalogQuerySchema = z.object({ q: z.string().min(1).optional() });
 
 /* inspection forms — save-on-confirm posts the custom fields only;
    builtins come from the server registry, never the request */
@@ -612,14 +593,14 @@ export const startInspectionSchema = z
     sessionId: id,
     layer: z.number().int().min(1).max(2),
     inspectionTypeCode: inspectionType,
-    mainComponentId: id.optional(),
-    componentCodeId: id.optional(),
+    descriptionId: id.optional(),
+    partCodeId: id.optional(),
     remarks: optionalText,
     masterStartMs: z.number().int().nonnegative(),
   })
   .refine(
-    (v) => (v.mainComponentId !== undefined) !== (v.componentCodeId !== undefined),
-    { message: "exactly one of mainComponentId or componentCodeId is required" },
+    (v) => (v.descriptionId !== undefined) !== (v.partCodeId !== undefined),
+    { message: "exactly one of descriptionId or partCodeId is required" },
   );
 export const stopInspectionSchema = z.object({
   remarks: optionalText,

@@ -34,7 +34,7 @@ const admissionSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("clip"),
     resultId: z.number().int().positive(),
-    masterVideoId: z.number().int().positive(),
+    sessionId: z.number().int().positive(),
     startOffsetMs: z.number().int().min(0),
   }),
 ]);
@@ -111,8 +111,8 @@ export const ingestRoutes = (
     // hold the segment response. Only a commit that advanced the prefix can
     // have made a new grid point due.
     if (!outcome.replayed && outcome.sequence === outcome.contiguousSequence) {
-      if (outcome.kind === "master" && outcome.masterVideoId !== null) {
-        dispatch.master(outcome.masterVideoId);
+      if (outcome.kind === "master" && outcome.sessionId !== null) {
+        dispatch.master(outcome.sessionId);
       }
 
       if (outcome.kind === "clip" && outcome.clipId !== null) {

@@ -1,7 +1,7 @@
 import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, timestamp, uuid, date, primaryKey, index, unique, uniqueIndex, check, jsonb,} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-/* =================== CHANGABLE ENUMRATIONS =================== */
+/* =================== ENUMERATIONS =================== */
 
 export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
 
@@ -22,7 +22,7 @@ export const gviCondition = pgEnum("gvi_condition", ["ok", "not_ok"]);
 export const cviMemberType = pgEnum("cvi_member_type", ["chord", "brace"]);
 
 /* =========================================================
-   TIMESTAMPS (JS Date both sides; JSON gives ISO strings)
+   TIMESTAMPS
 ========================================================= */
 const createdAt = {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
@@ -41,7 +41,7 @@ const archivedAt = {
 };
 
 /* =========================================================
-   ORGANIZATION (tenancy prep — seeded at boot, NOT NULL later)
+   ORGANIZATION
 ========================================================= */
 export const organization = pgTable("organization", {
   organizationId: integer("organization_id").primaryKey().generatedByDefaultAsIdentity(),
@@ -65,8 +65,7 @@ export const project = pgTable(
     // nullable until better-auth lands, then NOT NULL
     organizationId: integer("organization_id").references(() => organization.organizationId),
 
-    // per-org ordinal, assigned max+1 at creation; the number a user reads and
-    // the number every media key for this project carries
+    // per-org ordinal; also keys every media object for this project
     displayNumber: integer("display_number").notNull(),
 
     ...createdAt,
@@ -75,8 +74,6 @@ export const project = pgTable(
   },
   (table) => ({
     idxProjectTitle: index("idx_project_title").on(table.title),
-    // split by org: unique indexes treat NULLs as distinct, so the org-null
-    // rows (every project until better-auth lands) need their own guard
     uqProjectDisplayOrg: uniqueIndex("uq_project_display_org")
       .on(table.organizationId, table.displayNumber)
       .where(sql`${table.organizationId} IS NOT NULL`),
@@ -87,7 +84,8 @@ export const project = pgTable(
 );
 
 /* =========================================================
-   SESSION (WORK RUN)
+   SESSION (each session IS the master recording)
+   start_epoch / end_epoch / duration_ms replace master_video.
 ========================================================= */
 export const session = pgTable(
   "session",
@@ -103,6 +101,12 @@ export const session = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
     endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }),
 
+    // master recording anchors (epoch SECONDS; bigint clears 2038)
+    startEpoch: bigint("start_epoch", { mode: "number" }),
+    endEpoch: bigint("end_epoch", { mode: "number" }),
+    durationMs: integer("duration_ms"),
+    recordingUpdatedAt: timestamp("recording_updated_at", { withTimezone: true, mode: "date" }),
+
     ...createdAt,
     ...updatedAt,
     ...archivedAt,
@@ -117,8 +121,8 @@ export const session = pgTable(
 );
 
 /* =========================================================
-   TASK TREE (inspection structure)
-   Task Group > Task Code > Main Component > Type > Component Code
+   TASK TREE
+   task_group → task_code → description → type → part_code
 ========================================================= */
 export const taskGroup = pgTable(
   "task_group",
@@ -129,7 +133,7 @@ export const taskGroup = pgTable(
       .notNull()
       .references(() => project.projectId, { onDelete: "cascade" }),
 
-    groupCode: text("group_code").notNull(),
+    code: text("code").notNull(),
     label: text("label").notNull(),
     displayOrder: integer("display_order").notNull().default(0),
 
@@ -141,7 +145,7 @@ export const taskGroup = pgTable(
     idxTaskGroupProjectId: index("idx_task_group_project_id").on(table.projectId),
     uqTaskGroupProjectCode: uniqueIndex("uq_task_group_project_code").on(
       table.projectId,
-      table.groupCode
+      table.code
     ),
   })
 );
@@ -169,77 +173,17 @@ export const taskCode = pgTable(
   })
 );
 
-export const mainComponent = pgTable(
-  "main_component",
+/* the UI "Description" field — the named structural component */
+export const description = pgTable(
+  "description",
   {
-    mainComponentId: integer("main_component_id").primaryKey().generatedByDefaultAsIdentity(),
+    descriptionId: integer("description_id").primaryKey().generatedByDefaultAsIdentity(),
 
     taskCodeId: integer("task_code_id")
       .notNull()
       .references(() => taskCode.taskCodeId, { onDelete: "cascade" }),
 
-    // the "Description" field in the UI names the main component
-    description: text("description").notNull(),
-    displayOrder: integer("display_order").notNull().default(0),
-
-    ...createdAt,
-    ...updatedAt,
-    ...archivedAt,
-  },
-  (table) => ({
-    idxMainComponentTaskCodeId: index("idx_main_component_task_code_id").on(table.taskCodeId),
-    uqMainComponentTaskCodeDescription: uniqueIndex(
-      "uq_main_component_task_code_description"
-    ).on(table.taskCodeId, table.description),
-  })
-);
-
-/* project-scoped reusable type catalog (VDM, VHM, Valve, ...);
-   rename keeps the id so branches and results follow */
-export const componentType = pgTable(
-  "component_type",
-  {
-    componentTypeId: integer("component_type_id").primaryKey().generatedByDefaultAsIdentity(),
-
-    projectId: integer("project_id")
-      .notNull()
-      .references(() => project.projectId, { onDelete: "cascade" }),
-
-    typeCode: text("type_code").notNull(),
     label: text("label").notNull(),
-
-    ...createdAt,
-    ...updatedAt,
-    ...archivedAt,
-  },
-  (table) => ({
-    idxComponentTypeProjectId: index("idx_component_type_project_id").on(table.projectId),
-    uqComponentTypeProjectCode: uniqueIndex("uq_component_type_project_code").on(
-      table.projectId,
-      table.typeCode
-    ),
-  })
-);
-
-/* one type branch per main component; same type cannot repeat under one main component */
-export const mainComponentType = pgTable(
-  "main_component_type",
-  {
-    mainComponentTypeId: integer("main_component_type_id")
-      .primaryKey()
-      .generatedByDefaultAsIdentity(),
-
-    mainComponentId: integer("main_component_id")
-      .notNull()
-      .references(() => mainComponent.mainComponentId, { onDelete: "cascade" }),
-
-    // cascade: deleting a catalog value removes its branches (and their codes).
-    // The "in use" refusal is a service-level 409, not a database block, so
-    // deleting a project never deadlocks on cascade ordering.
-    componentTypeId: integer("component_type_id")
-      .notNull()
-      .references(() => componentType.componentTypeId, { onDelete: "cascade" }),
-
     displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
@@ -247,27 +191,49 @@ export const mainComponentType = pgTable(
     ...archivedAt,
   },
   (table) => ({
-    idxMainComponentTypeMainComponentId: index("idx_main_component_type_main_component_id").on(
-      table.mainComponentId
-    ),
-    idxMainComponentTypeComponentTypeId: index(
-      "idx_main_component_type_component_type_id"
-    ).on(table.componentTypeId),
-    uqMainComponentTypePair: uniqueIndex("uq_main_component_type_pair").on(
-      table.mainComponentId,
-      table.componentTypeId
+    idxDescriptionTaskCodeId: index("idx_description_task_code_id").on(table.taskCodeId),
+    uqDescriptionTaskCodeLabel: uniqueIndex("uq_description_task_code_label").on(
+      table.taskCodeId,
+      table.label
     ),
   })
 );
 
-export const componentCode = pgTable(
-  "component_code",
+/* component type — owned by one description, not a shared catalog */
+export const type = pgTable(
+  "type",
   {
-    componentCodeId: integer("component_code_id").primaryKey().generatedByDefaultAsIdentity(),
+    typeId: integer("type_id").primaryKey().generatedByDefaultAsIdentity(),
 
-    mainComponentTypeId: integer("main_component_type_id")
+    descriptionId: integer("description_id")
       .notNull()
-      .references(() => mainComponentType.mainComponentTypeId, { onDelete: "cascade" }),
+      .references(() => description.descriptionId, { onDelete: "cascade" }),
+
+    code: text("code").notNull(),
+    label: text("label").notNull(),
+    displayOrder: integer("display_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+    ...archivedAt,
+  },
+  (table) => ({
+    idxTypeDescriptionId: index("idx_type_description_id").on(table.descriptionId),
+    uqTypeDescriptionCode: uniqueIndex("uq_type_description_code").on(
+      table.descriptionId,
+      table.code
+    ),
+  })
+);
+
+export const partCode = pgTable(
+  "part_code",
+  {
+    partCodeId: integer("part_code_id").primaryKey().generatedByDefaultAsIdentity(),
+
+    typeId: integer("type_id")
+      .notNull()
+      .references(() => type.typeId, { onDelete: "cascade" }),
 
     code: text("code").notNull(),
     label: text("label"),
@@ -278,13 +244,8 @@ export const componentCode = pgTable(
     ...archivedAt,
   },
   (table) => ({
-    idxComponentCodeMainComponentTypeId: index(
-      "idx_component_code_main_component_type_id"
-    ).on(table.mainComponentTypeId),
-    uqComponentCodeBranchCode: uniqueIndex("uq_component_code_branch_code").on(
-      table.mainComponentTypeId,
-      table.code
-    ),
+    idxPartCodeTypeId: index("idx_part_code_type_id").on(table.typeId),
+    uqPartCodeTypeCode: uniqueIndex("uq_part_code_type_code").on(table.typeId, table.code),
   })
 );
 
@@ -326,7 +287,7 @@ export const inspectionFormField = pgTable(
       .references(() => inspectionForm.inspectionFormId, { onDelete: "cascade" }),
 
     label: text("label").notNull(),
-    // integer | decimal | text | boolean (check below)
+    // integer | decimal | text | boolean
     dataType: text("data_type").notNull(),
     required: boolean("required").notNull().default(false),
     isBuiltin: boolean("is_builtin").notNull().default(false),
@@ -363,21 +324,19 @@ export const result = pgTable(
     projectId: integer("project_id").notNull(),
     sessionId: integer("session_id").notNull(),
 
-    // v2 target: main component XOR component code (check below).
-    // cascade: removing a target removes its results.
-    mainComponentId: integer("main_component_id").references(() => mainComponent.mainComponentId, {
+    // target: description XOR part_code (check below)
+    descriptionId: integer("description_id").references(() => description.descriptionId, {
       onDelete: "cascade",
     }),
-    componentCodeId: integer("component_code_id").references(
-      () => componentCode.componentCodeId,
-      { onDelete: "cascade" }
-    ),
+    partCodeId: integer("part_code_id").references(() => partCode.partCodeId, {
+      onDelete: "cascade",
+    }),
 
-    // master-video timeline anchors for playback layer markers
+    // master timeline anchors for playback layer markers
     masterStartMs: bigint("master_start_ms", { mode: "number" }),
     masterEndMs: bigint("master_end_ms", { mode: "number" }),
 
-    // runtime stack layer 1-2 (check below); null on legacy rows
+    // runtime stack layer 1-2; null on legacy rows
     layer: integer("layer"),
 
     // custom form values keyed by inspection_form_field id
@@ -401,24 +360,20 @@ export const result = pgTable(
   (table) => ({
     idxResultProjectId: index("idx_result_project_id").on(table.projectId),
     idxResultSessionId: index("idx_result_session_id").on(table.sessionId),
-    idxResultMainComponentId: index("idx_result_main_component_id").on(table.mainComponentId),
-    idxResultComponentCodeId: index("idx_result_component_code_id").on(table.componentCodeId),
-    // active-layer lookups: one open inspection per session per layer
+    idxResultDescriptionId: index("idx_result_description_id").on(table.descriptionId),
+    idxResultPartCodeId: index("idx_result_part_code_id").on(table.partCodeId),
     idxResultSessionLayer: index("idx_result_session_layer").on(table.sessionId, table.layer),
-    // v2 target: exactly one target
+    idxResultInspectionTypeCode: index("idx_result_inspection_type_code").on(
+      table.inspectionTypeCode
+    ),
     resultTargetCheck: check(
       "result_target_check",
-      sql`num_nonnulls(${table.mainComponentId}, ${table.componentCodeId}) = 1`,
+      sql`num_nonnulls(${table.descriptionId}, ${table.partCodeId}) = 1`,
     ),
     resultLayerCheck: check(
       "result_layer_check",
       sql`${table.layer} IS NULL OR ${table.layer} BETWEEN 1 AND 2`,
     ),
-    idxResultInspectionTypeCode: index("idx_result_inspection_type_code").on(
-      table.inspectionTypeCode
-    ),
-    // per-session ordinal, assigned max+1 at creation. A clip is 1:1 with a
-    // result, so one number names both the clip and the results folder.
     uqResultSessionDisplay: uniqueIndex("uq_result_session_display").on(
       table.sessionId,
       table.displayNumber
@@ -427,12 +382,10 @@ export const result = pgTable(
 );
 
 /* =========================================================
-   TYPED DETAIL TABLES (CTI - Class Table Inheritance)
-   ========================================================= */
+   TYPED DETAIL TABLES (Class Table Inheritance)
+========================================================= */
 
-/* ---------------------------------------------------------
-   MGI — Marine Growth Inspection
---------------------------------------------------------- */
+/* MGI — Marine Growth Inspection */
 export const resultMgi = pgTable(
   "result_mgi",
   {
@@ -440,10 +393,7 @@ export const resultMgi = pgTable(
       .primaryKey()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
-    // plain 0/1 int end-to-end — boolean would break the DTO contract
-    noMgObserved: integer("no_mg_observed")
-      .notNull()
-      .default(0),
+    noMgObserved: integer("no_mg_observed").notNull().default(0),
     criteriaPreset: mgiCriteriaPreset("criteria_preset"),
 
     ...createdAt,
@@ -482,14 +432,12 @@ export const resultMgiFinding = pgTable(
   })
 );
 
-/* ---------------------------------------------------------
-   CP — Cathodic Protection
---------------------------------------------------------- */
+/* CP — Cathodic Protection */
 export const resultCp = pgTable("result_cp", {
   resultId: integer("result_id")
     .primaryKey()
     .references(() => result.resultId, { onDelete: "cascade" }),
-  anodeType: text("anodeType"), // camelCase column name kept verbatim
+  anodeType: text("anodeType"),
   voltageMv: integer("voltage_mv"),
   depletion: text("depletion"),
   anodeWidth: integer("anodeWidth"),
@@ -502,9 +450,7 @@ export const resultCp = pgTable("result_cp", {
   ...updatedAt,
 });
 
-/* ---------------------------------------------------------
-   FMD — Flooded Member Detection
---------------------------------------------------------- */
+/* FMD — Flooded Member Detection */
 export const resultFmd = pgTable(
   "result_fmd",
   {
@@ -522,9 +468,7 @@ export const resultFmd = pgTable(
   }
 );
 
-/* ---------------------------------------------------------
-   SCOUR — Scour Inspection
---------------------------------------------------------- */
+/* SCOUR */
 export const resultScour = pgTable(
   "result_scour",
   {
@@ -542,9 +486,7 @@ export const resultScour = pgTable(
   }
 );
 
-/* ---------------------------------------------------------
-   GVI — General Visual Inspection
---------------------------------------------------------- */
+/* GVI — General Visual Inspection */
 export const resultGvi = pgTable(
   "result_gvi",
   {
@@ -560,9 +502,7 @@ export const resultGvi = pgTable(
   }
 );
 
-/* ---------------------------------------------------------
-   CVI — Close Visual Inspection
---------------------------------------------------------- */
+/* CVI — Close Visual Inspection */
 export const resultCvi = pgTable(
   "result_cvi",
   {
@@ -601,40 +541,17 @@ export const resultCviPosition = pgTable(
 );
 
 /* =========================================================
-   MASTER VIDEO (SESSION RECORDING)
-========================================================= */
-export const masterVideo = pgTable(
-  "master_video",
-  {
-    masterVideoId: integer("master_video_id").primaryKey().generatedByDefaultAsIdentity(),
-
-    sessionId: integer("session_id")
-      .notNull()
-      .references(() => session.sessionId, { onDelete: "cascade" }),
-
-    startEpoch: bigint("start_epoch", { mode: "number" }).notNull(), // epoch SECONDS; bigint clears 2038
-    endEpoch: bigint("end_epoch", { mode: "number" }),
-    durationMs: integer("duration_ms"),
-    lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true, mode: "date" })
-      .notNull()
-      .defaultNow(),
-  },
-  (table) => ({
-    idxMasterVideoSessionId: index("idx_master_video_session_id").on(table.sessionId),
-  })
-);
-
-/* =========================================================
-   TIMELINE THUMBNAIL
+   TIMELINE THUMBNAIL (filmstrip for the session master)
 ========================================================= */
 export const timelineThumbnail = pgTable(
   "timeline_thumbnail",
   {
     thumbnailId: integer("thumbnail_id").primaryKey().generatedByDefaultAsIdentity(),
 
-    masterVideoId: integer("master_video_id")
+    // points at session now that master_video is merged in
+    sessionId: integer("session_id")
       .notNull()
-      .references(() => masterVideo.masterVideoId, { onDelete: "cascade" }),
+      .references(() => session.sessionId, { onDelete: "cascade" }),
 
     timestampMs: integer("timestamp_ms").notNull(),
     storageStem: text("storage_stem").notNull(),
@@ -645,16 +562,15 @@ export const timelineThumbnail = pgTable(
     ...createdAt,
   },
   (table) => ({
-    // composite: filmstrip reads walk one master in time order
-    idxTimelineThumbnailMasterVideoTs: index("idx_timeline_thumbnail_master_video_ts").on(
-      table.masterVideoId,
+    idxTimelineThumbnailSessionTs: index("idx_timeline_thumbnail_session_ts").on(
+      table.sessionId,
       table.timestampMs,
     ),
   })
 );
 
 /* =========================================================
-   VIDEO CLIP (RESULT-BASED EVIDENCE)
+   VIDEO CLIP (one per result / inspection instance)
 ========================================================= */
 export const videoClip = pgTable(
   "video_clip",
@@ -665,23 +581,21 @@ export const videoClip = pgTable(
       .notNull()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
-    // intentionally NO cascade — clips survive master deletion
-    masterVideoId: integer("master_video_id")
+    // clips survive independent of the session master row
+    sessionId: integer("session_id")
       .notNull()
-      .references(() => masterVideo.masterVideoId),
+      .references(() => session.sessionId),
 
     startOffsetMs: integer("start_offset_ms").notNull(),
     endOffsetMs: integer("end_offset_ms"),
-    // Object key of the clip's own card still; null until the still job runs.
     thumbnailKey: text("thumbnail_key"),
     lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
   },
   (table) => ({
-    // one clip per inspection instance — the app enforced this in code only
     uqVideoClipResultId: uniqueIndex("uq_video_clip_result_id").on(table.resultId),
-    idxVideoClipMasterVideoId: index("idx_video_clip_master_video_id").on(table.masterVideoId),
+    idxVideoClipSessionId: index("idx_video_clip_session_id").on(table.sessionId),
   })
 );
 
@@ -697,14 +611,8 @@ export const resultImage = pgTable(
       .notNull()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
-    // required: the result row knows its stem at insert time (result stem
-    // derives from resultId, not from this row's own PK)
     storageStem: text("storage_stem").notNull(),
-
-    // upload format — leaf extension derives from this, never hardcoded
     contentType: text("content_type").notNull().default("image/png"),
-
-    // true once the annotated twin is written; reads skip a storage probe
     hasAnnotated: boolean("has_annotated").notNull().default(false),
     remarks: text("remarks"),
   },
@@ -713,43 +621,32 @@ export const resultImage = pgTable(
   })
 );
 
-
 /* =========================================================
    RECORDING INGEST (direct protocol)
-   Backend-owned identity: a numeric ingestId plus a hashed
-   bearer ticket. No client UUID, no nonce, no raw ticket.
+   One row per capture attempt (session master or inspection clip).
+   kind drives the XOR: master points at session, clip at video_clip.
 ========================================================= */
 export const recordingIngestKind = pgEnum("recording_ingest_kind", ["master", "clip"]);
 
-/* ---------------------------------------------------------
-   One row per capture attempt. The row carries the contiguous
-   pointer and the close facts, so segment commit and close can
-   serialize on it.
---------------------------------------------------------- */
 export const recordingIngest = pgTable(
   "recording_ingest",
   {
     ingestId: integer("ingest_id").primaryKey().generatedByDefaultAsIdentity(),
     kind: recordingIngestKind("kind").notNull(),
-    // exactly one target per kind (check below); cascade: the ingest is
-    // transport metadata and dies with the domain row it feeds
-    masterVideoId: integer("master_video_id").references(() => masterVideo.masterVideoId, {
+
+    // exactly one target (check below); cascade so ingest dies with its domain row
+    sessionId: integer("session_id").references(() => session.sessionId, {
       onDelete: "cascade",
     }),
     clipId: integer("clip_id").references(() => videoClip.clipId, { onDelete: "cascade" }),
-    // sha-256 hex of the bearer ticket; the raw ticket never reaches the database
+
     ticketHash: text("ticket_hash").notNull(),
-    // recording start UTC, frozen at admission: a midnight rollover never moves keys
     keyDate: date("key_date", { mode: "string" }).notNull(),
-    // readable key directory, frozen at admission; every leaf hangs off it
     keyPrefix: text("key_prefix").notNull(),
     openedAt: timestamp("opened_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
-    // null until the first committed segment; the sweep falls back to openedAt
     lastSegmentAt: timestamp("last_segment_at", { withTimezone: true, mode: "date" }),
     closedAt: timestamp("closed_at", { withTimezone: true, mode: "date" }),
-    // last sequence of the contiguous prefix, -1 while the prefix is empty
     contiguousSequence: integer("contiguous_sequence").notNull().default(-1),
-    // frozen at close; playable range never passes it
     finalSequence: integer("final_sequence"),
     durationMs: integer("duration_ms"),
 
@@ -759,21 +656,24 @@ export const recordingIngest = pgTable(
   (table) => ({
     recordingIngestKindTargetCheck: check(
       "recording_ingest_kind_target_check",
-      sql`(${table.kind} = 'master' AND ${table.masterVideoId} IS NOT NULL AND ${table.clipId} IS NULL)
-       OR (${table.kind} = 'clip' AND ${table.clipId} IS NOT NULL AND ${table.masterVideoId} IS NULL)`,
+      sql`(${table.kind} = 'master' AND ${table.sessionId} IS NOT NULL AND ${table.clipId} IS NULL)
+       OR (${table.kind} = 'clip' AND ${table.clipId} IS NOT NULL AND ${table.sessionId} IS NULL)`,
     ),
-    // one open ingest per clip: admission of a second is a 409, enforced here
+    // one open ingest per clip
     uqRecordingIngestOpenClip: uniqueIndex("uq_recording_ingest_open_clip")
       .on(table.clipId)
       .where(sql`${table.closedAt} IS NULL AND ${table.kind} = 'clip'`),
+    // one open ingest per session master
+    uqRecordingIngestOpenSession: uniqueIndex("uq_recording_ingest_open_session")
+      .on(table.sessionId)
+      .where(sql`${table.closedAt} IS NULL AND ${table.kind} = 'master'`),
     idxRecordingIngestOpen: index("idx_recording_ingest_open").on(table.closedAt),
   })
 );
 
-/* ---------------------------------------------------------
-   One stored TS object per row. Composite PK (ingest, sequence)
-   makes a replay hit the same row instead of a duplicate.
---------------------------------------------------------- */
+/* =========================================================
+   RECORDING INGEST SEGMENT
+========================================================= */
 export const recordingIngestSegment = pgTable(
   "recording_ingest_segment",
   {
@@ -783,7 +683,6 @@ export const recordingIngestSegment = pgTable(
     sequence: integer("sequence").notNull(),
     checksumSha256: text("checksum_sha256").notNull(),
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
-    // measured on the client, never derived from the 2 s splitmuxsink target
     durationMs: integer("duration_ms").notNull(),
     discontinuity: boolean("discontinuity").notNull().default(false),
     objectKey: text("object_key").notNull(),

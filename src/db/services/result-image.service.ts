@@ -14,7 +14,6 @@ import {
 } from "../repositories/result-image.repository";
 import { findProjectById } from "../repositories/project.repository";
 import { findSessionById } from "../repositories/session.repository";
-import { listMasterVideoRecordsBySessionId } from "../repositories/master-video.repository";
 import { listVideoClipRecordsByResultId } from "../repositories/video-clip.repository";
 import { getResultById, touchResult } from "./result.service";
 import { resolveTargetLabel } from "./task-structure.service";
@@ -43,7 +42,7 @@ const requireImage = async (imageId: number, database?: DbOrTx) => {
   return imageRow;
 };
 
-// flow: result row > project + session + master + item > evidence stem. The
+// flow: result row > project + session + target > evidence stem. The
 // date is the master's start, or the session's creation for a session with no
 // master (a photo-only inspection). The stem freezes on the image row, so a
 // later rename cannot split one result's images across two directories.
@@ -51,8 +50,8 @@ const resolveImageStem = async (
   resultRow: {
     projectId: number;
     sessionId: number;
-    mainComponentId: number | null;
-    componentCodeId: number | null;
+    descriptionId: number | null;
+    partCodeId: number | null;
     resultId: number;
     displayNumber: number;
     inspectionTypeCode: string;
@@ -69,21 +68,17 @@ const resolveImageStem = async (
     throw new AppError(404, "not_found", `session ${resultRow.sessionId} not found`);
   }
 
-  // the v2 target label names the evidence folder, exactly like the item did
+  // the target label names the evidence folder, exactly like the item did
   const targetLabel = await resolveTargetLabel(resultRow, database);
 
-  // A session holds one master in practice. The repo pins the pick by
-  // (startEpoch, masterVideoId) when it somehow holds more.
-  const [master] = await listMasterVideoRecordsBySessionId(resultRow.sessionId, database);
   const [clip] = await listVideoClipRecordsByResultId(resultRow.resultId, database);
 
   return resultEvidenceStem({
     projectNumber: project.displayNumber,
     projectTitle: project.title,
     displayNumber: session.displayNumber ?? session.sessionId,
-    startEpoch: master
-      ? master.startEpoch
-      : Math.floor(session.createdAt.getTime() / 1000),
+    // the session carries the master anchors; fall back to its creation
+    startEpoch: session.startEpoch ?? Math.floor(session.createdAt.getTime() / 1000),
     resultNumber: resultRow.displayNumber,
     itemLabel: targetLabel,
     clip: clip

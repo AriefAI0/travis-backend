@@ -3,12 +3,12 @@ import type { DbOrTx } from "../../db/client";
 import { getResultById } from "../../db/services/result.service";
 import { listSessionsByProjectId } from "../../db/services/session.service";
 import {
-  getMasterVideoById,
-  getMasterVideoPlaybackData,
+  getSessionPlaybackData,
   listActiveVideoClips,
-  listUnfinishedMasterVideos,
+  listUnfinishedSessions,
   listVideoClipPlaybackByResultIds,
 } from "../../db/services/video.service";
+import { findSessionById } from "../../db/repositories/session.repository";
 import { mintMasterPlaybackUrl } from "../../db/services/recording-playback.service";
 import { notFound } from "../../lib/error";
 import { parseBody, parseId, parseQuery } from "../../lib/parse";
@@ -28,7 +28,7 @@ export const recordingRoutes = (database?: DbOrTx) => {
   // recovery sweep: optional project filter (engine reads all by default)
   routes.get("/api/v1/recordings/unfinished", async (c) => {
     const query = parseQuery(c, unfinishedRecordingsQuerySchema);
-    const rows = await listUnfinishedMasterVideos(database);
+    const rows = await listUnfinishedSessions(database);
     if (query.projectId === undefined) return ok(c, rows);
 
     const sessionIds = new Set(
@@ -37,17 +37,18 @@ export const recordingRoutes = (database?: DbOrTx) => {
     return ok(c, rows.filter((row) => sessionIds.has(row.sessionId)));
   });
 
+  // the id is the sessionId: the session IS the master recording
   routes.get("/api/v1/recordings/:id", async (c) => {
-    const video = await getMasterVideoById(parseId(c, "id"), database);
-    if (!video) throw notFound("Master video");
-    return ok(c, video);
+    const session = await findSessionById(parseId(c, "id"), database);
+    if (!session) throw notFound("Session recording");
+    return ok(c, session);
   });
 
   // playback bundle; the master plays as soon as segment zero is committed
   routes.get("/api/v1/recordings/:id/playback", async (c) => {
     const id = parseId(c, "id");
     const query = parseQuery(c, playbackQuerySchema);
-    const playback = await getMasterVideoPlaybackData(query.projectId, id, database);
+    const playback = await getSessionPlaybackData(query.projectId, id, database);
     if (!playback) throw notFound("Master video playback");
     return ok(c, {
       ...playback,

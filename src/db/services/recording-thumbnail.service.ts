@@ -3,15 +3,15 @@
 
 import type { DbOrTx } from "../client";
 import { db } from "../client";
-import { findMasterVideoById } from "../repositories/master-video.repository";
+import { findSessionById } from "../repositories/session.repository";
 import {
   listIngestSegmentRecords,
   findPlayableIngestRecord,
 } from "../repositories/recording-ingest.repository";
 import {
-  createMasterVideoTimelineThumbnailRecords,
-  listMasterVideoIdsWithThumbnailWork,
-  listTimelineThumbnailTimestampsByMasterVideoId,
+  createTimelineThumbnailRecords,
+  listSessionIdsWithThumbnailWork,
+  listTimelineThumbnailTimestampsBySessionId,
 } from "../repositories/timeline-thumbnail.repository";
 import {
   listClipIdsWithThumbnailWork,
@@ -31,7 +31,7 @@ export type ThumbnailSegment = {
 export type TimelineThumbnailInsert = typeof timelineThumbnail.$inferInsert;
 
 export type ThumbnailSource = {
-  masterVideoId: number;
+  sessionId: number;
   // Frozen at admission: a rename never moves a still to a second directory.
   keyPrefix: string;
   durationMs: number;
@@ -63,40 +63,40 @@ const contiguousRows = <Row extends { sequence: number }>(rows: Row[]): Row[] =>
   return prefix;
 };
 
-// Masters whose grid may be short: still recording, or never thumbnailed.
-// The job decides what is due, so a covered master reports nothing.
+// Sessions whose grid may be short: still recording, or never thumbnailed.
+// The job decides what is due, so a covered session reports nothing.
 export const listMastersNeedingThumbnails = (database?: DbOrTx): Promise<number[]> =>
-  listMasterVideoIdsWithThumbnailWork(database ?? db);
+  listSessionIdsWithThumbnailWork(database ?? db);
 
 // Clips holding segments with no still yet.
 export const listClipsNeedingThumbnails = (database?: DbOrTx): Promise<number[]> =>
   listClipIdsWithThumbnailWork(database ?? db);
 
-// flow: master > playable ingest > frozen key prefix > sealed segments
+// flow: session > playable ingest > frozen key prefix > sealed segments
 export const loadThumbnailSource = async (
-  masterVideoId: number,
+  sessionId: number,
   database?: DbOrTx,
 ): Promise<ThumbnailSource | null> => {
   const handle = database ?? db;
 
-  const master = await findMasterVideoById(masterVideoId, handle);
-  if (!master) return null;
+  const session = await findSessionById(sessionId, handle);
+  if (!session) return null;
 
   // The ingest holds the key prefix and the segments this master owns.
-  const ingest = await findPlayableIngestRecord({ kind: "master", id: masterVideoId }, handle);
+  const ingest = await findPlayableIngestRecord({ kind: "master", id: sessionId }, handle);
   if (!ingest) return null;
 
   const rows = contiguousRows(await listIngestSegmentRecords(ingest.ingestId, null, handle));
   if (rows.length === 0) return null;
 
   return {
-    masterVideoId,
+    sessionId,
     // read, never re-derived: the live project title may have changed since
     keyPrefix: ingest.keyPrefix,
     durationMs: rows.reduce((total, row) => total + row.durationMs, 0),
     closed: ingest.closedAt !== null,
-    existingTimestamps: await listTimelineThumbnailTimestampsByMasterVideoId(
-      masterVideoId,
+    existingTimestamps: await listTimelineThumbnailTimestampsBySessionId(
+      sessionId,
       handle,
     ),
     segments: rows.map((row) => ({
@@ -135,7 +135,7 @@ export const recordTimelineThumbnails = async (
   database?: DbOrTx,
 ): Promise<number> => {
   if (rows.length === 0) return 0;
-  const created = await createMasterVideoTimelineThumbnailRecords(rows, database ?? db);
+  const created = await createTimelineThumbnailRecords(rows, database ?? db);
   return created.length;
 };
 

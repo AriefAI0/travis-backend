@@ -37,7 +37,7 @@ const POSTER_AT_MS = 1_000;
 // Seams the tests replace: where the source comes from, process execution,
 // storage reads and writes, and where the rows land.
 export type ThumbnailDeps = {
-  loadSource: (masterVideoId: number) => Promise<ThumbnailSource | null>;
+  loadSource: (sessionId: number) => Promise<ThumbnailSource | null>;
   loadClipSource: (clipId: number) => Promise<ClipStillSource | null>;
   runFfmpeg: (command: string, args: string[], timeoutMs: number) => Promise<void>;
   fetchSegment: (objectKey: string, destination: string) => Promise<void>;
@@ -116,7 +116,7 @@ export const resetThumbnailQueue = (): void => {
 };
 
 export type ThumbnailJobResult = {
-  masterVideoId: number;
+  sessionId: number;
   posterStored: boolean;
   stills: number;
   skipped: boolean;
@@ -188,12 +188,12 @@ const writeStill = async (
 
 // flow: source > due points > fetch those segments > stills > dated keys > rows
 export const runThumbnailJob = async (
-  masterVideoId: number,
+  sessionId: number,
   deps: ThumbnailDeps = defaultDeps,
 ): Promise<ThumbnailJobResult> => {
-  const source = await deps.loadSource(masterVideoId);
+  const source = await deps.loadSource(sessionId);
   if (!source) {
-    return { masterVideoId, posterStored: false, stills: 0, skipped: true };
+    return { sessionId, posterStored: false, stills: 0, skipped: true };
   }
 
   const due = dueSamples(
@@ -205,10 +205,10 @@ export const runThumbnailJob = async (
   const posterDue = source.closed;
 
   if (due.length === 0 && !posterDue) {
-    return { masterVideoId, posterStored: false, stills: 0, skipped: true };
+    return { sessionId, posterStored: false, stills: 0, skipped: true };
   }
 
-  const directory = await mkdtemp(path.join(tmpdir(), `travis-thumb-${masterVideoId}-`));
+  const directory = await mkdtemp(path.join(tmpdir(), `travis-thumb-${sessionId}-`));
   try {
     // Every run reads exactly the segments its due points land in: no pass over
     // the whole recording for a still nobody asked for.
@@ -281,7 +281,7 @@ export const runThumbnailJob = async (
     // Rows land last and together: a run that dies before this leaves none,
     // which is what makes the boot scan a complete retry signal.
     const rows = stored.map((still) => ({
-      masterVideoId,
+      sessionId,
       timestampMs: still.timestampMs,
       storageStem: filmstripLeafV2(source.keyPrefix, still.timestampMs).key,
       width: STILL_WIDTH,
@@ -290,8 +290,8 @@ export const runThumbnailJob = async (
     }));
     await deps.recordRows(rows);
 
-    log.info("master thumbnails stored", { masterVideoId, posterStored, stills: rows.length });
-    return { masterVideoId, posterStored, stills: rows.length, skipped: false };
+    log.info("master thumbnails stored", { sessionId, posterStored, stills: rows.length });
+    return { sessionId, posterStored, stills: rows.length, skipped: false };
   } finally {
     await rm(directory, { recursive: true, force: true }).catch(() => undefined);
   }
@@ -347,9 +347,9 @@ const runningCount = (): number => inFlight.size + clipInFlight.size;
 // whatever has arrived by the time it picks up. A master already running is
 // queued again, because the run in flight derived its due set before this
 // segment landed and would otherwise leave the tail unfilled.
-export const enqueueThumbnails = (masterVideoId: number, deps?: ThumbnailDeps): void => {
-  if (queued.has(masterVideoId)) return;
-  queued.add(masterVideoId);
+export const enqueueThumbnails = (sessionId: number, deps?: ThumbnailDeps): void => {
+  if (queued.has(sessionId)) return;
+  queued.add(sessionId);
   void pump(deps);
 };
 
@@ -384,7 +384,7 @@ const pump = async (deps?: ThumbnailDeps): Promise<void> => {
       .catch((error) => {
         // Best effort: playback reads segment rows, never this table.
         log.warn("thumbnail job failed", {
-          masterVideoId: nextMaster,
+          sessionId: nextMaster,
           clipId: nextClip,
           err: String(error).slice(0, 200),
         });
@@ -406,8 +406,8 @@ const pump = async (deps?: ThumbnailDeps): Promise<void> => {
 export const sweepMissingThumbnails = async (deps?: ThumbnailDeps): Promise<number> => {
   const masters = await listMastersNeedingThumbnails();
 
-  for (const masterVideoId of masters) {
-    enqueueThumbnails(masterVideoId, deps);
+  for (const sessionId of masters) {
+    enqueueThumbnails(sessionId, deps);
   }
 
   const clips = await listClipsNeedingThumbnails();

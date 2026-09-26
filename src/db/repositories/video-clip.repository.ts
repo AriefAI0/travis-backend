@@ -1,14 +1,14 @@
 import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
-import { masterVideo, recordingIngest, recordingIngestSegment, videoClip } from "../schema";
+import { recordingIngest, recordingIngestSegment, session, videoClip } from "../schema";
 
 export type VideoClipPlaybackRow = {
   clipId: number;
   resultId: number;
-  masterVideoId: number;
-  masterVideoStartEpoch: number;
-  masterVideoEndEpoch: number | null;
+  sessionId: number;
+  sessionStartEpoch: number | null;
+  sessionEndEpoch: number | null;
   startOffsetMs: number;
   endOffsetMs: number | null;
   // Object key of the clip's card still; null until the still job has run.
@@ -68,12 +68,12 @@ export const listActiveVideoClipRecords = async (database: DbOrTx = db) =>
     orderBy: asc(videoClip.startOffsetMs),
   });
 
-export const listVideoClipRecordsByMasterVideoId = async (
-  masterVideoId: number,
+export const listVideoClipRecordsBySessionId = async (
+  sessionId: number,
   database: DbOrTx = db,
 ) =>
   database.query.videoClip.findMany({
-    where: eq(videoClip.masterVideoId, masterVideoId),
+    where: eq(videoClip.sessionId, sessionId),
     orderBy: asc(videoClip.startOffsetMs),
   });
 
@@ -85,17 +85,17 @@ export const findVideoClipPlaybackRowById = async (
     .select({
       clipId: videoClip.clipId,
       resultId: videoClip.resultId,
-      masterVideoId: videoClip.masterVideoId,
-      masterVideoStartEpoch: masterVideo.startEpoch,
-      masterVideoEndEpoch: masterVideo.endEpoch,
+      sessionId: videoClip.sessionId,
+      sessionStartEpoch: session.startEpoch,
+      sessionEndEpoch: session.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
       thumbnailKey: videoClip.thumbnailKey,
     })
     .from(videoClip)
     .innerJoin(
-      masterVideo,
-      eq(masterVideo.masterVideoId, videoClip.masterVideoId),
+      session,
+      eq(session.sessionId, videoClip.sessionId),
     )
     .where(eq(videoClip.clipId, clipId))
     .limit(1))[0] ?? null;
@@ -113,17 +113,17 @@ export const listVideoClipPlaybackRowsByResultIds = async (
     .select({
       clipId: videoClip.clipId,
       resultId: videoClip.resultId,
-      masterVideoId: videoClip.masterVideoId,
-      masterVideoStartEpoch: masterVideo.startEpoch,
-      masterVideoEndEpoch: masterVideo.endEpoch,
+      sessionId: videoClip.sessionId,
+      sessionStartEpoch: session.startEpoch,
+      sessionEndEpoch: session.endEpoch,
       startOffsetMs: videoClip.startOffsetMs,
       endOffsetMs: videoClip.endOffsetMs,
       thumbnailKey: videoClip.thumbnailKey,
     })
     .from(videoClip)
     .innerJoin(
-      masterVideo,
-      eq(masterVideo.masterVideoId, videoClip.masterVideoId),
+      session,
+      eq(session.sessionId, videoClip.sessionId),
     )
     .where(inArray(videoClip.resultId, resultIds))
     .orderBy(

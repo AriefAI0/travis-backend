@@ -9,22 +9,18 @@ import {
 } from "../helpers/db";
 import * as schema from "../../src/db/schema";
 import {
-  createMasterVideo,
   createVideoClip,
-  deleteMasterVideo,
   deleteVideoClip,
-  getMasterVideoPlaybackData,
-  getMasterVideoById,
+  getSessionPlaybackData,
   getVideoClipById,
   getVideoClipPlaybackById,
-  listMasterVideos,
-  listMasterVideosByProjectId,
-  listMasterVideosBySessionId,
+  listSessionRecordingsByProjectId,
   listVideoClips,
-  listVideoClipsByMasterVideoId,
+  listVideoClipsBySessionId,
   listVideoClipsByResultId,
-  replaceMasterVideoTimelineThumbnails,
-  updateMasterVideo,
+  replaceSessionTimelineThumbnails,
+  stampSessionRecordingEnd,
+  stampSessionRecordingStart,
   updateVideoClip,
 } from "../../src/db/services/video.service";
 
@@ -50,11 +46,11 @@ const seedVideoContext = async () => {
     },
   ]);
 
-  // v2 target chain: group > code > main component (+ type + code)
+  // target chain: group > code > description (+ type + part code)
   await testDb.insert(schema.taskGroup).values({
     taskGroupId: 1,
     projectId: 1,
-    groupCode: "100",
+    code: "100",
     label: "Rows",
   });
 
@@ -65,23 +61,17 @@ const seedVideoContext = async () => {
     label: "Row A",
   });
 
-  await testDb.insert(schema.mainComponent).values({
-    mainComponentId: 100,
+  await testDb.insert(schema.description).values({
+    descriptionId: 100,
     taskCodeId: 10,
-    description: "JL-01",
+    label: "JL-01",
   });
 
-  await testDb.insert(schema.componentType).values({
-    componentTypeId: 1,
-    projectId: 1,
-    typeCode: "VDM",
+  await testDb.insert(schema.type).values({
+    typeId: 1,
+    descriptionId: 100,
+    code: "VDM",
     label: "VDM",
-  });
-
-  await testDb.insert(schema.mainComponentType).values({
-    mainComponentTypeId: 1,
-    mainComponentId: 100,
-    componentTypeId: 1,
   });
 
   await testDb.insert(schema.inspectionForm).values({
@@ -97,7 +87,7 @@ const seedVideoContext = async () => {
       resultId: 5001,
       inspectionTypeCode: "GVI",
       projectId: 1,
-      mainComponentId: 100,
+      descriptionId: 100,
       layer: 1,
       masterStartMs: 0,
       inspectionFormId: 1,
@@ -108,7 +98,7 @@ const seedVideoContext = async () => {
       resultId: 5002,
       inspectionTypeCode: "GVI",
       projectId: 1,
-      mainComponentId: 100,
+      descriptionId: 100,
       layer: 1,
       masterStartMs: 0,
       inspectionFormId: 1,
@@ -119,7 +109,7 @@ const seedVideoContext = async () => {
       resultId: 5003,
       inspectionTypeCode: "GVI",
       projectId: 1,
-      mainComponentId: 100,
+      descriptionId: 100,
       layer: 1,
       masterStartMs: 0,
       inspectionFormId: 1,
@@ -164,6 +154,18 @@ const seedProjectRecordingContext = async () => {
   ]);
 };
 
+// fixture: stamp recording anchors straight onto the session row
+const stampRecording = async (
+  sessionId: number,
+  startEpoch: number,
+  endEpoch?: number | null,
+) => {
+  await testDb
+    .update(schema.session)
+    .set({ startEpoch, endEpoch: endEpoch ?? null })
+    .where(eq(schema.session.sessionId, sessionId));
+};
+
 describe("video.service", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
@@ -172,124 +174,51 @@ describe("video.service", () => {
     await truncateTestDatabase();
   });
 
-  it("supports CRUD for master videos and lists them by session id", async () => {
+  it("stamps the session recording start and end anchors", async () => {
     await seedVideoContext();
 
-    const createdMasterVideo = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_760_000_000,
-        endEpoch: 1_760_003_600
-      },
+    await stampSessionRecordingStart(
+      { sessionId: 101, startEpoch: 1_760_000_000 },
       testDb,
     );
 
-    const secondMasterVideo = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_760_086_400,
-        endEpoch: null
-      },
-      testDb,
-    );
-
-    const thirdMasterVideo = await createMasterVideo(
-      {
-        sessionId: 102,
-        startEpoch: 1_760_172_800,
-        endEpoch: null
-      },
-      testDb,
-    );
-
-    expect(createdMasterVideo).toMatchObject({
-      sessionId: 101,
-      startEpoch: 1_760_000_000,
-      endEpoch: 1_760_003_600,
-    });
-    expect(createdMasterVideo?.masterVideoId).toBeTypeOf("number");
-    expect(await listMasterVideos(testDb)).toHaveLength(3);
     expect(
-      await getMasterVideoById(createdMasterVideo!.masterVideoId, testDb),
+      await testDb.query.session.findFirst({
+        where: eq(schema.session.sessionId, 101),
+      }),
     ).toMatchObject({
       sessionId: 101,
       startEpoch: 1_760_000_000,
+      endEpoch: null,
     });
 
-    const sessionMasterVideos = await listMasterVideosBySessionId(101, testDb);
-
-    expect(sessionMasterVideos).toEqual([
-      expect.objectContaining({
-        masterVideoId: createdMasterVideo!.masterVideoId,
-        sessionId: 101,
-      }),
-      expect.objectContaining({
-        masterVideoId: secondMasterVideo!.masterVideoId,
-        sessionId: 101,
-      }),
-    ]);
-
-    const updatedMasterVideo = await updateMasterVideo(
-      secondMasterVideo!.masterVideoId,
-      {
-        endEpoch: 1_760_087_400,
-      },
+    const closed = await stampSessionRecordingEnd(
+      101,
+      { endEpoch: 1_760_003_600, durationMs: 3_600_000 },
       testDb,
     );
 
-    expect(updatedMasterVideo).toMatchObject({
-      masterVideoId: secondMasterVideo!.masterVideoId,
-      endEpoch: 1_760_087_400,
-    });
-
-    const deletedMasterVideo = await deleteMasterVideo(
-      thirdMasterVideo!.masterVideoId,
-      testDb,
-    );
-
-    expect(deletedMasterVideo).toMatchObject({
-      masterVideoId: thirdMasterVideo!.masterVideoId,
-      sessionId: 102,
+    expect(closed).toMatchObject({
+      sessionId: 101,
+      endEpoch: 1_760_003_600,
+      durationMs: 3_600_000,
     });
   });
 
-  it("lists master videos by project id with session names and timing facts", async () => {
+  it("lists session recordings by project id with names and timing facts", async () => {
     await seedProjectRecordingContext();
 
-    const firstProjectOldRecording = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_768_000_000,
-        endEpoch: 1_768_000_500
-      },
-      testDb,
-    );
+    // sessions become recordings once the start anchor is stamped
+    await stampRecording(101, 1_768_000_000, 1_768_000_500);
+    await stampRecording(102, 1_768_003_600, null);
+    // session 201 never recorded: excluded from the recording list
 
-    const firstProjectNewRecording = await createMasterVideo(
-      {
-        sessionId: 102,
-        startEpoch: 1_768_003_600,
-        endEpoch: null
-      },
-      testDb,
-    );
-
-    await createMasterVideo(
-      {
-        sessionId: 201,
-        startEpoch: 1_768_007_200,
-        endEpoch: null
-      },
-      testDb,
-    );
-
-    await expect(listMasterVideosByProjectId(0, testDb)).rejects.toThrow(
+    await expect(listSessionRecordingsByProjectId(0, testDb)).rejects.toThrow(
       "Project id must be a positive integer",
     );
 
-    expect(await listMasterVideosByProjectId(1, testDb)).toEqual([
+    expect(await listSessionRecordingsByProjectId(1, testDb)).toEqual([
       {
-        masterVideoId: firstProjectOldRecording!.masterVideoId,
         sessionId: 101,
         sessionName: "session-001",
         // the card labels itself with this, not with sessionId
@@ -301,7 +230,6 @@ describe("video.service", () => {
         thumbnailUrl: null,
       },
       {
-        masterVideoId: firstProjectNewRecording!.masterVideoId,
         sessionId: 102,
         sessionName: "session-002",
         sessionDisplayNumber: 2,
@@ -316,26 +244,23 @@ describe("video.service", () => {
   it("master thumbnailUrl mints the earliest timeline still", async () => {
     await seedVideoContext();
 
-    const still = await createMasterVideo(
-      { sessionId: 101, startEpoch: 1_768_000_000 },
-      testDb,
-    );
+    await stampRecording(101, 1_768_000_000);
 
     // the thumbnail job has not run: no still, so no card face
-    const before = await listMasterVideosByProjectId(1, testDb);
+    const before = await listSessionRecordingsByProjectId(1, testDb);
     expect(before[0]!.thumbnailUrl).toBeNull();
 
     // two stills land out of order: the earliest one is the card face
-    await replaceMasterVideoTimelineThumbnails(
-      still!.masterVideoId,
+    await replaceSessionTimelineThumbnails(
+      101,
       [
-        { masterVideoId: still!.masterVideoId, timestampMs: 1_800, width: 640, height: 360, sizeBytes: 1_024, storageStem: "1/1/101/2026/05/08/master/50/timeline/0000001800.jpg" },
-        { masterVideoId: still!.masterVideoId, timestampMs: 1_500, width: 640, height: 360, sizeBytes: 1_024, storageStem: "1/1/101/2026/05/08/master/50/timeline/0000001500.jpg" },
+        { sessionId: 101, timestampMs: 1_800, width: 640, height: 360, sizeBytes: 1_024, storageStem: "1/1/101/2026/05/08/master/50/timeline/0000001800.jpg" },
+        { sessionId: 101, timestampMs: 1_500, width: 640, height: 360, sizeBytes: 1_024, storageStem: "1/1/101/2026/05/08/master/50/timeline/0000001500.jpg" },
       ],
       testDb,
     );
 
-    const after = await listMasterVideosByProjectId(1, testDb);
+    const after = await listSessionRecordingsByProjectId(1, testDb);
     expect(after[0]!.thumbnailUrl).toContain("travis-media");
     expect(after[0]!.thumbnailUrl).toContain("0000001500.jpg");
   });
@@ -343,19 +268,12 @@ describe("video.service", () => {
   it("supports CRUD for video clips and exposes playback metadata", async () => {
     await seedVideoContext();
 
-    const masterVideo = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_760_000_000,
-        endEpoch: 1_760_003_600
-      },
-      testDb,
-    );
+    await stampRecording(101, 1_760_000_000, 1_760_003_600);
 
     const createdVideoClip = await createVideoClip(
       {
         resultId: 5001,
-        masterVideoId: masterVideo!.masterVideoId,
+        sessionId: 101,
         startOffsetMs: 320_000,
         endOffsetMs: 350_000,
       },
@@ -365,7 +283,7 @@ describe("video.service", () => {
     const secondVideoClip = await createVideoClip(
       {
         resultId: 5003,
-        masterVideoId: masterVideo!.masterVideoId,
+        sessionId: 101,
         startOffsetMs: 500_000,
         endOffsetMs: 510_000,
       },
@@ -375,7 +293,7 @@ describe("video.service", () => {
     const thirdVideoClip = await createVideoClip(
       {
         resultId: 5002,
-        masterVideoId: masterVideo!.masterVideoId,
+        sessionId: 101,
         startOffsetMs: 600_000,
         endOffsetMs: 620_000,
       },
@@ -384,7 +302,7 @@ describe("video.service", () => {
 
     expect(createdVideoClip).toMatchObject({
       resultId: 5001,
-      masterVideoId: masterVideo!.masterVideoId,
+      sessionId: 101,
       startOffsetMs: 320_000,
       endOffsetMs: 350_000,
     });
@@ -405,32 +323,30 @@ describe("video.service", () => {
       createVideoClip(
         {
           resultId: 5001,
-          masterVideoId: masterVideo!.masterVideoId,
+          sessionId: 101,
           startOffsetMs: 700_000,
           endOffsetMs: 710_000,
         },
         testDb,
       ),
     ).rejects.toThrow();
-    expect(
-      await listVideoClipsByMasterVideoId(masterVideo!.masterVideoId, testDb),
-    ).toHaveLength(3);
+    expect(await listVideoClipsBySessionId(101, testDb)).toHaveLength(3);
 
     const playback = await getVideoClipPlaybackById(createdVideoClip!.clipId, testDb);
 
     expect(playback).toEqual({
       clipId: createdVideoClip!.clipId,
       resultId: 5001,
-      masterVideoId: masterVideo!.masterVideoId,
-      masterVideoStartEpoch: 1_760_000_000,
-      masterVideoEndEpoch: 1_760_003_600,
-      masterVideoDurationMs: 3_600_000,
+      sessionId: 101,
+      sessionStartEpoch: 1_760_000_000,
+      sessionEndEpoch: 1_760_003_600,
+      masterDurationMs: 3_600_000,
       startOffsetMs: 320_000,
       endOffsetMs: 350_000,
       durationMs: 30_000,
       startEpochMs: 1_760_000_320_000,
       endEpochMs: 1_760_000_350_000,
-    thumbnailKey: null,
+      thumbnailKey: null,
     });
 
     const updatedVideoClip = await updateVideoClip(
@@ -465,20 +381,13 @@ describe("video.service", () => {
   it("supports open video clip lifecycle before and after completion", async () => {
     await seedVideoContext();
 
-    const masterVideo = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_760_000_000,
-        endEpoch: 1_760_003_600
-      },
-      testDb,
-    );
+    await stampRecording(101, 1_760_000_000, 1_760_003_600);
 
     // open clip: endOffsetMs null until completion flips it
     const activeVideoClip = await createVideoClip(
       {
         resultId: 5001,
-        masterVideoId: masterVideo!.masterVideoId,
+        sessionId: 101,
         startOffsetMs: 120_000,
         endOffsetMs: null,
       },
@@ -487,7 +396,7 @@ describe("video.service", () => {
 
     expect(activeVideoClip).toMatchObject({
       resultId: 5001,
-      masterVideoId: masterVideo!.masterVideoId,
+      sessionId: 101,
       startOffsetMs: 120_000,
       endOffsetMs: null,
     });
@@ -495,16 +404,16 @@ describe("video.service", () => {
     expect(await getVideoClipPlaybackById(activeVideoClip!.clipId, testDb)).toEqual({
       clipId: activeVideoClip!.clipId,
       resultId: 5001,
-      masterVideoId: masterVideo!.masterVideoId,
-      masterVideoStartEpoch: 1_760_000_000,
-      masterVideoEndEpoch: 1_760_003_600,
-      masterVideoDurationMs: 3_600_000,
+      sessionId: 101,
+      sessionStartEpoch: 1_760_000_000,
+      sessionEndEpoch: 1_760_003_600,
+      masterDurationMs: 3_600_000,
       startOffsetMs: 120_000,
       endOffsetMs: null,
       durationMs: null,
       startEpochMs: 1_760_000_120_000,
       endEpochMs: null,
-    thumbnailKey: null,
+      thumbnailKey: null,
     });
 
     const completedVideoClip = await updateVideoClip(
@@ -520,32 +429,23 @@ describe("video.service", () => {
     });
   });
 
-  it("includes structured payloads in master video playback events", async () => {
+  it("includes structured payloads in session playback events", async () => {
     await seedVideoContext();
 
-    const masterVideo = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_760_000_000,
-        endEpoch: 1_760_003_600
-      },
-      testDb,
-    );
+    await stampRecording(101, 1_760_000_000, 1_760_003_600);
 
     const clip = await createVideoClip(
       {
         resultId: 5001,
-        masterVideoId: masterVideo!.masterVideoId,
+        sessionId: 101,
         startOffsetMs: 320_000,
         endOffsetMs: 350_000,
       },
       testDb,
     );
 
-    await expect(
-      getMasterVideoPlaybackData(1, masterVideo!.masterVideoId, testDb),
-    ).resolves.toMatchObject({
-      masterVideoId: masterVideo!.masterVideoId,
+    await expect(getSessionPlaybackData(1, 101, testDb)).resolves.toMatchObject({
+      sessionId: 101,
       events: [
         {
           eventId: `clip-${clip!.clipId}`,
@@ -560,31 +460,26 @@ describe("video.service", () => {
   it("rejects invalid video time ranges", async () => {
     await seedVideoContext();
 
-    await expect(
-      createMasterVideo(
-        {
-          sessionId: 101,
-          startEpoch: 1_760_000_000,
-          endEpoch: 1_759_999_999
-        },
-        testDb,
-      ),
-    ).rejects.toThrow("Master video endEpoch must be greater than startEpoch");
-
-    const masterVideo = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_760_000_000,
-        endEpoch: 1_760_000_100
-      },
+    await stampSessionRecordingStart(
+      { sessionId: 101, startEpoch: 1_760_000_000 },
       testDb,
     );
+
+    await expect(
+      stampSessionRecordingEnd(
+        101,
+        { endEpoch: 1_759_999_999 },
+        testDb,
+      ),
+    ).rejects.toThrow("Recording endEpoch must be greater than startEpoch");
+
+    await stampRecording(101, 1_760_000_000, 1_760_000_100);
 
     await expect(
       createVideoClip(
         {
           resultId: 5001,
-          masterVideoId: masterVideo!.masterVideoId,
+          sessionId: 101,
           startOffsetMs: 10_000,
           endOffsetMs: 10_000,
         },
@@ -596,53 +491,35 @@ describe("video.service", () => {
       createVideoClip(
         {
           resultId: 5001,
-          masterVideoId: masterVideo!.masterVideoId,
+          sessionId: 101,
           startOffsetMs: 90_000,
           endOffsetMs: 101_000,
         },
         testDb,
       ),
-    ).rejects.toThrow("Video clip endOffsetMs exceeds master video duration");
+    ).rejects.toThrow("Video clip endOffsetMs exceeds the session recording duration");
   });
 
   it("two timeline stills 300ms apart both persist and list in time order", async () => {
     await seedVideoContext();
 
-    const masterVideo = await createMasterVideo(
-      {
-        sessionId: 101,
-        startEpoch: 1_760_000_000,
-        endEpoch: 1_760_003_600
-      },
-      testDb,
-    );
+    await stampRecording(101, 1_760_000_000, 1_760_003_600);
 
     // ms granularity: same-second stills are distinct rows, never overwrites
-    await replaceMasterVideoTimelineThumbnails(
-      masterVideo!.masterVideoId,
+    await replaceSessionTimelineThumbnails(
+      101,
       [
-        { masterVideoId: masterVideo!.masterVideoId, timestampMs: 1_800, width: 1_280, height: 720, sizeBytes: 2_048, storageStem: "p1/s101/master_1" },
-        { masterVideoId: masterVideo!.masterVideoId, timestampMs: 1_500, width: 1_280, height: 720, sizeBytes: 2_048, storageStem: "p1/s101/master_1" },
+        { sessionId: 101, timestampMs: 1_800, width: 1_280, height: 720, sizeBytes: 2_048, storageStem: "p1/s101/master_1" },
+        { sessionId: 101, timestampMs: 1_500, width: 1_280, height: 720, sizeBytes: 2_048, storageStem: "p1/s101/master_1" },
       ],
       testDb,
     );
 
-    const playback = await getMasterVideoPlaybackData(1, masterVideo!.masterVideoId, testDb);
-    expect(playback!.thumbnails.map((t) => t.timestampMs)).toEqual([1_500, 1_800]);
-    expect(playback!.thumbnails.every((t) => t.storageStem === "p1/s101/master_1")).toBe(true);
-  });
+    const rows = await testDb.query.timelineThumbnail.findMany({
+      where: eq(schema.timelineThumbnail.sessionId, 101),
+      orderBy: schema.timelineThumbnail.timestampMs,
+    });
 
-  it("playback answers for a master with no outcome facts at all", async () => {
-    await seedVideoContext();
-
-    const masterVideo = await createMasterVideo(
-      { sessionId: 101, startEpoch: 1_760_000_000 },
-      testDb,
-    );
-
-    const playback = await getMasterVideoPlaybackData(1, masterVideo!.masterVideoId, testDb);
-    expect(playback!.masterVideoId).toBe(masterVideo!.masterVideoId);
-    expect(playback!.events).toEqual([]);
-    expect(playback!.thumbnails).toEqual([]);
+    expect(rows.map((row) => row.timestampMs)).toEqual([1_500, 1_800]);
   });
 });

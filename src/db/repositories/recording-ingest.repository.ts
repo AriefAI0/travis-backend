@@ -18,7 +18,7 @@ export const findPlayableIngestRecord = async (
     .from(recordingIngest)
     .where(
       scope.kind === "master"
-        ? eq(recordingIngest.masterVideoId, scope.id)
+        ? eq(recordingIngest.sessionId, scope.id)
         : eq(recordingIngest.clipId, scope.id),
     )
     .orderBy(sql`${recordingIngest.closedAt} IS NULL DESC`, desc(recordingIngest.ingestId))

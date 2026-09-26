@@ -28,21 +28,19 @@ const GVI_PAYLOAD = { kind: "gvi", version: 1, gviCP: 120, gviUT: null, conditio
 // plus session and a capturing master, all with fixed ids
 const seedWorld = async (withMaster = true) => {
   await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
-  await testDb.insert(schema.taskGroup).values({ taskGroupId: 10, projectId: 1, groupCode: "100", label: "Rows" });
+  await testDb.insert(schema.taskGroup).values({ taskGroupId: 10, projectId: 1, code: "100", label: "Rows" });
   await testDb.insert(schema.taskCode).values({ taskCodeId: 20, taskGroupId: 10, code: "101", label: "Row A" });
-  await testDb.insert(schema.mainComponent).values({ mainComponentId: 30, taskCodeId: 20, description: "Row A" });
-  await testDb.insert(schema.componentType).values({ componentTypeId: 40, projectId: 1, typeCode: "VDM", label: "VDM" });
-  await testDb.insert(schema.mainComponentType).values({ mainComponentTypeId: 50, mainComponentId: 30, componentTypeId: 40 });
-  await testDb.insert(schema.componentCode).values({ componentCodeId: 60, mainComponentTypeId: 50, code: "101-105" });
+  await testDb.insert(schema.description).values({ descriptionId: 30, taskCodeId: 20, label: "Row A" });
+  await testDb.insert(schema.type).values({ typeId: 50, descriptionId: 30, code: "VDM", label: "VDM" });
+  await testDb.insert(schema.partCode).values({ partCodeId: 60, typeId: 50, code: "101-105" });
   // second main component for layer/duplicate probes
-  await testDb.insert(schema.mainComponent).values({ mainComponentId: 31, taskCodeId: 20, description: "Row B" });
+  await testDb.insert(schema.description).values({ descriptionId: 31, taskCodeId: 20, label: "Row B" });
 
-  await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 101, projectId: 1, name: "Run 1" });
+  await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 101, projectId: 1, name: "Run 1", startEpoch: 1000 });
   if (withMaster) {
-    await testDb.insert(schema.masterVideo).values({ masterVideoId: 1, sessionId: 101, startEpoch: 1000 });
     await testDb.insert(schema.recordingIngest).values({
       kind: "master",
-      masterVideoId: 1,
+      sessionId: 101,
       ticketHash: "b".repeat(64),
       keyDate: "2026-09-24",
       keyPrefix: "1/1/1/2026/09/24/master/1",
@@ -55,7 +53,7 @@ const startInspection = (extra: Record<string, unknown>) =>
     sessionId: 101,
     layer: 1,
     inspectionTypeCode: "GVI",
-    mainComponentId: 30,
+    descriptionId: 30,
     masterStartMs: 0,
     ...extra,
   });
@@ -73,7 +71,7 @@ describe("inspections routes", () => {
     expect(res.status).toBe(201);
     const row = (await json(res)).data as Record<string, any>;
     expect(row.layer).toBe(1);
-    expect(row.mainComponentId).toBe(30);
+    expect(row.descriptionId).toBe(30);
     expect(row.inspectionFormId).not.toBeNull();
     expect(row.masterStartMs).toBe(0);
     expect(row.masterEndMs).toBeNull();
@@ -92,16 +90,16 @@ describe("inspections routes", () => {
     await seedWorld();
     await startInspection({});
 
-    const sameLayer = await startInspection({ mainComponentId: 31 });
+    const sameLayer = await startInspection({ descriptionId: 31 });
     expect(sameLayer.status).toBe(409);
     const sameLayerBody = (await json(sameLayer)) as Record<string, any>;
     expect(sameLayerBody.code ?? sameLayerBody.error?.code ?? "layer_in_use").toContain("layer_in_use");
 
     // 2-layer cap: layer 2 is the one ad-hoc child, a third is refused
-    const layerThree = await startInspection({ layer: 3, mainComponentId: 31 });
+    const layerThree = await startInspection({ layer: 3, descriptionId: 31 });
     expect(layerThree.status).toBe(400);
 
-    const tooHigh = await startInspection({ layer: 4, mainComponentId: 31 });
+    const tooHigh = await startInspection({ layer: 4, descriptionId: 31 });
     expect(tooHigh.status).toBe(400);
   });
 
@@ -113,7 +111,7 @@ describe("inspections routes", () => {
 
   it("requires exactly one target", async () => {
     await seedWorld();
-    const both = await startInspection({ componentCodeId: 60 });
+    const both = await startInspection({ partCodeId: 60 });
     expect(both.status).toBe(400);
     const neither = await post("/api/v1/inspections/start", {
       sessionId: 101,
@@ -128,11 +126,11 @@ describe("inspections routes", () => {
     await seedWorld();
     await startInspection({});
 
-    const child = await startInspection({ layer: 2, mainComponentId: undefined, componentCodeId: 60 });
+    const child = await startInspection({ layer: 2, descriptionId: undefined, partCodeId: 60 });
     expect(child.status).toBe(201);
     const row = (await json(child)).data as Record<string, any>;
-    expect(row.componentCodeId).toBe(60);
-    expect(row.mainComponentId).toBeNull();
+    expect(row.partCodeId).toBe(60);
+    expect(row.descriptionId).toBeNull();
   });
 
   it("stops with validated custom values and anchors the master end", async () => {
@@ -204,7 +202,7 @@ describe("inspections routes", () => {
   it("lists active inspections with layer and target", async () => {
     await seedWorld();
     await startInspection({});
-    await startInspection({ layer: 2, mainComponentId: undefined, componentCodeId: 60 });
+    await startInspection({ layer: 2, descriptionId: undefined, partCodeId: 60 });
 
     const active = (await json(await app.request("/api/v1/sessions/101/inspections/active")))
       .data as Array<Record<string, any>>;

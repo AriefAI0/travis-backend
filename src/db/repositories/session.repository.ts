@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
-import { session } from "../schema";
+import { recordingIngest, session } from "../schema";
 
 export const createSessionRecord = async (
   data: typeof session.$inferInsert,
@@ -103,3 +103,78 @@ export const deleteSessionById = async (
 
   return deletedSessions[0] ?? null;
 };
+
+/* ---- master-recording reads (the session IS the master recording) ---- */
+
+export type SessionRecordingRow = {
+  sessionId: number;
+  sessionName: string | null;
+  sessionDisplayNumber: number;
+  startEpoch: number | null;
+  endEpoch: number | null;
+  durationMs: number | null;
+};
+
+// recording cards: sessions that captured a master (start stamped)
+export const listSessionRecordingRowsByProjectId = async (
+  projectId: number,
+  database: DbOrTx = db,
+): Promise<SessionRecordingRow[]> =>
+  database
+    .select({
+      sessionId: session.sessionId,
+      sessionName: session.name,
+      sessionDisplayNumber: session.displayNumber,
+      startEpoch: session.startEpoch,
+      endEpoch: session.endEpoch,
+      durationMs: session.durationMs,
+    })
+    .from(session)
+    .where(and(eq(session.projectId, projectId), isNotNull(session.startEpoch)))
+    .orderBy(asc(session.startEpoch), asc(session.sessionId));
+
+// sessions whose master ingest is still open on the wire
+export const listSessionsWithOpenIngest = async (
+  database: DbOrTx = db,
+): Promise<Omit<SessionRecordingRow, "sessionName" | "sessionDisplayNumber">[]> =>
+  database
+    .selectDistinct({
+      sessionId: session.sessionId,
+      startEpoch: session.startEpoch,
+      endEpoch: session.endEpoch,
+      durationMs: session.durationMs,
+    })
+    .from(session)
+    .innerJoin(
+      recordingIngest,
+      and(eq(recordingIngest.sessionId, session.sessionId), eq(recordingIngest.kind, "master")),
+    )
+    .where(isNull(recordingIngest.closedAt))
+    .orderBy(asc(session.sessionId));
+
+// The master a session is capturing right now: its master ingest is open.
+// An inspection may only start against a session in this state.
+export const findSessionWithOpenIngestBySessionId = async (
+  sessionId: number,
+  database: DbOrTx = db,
+): Promise<{ sessionId: number; startEpoch: number | null; endEpoch: number | null; durationMs: number | null } | null> =>
+  (
+    await database
+      .select({
+        sessionId: session.sessionId,
+        startEpoch: session.startEpoch,
+        endEpoch: session.endEpoch,
+        durationMs: session.durationMs,
+      })
+      .from(session)
+      .innerJoin(
+        recordingIngest,
+        and(
+          eq(recordingIngest.sessionId, session.sessionId),
+          eq(recordingIngest.kind, "master"),
+        ),
+      )
+      .where(and(eq(session.sessionId, sessionId), isNull(recordingIngest.closedAt)))
+      .orderBy(asc(session.sessionId))
+      .limit(1)
+  )[0] ?? null;
