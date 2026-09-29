@@ -50,6 +50,8 @@ export type MasterIngestDomain = {
   kind: "master";
   sessionId: number;
   projectId: number;
+  // per-project ordinal; the client labels the take `Session N` from this
+  displayNumber: number;
 };
 
 export type ClipIngestDomain = {
@@ -129,6 +131,8 @@ const admitMaster = async (
       kind: "master",
       sessionId: session.sessionId,
       projectId: session.projectId,
+      // same number the key prefix froze
+      displayNumber: session.displayNumber ?? session.sessionId,
     },
   };
 };
@@ -232,6 +236,7 @@ const loadDomain = async (
       kind: "master",
       sessionId: session.sessionId,
       projectId: session.projectId,
+      displayNumber: session.displayNumber ?? session.sessionId,
     };
   }
 

@@ -121,6 +121,8 @@ describe("direct ingest admission", () => {
       kind: "master",
       sessionId: expect.any(Number),
       projectId: 9200,
+      // the seeded session holds ordinal 1, so this take is ordinal 2
+      displayNumber: 2,
     });
     expect(admission.ticket.length).toBeGreaterThan(20);
 
