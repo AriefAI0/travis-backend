@@ -6,14 +6,16 @@ import {
   getProjectById,
   listDashboard,
   updateProject,
+  type ProjectMediaCleanup,
 } from "../../db/services/project.service";
 import { notFound } from "../../lib/error";
 import { parseBody, parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
 import { projectInputSchema } from "../../types/api";
 
-// thin transport: parse > service > ok(); database injectable for tests
-export const projectRoutes = (database?: DbOrTx) => {
+// thin transport: parse > service > ok(); database and the media sweep are
+// injectable for tests
+export const projectRoutes = (database?: DbOrTx, cleanup?: ProjectMediaCleanup) => {
   const routes = new Hono();
 
   routes.get("/api/v1/projects", async (c) => ok(c, await listDashboard(database)));
@@ -37,7 +39,7 @@ export const projectRoutes = (database?: DbOrTx) => {
   });
 
   routes.delete("/api/v1/projects/:id", async (c) => {
-    const project = await deleteProject(parseId(c, "id"), database);
+    const project = await deleteProject(parseId(c, "id"), database, cleanup);
     if (!project) throw notFound("Project");
     return ok(c, project);
   });

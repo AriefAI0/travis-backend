@@ -1,4 +1,8 @@
 import type { DbOrTx } from "../client";
+import { AppError } from "../../lib/error";
+import { removeMediaKeys, removeMediaPrefix } from "../../lib/minio_storage/cleanup";
+import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
+import { listProjectMediaTargets } from "../repositories/project-media.repository";
 import {
 
   createProjectRecord,
@@ -147,7 +151,52 @@ export const updateProject = async (
   database?: DbOrTx,
 ) => updateProjectById(projectId, normalizeProjectUpdate(data), database);
 
+// The bucket side of a project delete, injectable so a test can watch the sweep
+// without a live MinIO. The default routes to the best-effort helpers, which log
+// a storage error and let the delete win.
+export type ProjectMediaCleanup = {
+  removePrefix(keyPrefix: string): Promise<void>;
+  removeKeys(keys: string[]): Promise<void>;
+};
+
+const defaultMediaCleanup: ProjectMediaCleanup = {
+  removePrefix: removeMediaPrefix,
+  removeKeys: removeMediaKeys,
+};
+
+// Delete a project and everything the bucket holds for it.
+// flow: open-ingest guard > gather frozen locations > delete rows > sweep objects
 export const deleteProject = async (
   projectId: number,
   database?: DbOrTx,
-) => deleteProjectById(projectId, database);
+  cleanup: ProjectMediaCleanup = defaultMediaCleanup,
+) => {
+  const project = await findProjectById(projectId, database);
+  if (!project) return null;
+
+  // read before the delete: the prefixes and stems die with their rows
+  const media = await listProjectMediaTargets(projectId, database);
+
+  // a live pipeline is still writing into a folder about to disappear
+  if (media.openIngests > 0) {
+    throw new AppError(
+      409,
+      "wrong_state",
+      `project ${projectId} has ${media.openIngests} recording(s) still open`,
+    );
+  }
+
+  const deleted = await deleteProjectById(projectId, database);
+
+  // the rows are gone, so a storage error logs and the delete still succeeds
+  for (const prefix of media.prefixes) await cleanup.removePrefix(prefix);
+  await cleanup.removeKeys([
+    ...media.imageRows.flatMap((row) => {
+      const leaves = imageEvidenceLeaves(row.storageStem, row.imageId, row.contentType);
+      return row.hasAnnotated ? [leaves.raw.key, leaves.annotated.key] : [leaves.raw.key];
+    }),
+    ...media.thumbnailKeys,
+  ]);
+
+  return deleted;
+};

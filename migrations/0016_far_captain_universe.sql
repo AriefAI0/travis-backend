@@ -1,2 +1,0 @@
-ALTER TABLE "result" DROP CONSTRAINT "result_layer_check";--> statement-breakpoint
-ALTER TABLE "result" ADD CONSTRAINT "result_layer_check" CHECK ("result"."layer" IS NULL OR "result"."layer" BETWEEN 1 AND 2);

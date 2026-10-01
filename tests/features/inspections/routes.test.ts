@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 
 import { appFor } from "../../helpers/app";
@@ -244,6 +245,14 @@ describe("inspections routes", () => {
       customValues: {},
       masterEndMs: 1000
     });
+
+    // The recorder closes its ingest when it stops; the idle sweep closes one
+    // that went quiet. An open ingest refuses the project delete by design, so
+    // close it here the way production would before the operator deletes.
+    await testDb
+      .update(schema.recordingIngest)
+      .set({ closedAt: new Date() })
+      .where(eq(schema.recordingIngest.sessionId, 101));
 
     const deleted = await app.request("/api/v1/projects/1", { method: "DELETE" });
     expect(deleted.status).toBe(200);

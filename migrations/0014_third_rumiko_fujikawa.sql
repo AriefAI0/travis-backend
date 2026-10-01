@@ -1,1 +1,0 @@
-ALTER TABLE "video_clip" ADD COLUMN "thumbnail_key" text;

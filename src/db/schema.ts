@@ -705,10 +705,10 @@ export const videoClip = pgTable(
       .notNull()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
-    // clips survive independent of the session master row
+    // cascade: a project teardown drops the session, so its clips follow
     sessionId: integer("session_id")
       .notNull()
-      .references(() => session.sessionId),
+      .references(() => session.sessionId, { onDelete: "cascade" }),
 
     startOffsetMs: integer("start_offset_ms").notNull(),
     endOffsetMs: integer("end_offset_ms"),

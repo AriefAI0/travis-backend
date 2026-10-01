@@ -1,1 +1,0 @@
-ALTER TABLE "session" ALTER COLUMN "display_number" SET NOT NULL;
