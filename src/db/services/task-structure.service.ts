@@ -1,11 +1,21 @@
 import type {
   TaskStructureDescriptionNode,
+  TaskStructureNodeKind,
   TaskStructureTaskCodeNode,
   TaskStructureTaskGroupNode,
   TaskStructureTypeNode,
 } from "../../types/api";
 import { AppError } from "../../lib/error";
+import { removeMediaKeys, removeMediaPrefix } from "../../lib/minio_storage/cleanup";
+import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
 import { db, type DbOrTx } from "../client";
+import { listIngestRecordsByClipIds } from "../repositories/recording-ingest.repository";
+import {
+  listAllResultRecordsByTargetIds,
+  listOpenResultRecordsByTargetIds,
+} from "../repositories/result.repository";
+import { listResultImageRecordsByResultIds } from "../repositories/result-image.repository";
+import { listVideoClipRecordsByResultIds } from "../repositories/video-clip.repository";
 import {
   createPartCodeRecord,
   deletePartCodeById,
@@ -372,3 +382,208 @@ export const listDescriptionsByTaskCodeId = (taskCodeId: number, database?: DbOr
 
 export const listPartCodesByTypeId = (typeId: number, database?: DbOrTx) =>
   listPartCodeRecordsByTypeId(typeId, database);
+
+/* ---------- bulk delete: preview, then one transaction ---------- */
+
+export type TaskStructureNodeRef = { kind: TaskStructureNodeKind; id: number };
+
+// What the confirm dialog shows. Counts are what a cascade removes, so they
+// describe the damage before anything happens.
+export type TaskStructureDeletePreview = {
+  // node rows below the selection; the selected rows themselves are not counted
+  children: number;
+  results: number;
+  clips: number;
+  images: number;
+  // true while an inspection under the selection is still running
+  blocked: boolean;
+  reason: string | null;
+};
+
+type IdsByLevel = {
+  taskGroupIds: number[];
+  taskCodeIds: number[];
+  descriptionIds: number[];
+  typeIds: number[];
+  partCodeIds: number[];
+};
+
+// `selected` is what the user picked, `all` is everything the cascade reaches.
+// The delete targets `selected`; counts and media keys need `all`.
+type ResolvedSelection = { selected: IdsByLevel; all: IdsByLevel };
+
+const unique = (values: number[]): number[] => [...new Set(values)];
+
+const totalIds = (ids: IdsByLevel): number =>
+  ids.taskGroupIds.length +
+  ids.taskCodeIds.length +
+  ids.descriptionIds.length +
+  ids.typeIds.length +
+  ids.partCodeIds.length;
+
+// A group owns its task codes, a task code its descriptions, a description its
+// types, a type its part codes — so the walk only ever goes down.
+// flow: selected ids > walk each level down > selected + reachable ids
+const resolveSelection = async (
+  nodes: TaskStructureNodeRef[],
+  database?: DbOrTx,
+): Promise<ResolvedSelection> => {
+  const pick = (kind: TaskStructureNodeKind): number[] =>
+    unique(nodes.filter((node) => node.kind === kind).map((node) => node.id));
+
+  const selected: IdsByLevel = {
+    taskGroupIds: pick("task_group"),
+    taskCodeIds: pick("task_code"),
+    descriptionIds: pick("description"),
+    typeIds: pick("type"),
+    partCodeIds: pick("part_code"),
+  };
+
+  const codesUnderGroups = await listTaskCodeRecordsByTaskGroupIds(
+    selected.taskGroupIds,
+    database,
+  );
+  const taskCodeIds = unique([
+    ...selected.taskCodeIds,
+    ...codesUnderGroups.map((row) => row.taskCodeId),
+  ]);
+
+  const descriptionsUnderCodes = await listDescriptionRecordsByTaskCodeIds(
+    taskCodeIds,
+    database,
+  );
+  const descriptionIds = unique([
+    ...selected.descriptionIds,
+    ...descriptionsUnderCodes.map((row) => row.descriptionId),
+  ]);
+
+  const typesUnderDescriptions = await listTypeRecordsByDescriptionIds(
+    descriptionIds,
+    database,
+  );
+  const typeIds = unique([
+    ...selected.typeIds,
+    ...typesUnderDescriptions.map((row) => row.typeId),
+  ]);
+
+  const partsUnderTypes = await listPartCodeRecordsByTypeIds(typeIds, database);
+  const partCodeIds = unique([
+    ...selected.partCodeIds,
+    ...partsUnderTypes.map((row) => row.partCodeId),
+  ]);
+
+  return {
+    selected,
+    all: {
+      taskGroupIds: selected.taskGroupIds,
+      taskCodeIds,
+      descriptionIds,
+      typeIds,
+      partCodeIds,
+    },
+  };
+};
+
+type SelectionFacts = {
+  preview: TaskStructureDeletePreview;
+  // exact leaves a row stores itself
+  imageKeys: string[];
+  thumbnailKeys: string[];
+  // directories an ingest wrote into: segments, poster and evidence images
+  ingestPrefixes: string[];
+};
+
+// flow: resolved ids > results > clips + images + ingests > counts, keys, block flag
+const collectSelectionFacts = async (
+  resolved: ResolvedSelection,
+  database?: DbOrTx,
+): Promise<SelectionFacts> => {
+  const { descriptionIds, partCodeIds } = resolved.all;
+
+  const results = await listAllResultRecordsByTargetIds(descriptionIds, partCodeIds, database);
+  const resultIds = results.map((row) => row.resultId);
+
+  // Sequential on purpose: a caller can hand this a transaction, and a
+  // transaction is one connection, so parallel reads would share it.
+  const clips = await listVideoClipRecordsByResultIds(resultIds, database);
+  const images = await listResultImageRecordsByResultIds(resultIds, database);
+  const openResults = await listOpenResultRecordsByTargetIds(
+    descriptionIds,
+    partCodeIds,
+    database,
+  );
+
+  const ingestRows = await listIngestRecordsByClipIds(
+    clips.map((clip) => clip.clipId),
+    database,
+  );
+  const unclosed = ingestRows.filter((row) => row.closedAt === null);
+
+  // raw and annotated twins; the annotated leaf is only there when it was written
+  const imageKeys = images.flatMap((row) => {
+    const leaves = imageEvidenceLeaves(row.storageStem, row.imageId, row.contentType);
+    return row.hasAnnotated ? [leaves.raw.key, leaves.annotated.key] : [leaves.raw.key];
+  });
+
+  return {
+    preview: {
+      children: totalIds(resolved.all) - totalIds(resolved.selected),
+      results: results.length,
+      clips: clips.length,
+      images: images.length,
+      blocked: openResults.length > 0 || unclosed.length > 0,
+      reason:
+        openResults.length > 0
+          ? `${openResults.length} inspection${openResults.length === 1 ? "" : "s"} still running`
+          : unclosed.length > 0
+            ? `${unclosed.length} recording${unclosed.length === 1 ? "" : "s"} still open`
+            : null,
+    },
+    imageKeys,
+    thumbnailKeys: clips
+      .map((clip) => clip.thumbnailKey)
+      .filter((key): key is string => key !== null && key.length > 0),
+    ingestPrefixes: ingestRows.map((row) => row.keyPrefix),
+  };
+};
+
+// Read-only: same walk the delete does, so the dialog never promises a
+// different number than the delete delivers.
+export const previewTaskStructureDelete = async (
+  nodes: TaskStructureNodeRef[],
+  database?: DbOrTx,
+): Promise<TaskStructureDeletePreview> =>
+  (await collectSelectionFacts(await resolveSelection(nodes, database), database)).preview;
+
+// A running inspection or an unclosed recording means media still being written
+// under the selection, so the delete refuses before it touches anything.
+// flow: resolve > facts > block check > one tx > remove objects best-effort
+export const deleteTaskStructureSelection = async (
+  nodes: TaskStructureNodeRef[],
+  database?: DbOrTx,
+): Promise<TaskStructureDeletePreview> => {
+  const resolved = await resolveSelection(nodes, database);
+  const facts = await collectSelectionFacts(resolved, database);
+
+  if (facts.preview.blocked) {
+    throw new AppError(409, "wrong_state", facts.preview.reason ?? "selection is still live");
+  }
+
+  // Deepest level first: deleting a parent cascades the rows below it, and a
+  // later delete of those rows would find nothing left to return.
+  const run = async (tx: DbOrTx) => {
+    for (const id of resolved.selected.partCodeIds) await deletePartCodeById(id, tx);
+    for (const id of resolved.selected.typeIds) await deleteTypeById(id, tx);
+    for (const id of resolved.selected.descriptionIds) await deleteDescriptionById(id, tx);
+    for (const id of resolved.selected.taskCodeIds) await deleteTaskCodeById(id, tx);
+    for (const id of resolved.selected.taskGroupIds) await deleteTaskGroupById(id, tx);
+  };
+
+  await (database ? run(database) : db.transaction(run));
+
+  // The rows are already gone, so a storage error logs and the delete still wins.
+  for (const prefix of facts.ingestPrefixes) await removeMediaPrefix(prefix);
+  await removeMediaKeys([...facts.imageKeys, ...facts.thumbnailKeys]);
+
+  return facts.preview;
+};

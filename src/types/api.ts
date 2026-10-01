@@ -608,6 +608,30 @@ export const updatePartCodeSchema = z.object({
 // project type vocabulary: distinct code+label pairs from the tree, for autocomplete
 export const typeCatalogQuerySchema = z.object({ q: z.string().min(1).optional() });
 
+// The five levels a grid row can point at. A delete selection is a set of these.
+export const taskStructureNodeKindSchema = z.enum([
+  "task_group",
+  "task_code",
+  "description",
+  "type",
+  "part_code",
+]);
+export type TaskStructureNodeKind = z.infer<typeof taskStructureNodeKindSchema>;
+
+// One request carries a whole ticked selection, so the cap is generous but present.
+export const bulkDeleteTaskStructureSchema = z.object({
+  mode: z.enum(["preview", "delete"]),
+  nodes: z
+    .array(
+      z.object({
+        kind: taskStructureNodeKindSchema,
+        id: z.number().int().positive(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+
 /* inspection forms — save-on-confirm posts the custom fields only;
    builtins come from the server registry, never the request */
 export const formDataType = z.enum(["integer", "decimal", "text", "boolean"]);

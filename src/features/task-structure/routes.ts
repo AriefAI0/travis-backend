@@ -10,6 +10,7 @@ import {
   deletePartCode,
   deleteTaskCode,
   deleteTaskGroup,
+  deleteTaskStructureSelection,
   deleteType,
   getDescriptionById,
   getPartCodeById,
@@ -20,6 +21,7 @@ import {
   listProjectTaskStructureTree,
   listTaskCodesByGroupId,
   listTypeCatalog,
+  previewTaskStructureDelete,
   updateDescription,
   updatePartCode,
   updateTaskCode,
@@ -30,6 +32,7 @@ import { notFound } from "../../lib/error";
 import { compactUpdate, parseBody, parseId, parseQuery } from "../../lib/parse";
 import { ok } from "../../lib/response";
 import {
+  bulkDeleteTaskStructureSchema,
   createDescriptionSchema,
   createPartCodeSchema,
   createTaskCodeSchema,
@@ -182,6 +185,16 @@ export const taskStructureRoutes = (database?: DbOrTx) => {
     const projectId = parseId(c, "projectId");
     parseQuery(c, typeCatalogQuerySchema);
     return ok(c, await listTypeCatalog(projectId, database));
+  });
+
+  /* bulk delete: one route, preview reads and delete writes the same selection */
+  routes.post("/api/v1/task-structure/bulk-delete", async (c) => {
+    const input = await parseBody(c, bulkDeleteTaskStructureSchema);
+    const preview =
+      input.mode === "preview"
+        ? await previewTaskStructureDelete(input.nodes, database)
+        : await deleteTaskStructureSelection(input.nodes, database);
+    return ok(c, preview);
   });
 
   return routes;

@@ -86,23 +86,63 @@ export const listResultRecordsByPartCodeId = async (
     orderBy: asc(result.resultId),
   });
 
+// A result points at a description OR a part code, so a target set is two lists.
+// Null when neither list carries an id, so callers skip the query entirely.
+const targetMatchesFor = (descriptionIds: number[], partCodeIds: number[]): SQL | null => {
+  const matches: SQL[] = [];
+  if (descriptionIds.length > 0) {
+    matches.push(inArray(result.descriptionId, descriptionIds));
+  }
+  if (partCodeIds.length > 0) {
+    matches.push(inArray(result.partCodeId, partCodeIds));
+  }
+  return matches.length > 0 ? or(...matches)! : null;
+};
+
 /** Target reads: results pointing at any of the given targets, oldest-first. */
 export const listResultRecordsByTargetIds = async (
   descriptionIds: number[],
   partCodeIds: number[],
   database: DbOrTx = db,
 ) => {
-  const targetMatches: SQL[] = [];
-  if (descriptionIds.length > 0) {
-    targetMatches.push(inArray(result.descriptionId, descriptionIds));
-  }
-  if (partCodeIds.length > 0) {
-    targetMatches.push(inArray(result.partCodeId, partCodeIds));
-  }
-  if (targetMatches.length === 0) return [];
+  const targetMatch = targetMatchesFor(descriptionIds, partCodeIds);
+  if (!targetMatch) return [];
 
   return database.query.result.findMany({
-    where: and(or(...targetMatches), isNull(result.archivedAt)),
+    where: and(targetMatch, isNull(result.archivedAt)),
+    orderBy: asc(result.resultId),
+  });
+};
+
+/**
+ * Every row the target set owns, archived included: these are the rows a
+ * cascade removes, so their media keys must be collected before the delete.
+ */
+export const listAllResultRecordsByTargetIds = async (
+  descriptionIds: number[],
+  partCodeIds: number[],
+  database: DbOrTx = db,
+) => {
+  const targetMatch = targetMatchesFor(descriptionIds, partCodeIds);
+  if (!targetMatch) return [];
+
+  return database.query.result.findMany({
+    where: targetMatch,
+    orderBy: asc(result.resultId),
+  });
+};
+
+/** Live inspections under the target set: started (layer set) and not stopped. */
+export const listOpenResultRecordsByTargetIds = async (
+  descriptionIds: number[],
+  partCodeIds: number[],
+  database: DbOrTx = db,
+) => {
+  const targetMatch = targetMatchesFor(descriptionIds, partCodeIds);
+  if (!targetMatch) return [];
+
+  return database.query.result.findMany({
+    where: and(targetMatch, isNotNull(result.layer), isNull(result.masterEndMs)),
     orderBy: asc(result.resultId),
   });
 };
