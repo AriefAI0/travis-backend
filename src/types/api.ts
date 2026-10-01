@@ -653,6 +653,16 @@ export const updateSessionSchema = z.object({ name: optionalText });
 // batch reads for the report gatherer
 export const resultIdsSchema = z.object({ resultIds: z.array(id) });
 
+// batch target read — two id lists, capped so one call cannot fan out wide
+export const targetIdsSchema = z
+  .object({
+    descriptionIds: z.array(id).default([]),
+    partCodeIds: z.array(id).default([]),
+  })
+  .refine((body) => body.descriptionIds.length + body.partCodeIds.length <= 100, {
+    message: "expected 100 or fewer ids",
+  });
+
 // evidence image write — contentType drives the stored extension.
 // strict: an unknown key is a 400, matching the ingest create contract.
 export const createResultImageSchema = z

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, type SQL } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { result } from "../schema";
@@ -85,6 +85,27 @@ export const listResultRecordsByPartCodeId = async (
     where: and(eq(result.partCodeId, partCodeId), isNull(result.archivedAt)),
     orderBy: asc(result.resultId),
   });
+
+/** Target reads: results pointing at any of the given targets, oldest-first. */
+export const listResultRecordsByTargetIds = async (
+  descriptionIds: number[],
+  partCodeIds: number[],
+  database: DbOrTx = db,
+) => {
+  const targetMatches: SQL[] = [];
+  if (descriptionIds.length > 0) {
+    targetMatches.push(inArray(result.descriptionId, descriptionIds));
+  }
+  if (partCodeIds.length > 0) {
+    targetMatches.push(inArray(result.partCodeId, partCodeIds));
+  }
+  if (targetMatches.length === 0) return [];
+
+  return database.query.result.findMany({
+    where: and(or(...targetMatches), isNull(result.archivedAt)),
+    orderBy: asc(result.resultId),
+  });
+};
 
 export const updateResultById = async (
   resultId: number,
