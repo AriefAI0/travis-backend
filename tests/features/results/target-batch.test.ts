@@ -32,26 +32,22 @@ const seedTargets = async () => {
     taskGroupId: 1,
     projectId: 1,
     code: "100",
-    label: "Rows",
   });
   await testDb.insert(schema.taskCode).values({
     taskCodeId: 10,
     taskGroupId: 1,
     code: "101",
-    label: "Row A",
   });
   await testDb.insert(schema.description).values({ descriptionId: 100, taskCodeId: 10, label: "I" });
   await testDb.insert(schema.type).values({
     typeId: 200,
     descriptionId: 100,
     code: "T1",
-    label: "Type 1",
   });
   await testDb.insert(schema.partCode).values({
     partCodeId: 300,
     typeId: 200,
     code: "P1",
-    label: "Part 1",
   });
 
   await testDb.insert(schema.result).values({

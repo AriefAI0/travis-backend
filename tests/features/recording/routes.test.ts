@@ -45,13 +45,11 @@ const seedContext = async (p: {
     taskGroupId: p.asset,
     projectId: p.project,
     code: "100",
-    label: "Rows",
   });
   await testDb.insert(schema.taskCode).values({
     taskCodeId: p.component,
     taskGroupId: p.asset,
     code: "101",
-    label: "Row A",
   });
   await testDb.insert(schema.description).values({
     descriptionId: p.item,

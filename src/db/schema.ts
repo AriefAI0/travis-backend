@@ -140,8 +140,6 @@ export const taskGroup = pgTable(
       .references(() => project.projectId, { onDelete: "cascade" }),
 
     code: text("code").notNull(),
-    label: text("label").notNull(),
-    displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
     ...updatedAt,
@@ -166,8 +164,6 @@ export const taskCode = pgTable(
       .references(() => taskGroup.taskGroupId, { onDelete: "cascade" }),
 
     code: text("code").notNull(),
-    label: text("label").notNull(),
-    displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
     ...updatedAt,
@@ -190,7 +186,6 @@ export const description = pgTable(
       .references(() => taskCode.taskCodeId, { onDelete: "cascade" }),
 
     label: text("label").notNull(),
-    displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
     ...updatedAt,
@@ -216,8 +211,6 @@ export const type = pgTable(
       .references(() => description.descriptionId, { onDelete: "cascade" }),
 
     code: text("code").notNull(),
-    label: text("label").notNull(),
-    displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
     ...updatedAt,
@@ -242,8 +235,6 @@ export const partCode = pgTable(
       .references(() => type.typeId, { onDelete: "cascade" }),
 
     code: text("code").notNull(),
-    label: text("label"),
-    displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
     ...updatedAt,

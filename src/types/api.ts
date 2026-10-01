@@ -476,7 +476,6 @@ export type ReportGatherData = {
 // body ids are JSON numbers; params/queries coerce from strings
 const id = z.number().int().positive();
 const optionalText = z.string().min(1).nullable().optional();
-const optionalOrder = z.number().int().nonnegative().optional();
 const itemStatus = z.enum(["not_set", "pending", "complete"]);
 const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
 
@@ -516,96 +515,71 @@ export const updateItemSchema = z.object({
 export type TaskStructurePartCodeNode = {
   partCodeId: number;
   code: string;
-  label: string | null;
-  displayOrder: number;
 };
 
 export type TaskStructureTypeNode = {
   typeId: number;
   code: string;
-  label: string;
-  displayOrder: number;
   partCodes: TaskStructurePartCodeNode[];
 };
 
 export type TaskStructureDescriptionNode = {
   descriptionId: number;
   label: string;
-  displayOrder: number;
   types: TaskStructureTypeNode[];
 };
 
 export type TaskStructureTaskCodeNode = {
   taskCodeId: number;
   code: string;
-  label: string;
-  displayOrder: number;
   descriptions: TaskStructureDescriptionNode[];
 };
 
 export type TaskStructureTaskGroupNode = {
   taskGroupId: number;
   code: string;
-  label: string;
-  displayOrder: number;
   taskCodes: TaskStructureTaskCodeNode[];
 };
 
-/* task tree — request schemas */
+/* task tree — request schemas. Every level carries one identifying field:
+   `code`, or `label` for a description. */
 export const createTaskGroupSchema = z.object({
   projectId: id,
   code: z.string().min(1),
-  label: z.string().min(1),
-  displayOrder: optionalOrder,
 });
 export const updateTaskGroupSchema = z.object({
   code: z.string().min(1).optional(),
-  label: z.string().min(1).optional(),
-  displayOrder: optionalOrder,
 });
 export const createTaskCodeSchema = z.object({
   taskGroupId: id,
   code: z.string().min(1),
-  label: z.string().min(1),
-  displayOrder: optionalOrder,
 });
 export const updateTaskCodeSchema = z.object({
   code: z.string().min(1).optional(),
-  label: z.string().min(1).optional(),
-  displayOrder: optionalOrder,
 });
 export const createDescriptionSchema = z.object({
   taskCodeId: id,
   label: z.string().min(1),
-  displayOrder: optionalOrder,
 });
 export const updateDescriptionSchema = z.object({
   label: z.string().min(1).optional(),
-  displayOrder: optionalOrder,
 });
 // create a type under a description; same code under it is refused
 export const createTypeSchema = z.object({
   descriptionId: id,
   code: z.string().min(1),
-  label: z.string().min(1),
 });
 export const updateTypeSchema = z.object({
   code: z.string().min(1).optional(),
-  label: z.string().min(1).optional(),
-  displayOrder: optionalOrder,
 });
 export const createPartCodeSchema = z.object({
   typeId: id,
   code: z.string().min(1),
-  label: optionalText,
-  displayOrder: optionalOrder,
 });
 export const updatePartCodeSchema = z.object({
   code: z.string().min(1).optional(),
-  label: optionalText,
-  displayOrder: optionalOrder,
 });
-// project type vocabulary: distinct code+label pairs from the tree, for autocomplete
+// project type vocabulary: the distinct type codes already used in the tree
 export const typeCatalogQuerySchema = z.object({ q: z.string().min(1).optional() });
 
 // The five levels a grid row can point at. A delete selection is a set of these.

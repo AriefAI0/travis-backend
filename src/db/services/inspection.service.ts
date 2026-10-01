@@ -350,11 +350,11 @@ export const listActiveBySessionId = async (
 
 /* ---------- session timeline: rows for the event table, markers for playback ---------- */
 export type SessionInspectionBreadcrumb = {
-  taskGroup: { code: string; label: string };
-  taskCode: { code: string; label: string };
+  taskGroup: { code: string };
+  taskCode: { code: string };
   description: { label: string };
-  type: { code: string; label: string } | null;
-  partCode: { code: string; label: string | null } | null;
+  type: { code: string } | null;
+  partCode: { code: string } | null;
 };
 
 export type SessionInspectionRow = {
@@ -401,11 +401,11 @@ const buildBreadcrumb = async (
 
   return {
     breadcrumb: {
-      taskGroup: { code: group.code, label: group.label },
-      taskCode: { code: taskCode.code, label: taskCode.label },
+      taskGroup: { code: group.code },
+      taskCode: { code: taskCode.code },
       description: { label: comp.label },
-      type: type ? { code: type.code, label: type.label } : null,
-      partCode: partCode ? { code: partCode.code, label: partCode.label } : null,
+      type: type ? { code: type.code } : null,
+      partCode: partCode ? { code: partCode.code } : null,
     },
     label: partCode ? partCode.code : comp.label,
   };

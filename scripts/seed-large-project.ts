@@ -64,7 +64,7 @@ async function createProjectTree(partCodesPerType: number, partCodeCount: number
 
   const groupRows = await db
     .insert(schema.taskGroup)
-    .values({ projectId, code: "900", label: "Load group" })
+    .values({ projectId, code: "900" })
     .returning({ taskGroupId: schema.taskGroup.taskGroupId });
   const taskGroupId = groupRows[0]!.taskGroupId;
 
@@ -74,8 +74,6 @@ async function createProjectTree(partCodesPerType: number, partCodeCount: number
       Array.from({ length: TASK_CODES }, (_, index) => ({
         taskGroupId,
         code: `9${String(index + 1).padStart(2, "0")}`,
-        label: `Load row ${index + 1}`,
-        displayOrder: index,
       })),
     )
     .returning({ taskCodeId: schema.taskCode.taskCodeId });
@@ -87,7 +85,6 @@ async function createProjectTree(partCodesPerType: number, partCodeCount: number
         Array.from({ length: DESCRIPTIONS_PER_TASK_CODE }, (_, index) => ({
           taskCodeId: taskCodeRow.taskCodeId,
           label: `D${taskCodeIndex + 1}-${index + 1}`,
-          displayOrder: index,
         })),
       ),
     )
@@ -100,8 +97,6 @@ async function createProjectTree(partCodesPerType: number, partCodeCount: number
         Array.from({ length: TYPES_PER_DESCRIPTION }, (_, index) => ({
           descriptionId: descriptionRow.descriptionId,
           code: `T${descriptionIndex + 1}.${index + 1}`,
-          label: `Type ${descriptionIndex + 1}.${index + 1}`,
-          displayOrder: index,
         })),
       ),
     )
@@ -113,8 +108,6 @@ async function createProjectTree(partCodesPerType: number, partCodeCount: number
     const values = Array.from({ length: partCodesPerType }, (_, index) => ({
       typeId: typeRow.typeId,
       code: `PC-${typeRow.typeId}-${String(index + 1).padStart(4, "0")}`,
-      label: `Part ${index + 1}`,
-      displayOrder: index,
     }));
 
     for (const chunk of chunks(values, INSERT_CHUNK)) {

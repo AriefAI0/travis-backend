@@ -61,45 +61,32 @@ import {
 export type CreateTaskGroupInput = {
   projectId: number;
   code: string;
-  label: string;
-  displayOrder?: number;
 };
 
 export type CreateTaskCodeInput = {
   taskGroupId: number;
   code: string;
-  label: string;
-  displayOrder?: number;
 };
 
 export type CreateDescriptionInput = {
   taskCodeId: number;
   label: string;
-  displayOrder?: number;
 };
 
 export type CreateTypeInput = {
   descriptionId: number;
   code: string;
-  label: string;
 };
 
 export type CreatePartCodeInput = {
   typeId: number;
   code: string;
-  label?: string | null;
-  displayOrder?: number;
 };
 
 const normalizeRequired = (value: string, fieldName: string) => {
   const trimmed = value.trim();
   if (!trimmed) throw new Error(`${fieldName} is required`);
   return trimmed;
-};
-
-const normalizeOptional = (value?: string | null) => {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
 };
 
 /* ---------- tree read (batched: 5 queries for the whole project) ---------- */
@@ -138,13 +125,9 @@ export const listProjectTaskStructureTree = async (
     const node: TaskStructureTypeNode = {
       typeId: typeRow.typeId,
       code: typeRow.code,
-      label: typeRow.label,
-      displayOrder: typeRow.displayOrder,
       partCodes: (partCodesByType.get(typeRow.typeId) ?? []).map((part) => ({
         partCodeId: part.partCodeId,
         code: part.code,
-        label: part.label,
-        displayOrder: part.displayOrder,
       })),
     };
     const bucket = typesByDescription.get(typeRow.descriptionId) ?? [];
@@ -157,7 +140,6 @@ export const listProjectTaskStructureTree = async (
     const node: TaskStructureDescriptionNode = {
       descriptionId: row.descriptionId,
       label: row.label,
-      displayOrder: row.displayOrder,
       types: typesByDescription.get(row.descriptionId) ?? [],
     };
     const bucket = descriptionsByTaskCode.get(row.taskCodeId) ?? [];
@@ -170,8 +152,6 @@ export const listProjectTaskStructureTree = async (
     const node: TaskStructureTaskCodeNode = {
       taskCodeId: taskCode.taskCodeId,
       code: taskCode.code,
-      label: taskCode.label,
-      displayOrder: taskCode.displayOrder,
       descriptions: descriptionsByTaskCode.get(taskCode.taskCodeId) ?? [],
     };
     const bucket = codesByGroup.get(taskCode.taskGroupId) ?? [];
@@ -182,8 +162,6 @@ export const listProjectTaskStructureTree = async (
   return groups.map((group) => ({
     taskGroupId: group.taskGroupId,
     code: group.code,
-    label: group.label,
-    displayOrder: group.displayOrder,
     taskCodes: codesByGroup.get(group.taskGroupId) ?? [],
   }));
 };
@@ -194,8 +172,6 @@ export const createTaskGroup = async (data: CreateTaskGroupInput, database?: DbO
     {
       projectId: data.projectId,
       code: normalizeRequired(data.code, "Group code"),
-      label: normalizeRequired(data.label, "Group label"),
-      displayOrder: data.displayOrder ?? 0,
     },
     database,
   );
@@ -205,13 +181,11 @@ export const getTaskGroupById = (taskGroupId: number, database?: DbOrTx) =>
 
 export const updateTaskGroup = async (
   taskGroupId: number,
-  data: Partial<{ code: string; label: string; displayOrder: number }>,
+  data: Partial<{ code: string }>,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updateTaskGroupById>[1]> = {};
   if (data.code !== undefined) next.code = normalizeRequired(data.code, "Group code");
-  if (data.label !== undefined) next.label = normalizeRequired(data.label, "Group label");
-  if (data.displayOrder !== undefined) next.displayOrder = data.displayOrder;
   return updateTaskGroupById(taskGroupId, next, database);
 };
 
@@ -224,8 +198,6 @@ export const createTaskCode = async (data: CreateTaskCodeInput, database?: DbOrT
     {
       taskGroupId: data.taskGroupId,
       code: normalizeRequired(data.code, "Task code"),
-      label: normalizeRequired(data.label, "Task label"),
-      displayOrder: data.displayOrder ?? 0,
     },
     database,
   );
@@ -235,13 +207,11 @@ export const getTaskCodeById = (taskCodeId: number, database?: DbOrTx) =>
 
 export const updateTaskCode = async (
   taskCodeId: number,
-  data: Partial<{ code: string; label: string; displayOrder: number }>,
+  data: Partial<{ code: string }>,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updateTaskCodeById>[1]> = {};
   if (data.code !== undefined) next.code = normalizeRequired(data.code, "Task code");
-  if (data.label !== undefined) next.label = normalizeRequired(data.label, "Task label");
-  if (data.displayOrder !== undefined) next.displayOrder = data.displayOrder;
   return updateTaskCodeById(taskCodeId, next, database);
 };
 
@@ -257,7 +227,6 @@ export const createDescription = async (
     {
       taskCodeId: data.taskCodeId,
       label: normalizeRequired(data.label, "Description"),
-      displayOrder: data.displayOrder ?? 0,
     },
     database,
   );
@@ -267,12 +236,11 @@ export const getDescriptionById = (descriptionId: number, database?: DbOrTx) =>
 
 export const updateDescription = async (
   descriptionId: number,
-  data: Partial<{ label: string; displayOrder: number }>,
+  data: Partial<{ label: string }>,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updateDescriptionById>[1]> = {};
   if (data.label !== undefined) next.label = normalizeRequired(data.label, "Description");
-  if (data.displayOrder !== undefined) next.displayOrder = data.displayOrder;
   return updateDescriptionById(descriptionId, next, database);
 };
 
@@ -282,7 +250,6 @@ export const deleteDescription = (descriptionId: number, database?: DbOrTx) =>
 /* ---------- type (owned by one description) ---------- */
 export const createType = async (data: CreateTypeInput, database?: DbOrTx) => {
   const code = normalizeRequired(data.code, "Type code");
-  const label = normalizeRequired(data.label, "Type label");
 
   const existing = await findTypeByDescriptionIdAndCode(data.descriptionId, code, database);
   if (existing) {
@@ -293,8 +260,6 @@ export const createType = async (data: CreateTypeInput, database?: DbOrTx) => {
     {
       descriptionId: data.descriptionId,
       code,
-      label,
-      displayOrder: 0,
     },
     database,
   );
@@ -303,23 +268,21 @@ export const createType = async (data: CreateTypeInput, database?: DbOrTx) => {
 export const getTypeById = (typeId: number, database?: DbOrTx) =>
   findTypeById(typeId, database);
 
-// rename in place: stable id, code and label change together
+// rename in place: stable id, the code changes
 export const updateType = async (
   typeId: number,
-  data: Partial<{ code: string; label: string; displayOrder: number }>,
+  data: Partial<{ code: string }>,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updateTypeById>[1]> = {};
   if (data.code !== undefined) next.code = normalizeRequired(data.code, "Type code");
-  if (data.label !== undefined) next.label = normalizeRequired(data.label, "Type label");
-  if (data.displayOrder !== undefined) next.displayOrder = data.displayOrder;
   return updateTypeById(typeId, next, database);
 };
 
 export const deleteType = (typeId: number, database?: DbOrTx) =>
   deleteTypeById(typeId, database);
 
-// project-wide type vocabulary for autocomplete: distinct code+label pairs
+// project-wide type vocabulary for autocomplete: the distinct type codes
 export const listTypeCatalog = (projectId: number, database?: DbOrTx) =>
   listTypeCatalogByProjectId(projectId, database);
 
@@ -349,8 +312,6 @@ export const createPartCode = async (
     {
       typeId: data.typeId,
       code: normalizeRequired(data.code, "Part code"),
-      label: normalizeOptional(data.label),
-      displayOrder: data.displayOrder ?? 0,
     },
     database,
   );
@@ -360,13 +321,11 @@ export const getPartCodeById = (partCodeId: number, database?: DbOrTx) =>
 
 export const updatePartCode = async (
   partCodeId: number,
-  data: Partial<{ code: string; label?: string | null; displayOrder: number }>,
+  data: Partial<{ code: string }>,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updatePartCodeById>[1]> = {};
   if (data.code !== undefined) next.code = normalizeRequired(data.code, "Part code");
-  if (data.label !== undefined) next.label = normalizeOptional(data.label);
-  if (data.displayOrder !== undefined) next.displayOrder = data.displayOrder;
   return updatePartCodeById(partCodeId, next, database);
 };
 

@@ -29,10 +29,10 @@ const GVI_PAYLOAD = { kind: "gvi", version: 1, gviCP: 120, gviUT: null, conditio
 // plus session and a capturing master, all with fixed ids
 const seedWorld = async (withMaster = true) => {
   await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
-  await testDb.insert(schema.taskGroup).values({ taskGroupId: 10, projectId: 1, code: "100", label: "Rows" });
-  await testDb.insert(schema.taskCode).values({ taskCodeId: 20, taskGroupId: 10, code: "101", label: "Row A" });
+  await testDb.insert(schema.taskGroup).values({ taskGroupId: 10, projectId: 1, code: "100" });
+  await testDb.insert(schema.taskCode).values({ taskCodeId: 20, taskGroupId: 10, code: "101" });
   await testDb.insert(schema.description).values({ descriptionId: 30, taskCodeId: 20, label: "Row A" });
-  await testDb.insert(schema.type).values({ typeId: 50, descriptionId: 30, code: "VDM", label: "VDM" });
+  await testDb.insert(schema.type).values({ typeId: 50, descriptionId: 30, code: "VDM" });
   await testDb.insert(schema.partCode).values({ partCodeId: 60, typeId: 50, code: "101-105" });
   // second main component for layer/duplicate probes
   await testDb.insert(schema.description).values({ descriptionId: 31, taskCodeId: 20, label: "Row B" });

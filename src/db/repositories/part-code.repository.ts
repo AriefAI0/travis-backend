@@ -17,7 +17,7 @@ export const listPartCodeRecordsByTypeId = async (
 ) =>
   database.query.partCode.findMany({
     where: and(eq(partCode.typeId, typeId), isNull(partCode.archivedAt)),
-    orderBy: [asc(partCode.displayOrder), asc(partCode.partCodeId)],
+    orderBy: [asc(partCode.partCodeId)],
   });
 
 // batched tree read: all part codes under a set of types
@@ -28,7 +28,7 @@ export const listPartCodeRecordsByTypeIds = async (
   typeIds.length
     ? database.query.partCode.findMany({
         where: and(inArray(partCode.typeId, typeIds), isNull(partCode.archivedAt)),
-        orderBy: [asc(partCode.displayOrder), asc(partCode.partCodeId)],
+        orderBy: [asc(partCode.partCodeId)],
       })
     : [];
 
