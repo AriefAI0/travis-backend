@@ -10,11 +10,10 @@ import {
 import { json } from "../../helpers/json";
 import { sessionTimelineRoutes } from "../../../src/features/session-timeline/routes";
 import { resultRoutes } from "../../../src/features/results/routes";
-import { reportRoutes } from "../../../src/features/reports/routes";
 import { projectRoutes } from "../../../src/features/projects/routes";
 import * as schema from "../../../src/db/schema";
 
-const app = appFor(testDb, sessionTimelineRoutes, resultRoutes, reportRoutes, projectRoutes);
+const app = appFor(testDb, sessionTimelineRoutes, resultRoutes, projectRoutes);
 
 // project > tree chain > session > capturing master, fixed ids
 const seedWorld = async () => {
@@ -50,7 +49,7 @@ const insertResult = async (overrides: Partial<typeof schema.result.$inferInsert
   });
 };
 
-// flow: rows > markers > sidebars > report stub
+// flow: rows > markers > sidebars
 describe("session timeline routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
@@ -116,13 +115,5 @@ describe("session timeline routes", () => {
       .data as Record<string, any>;
     expect(code.sessions[0]!.results).toHaveLength(1);
     expect(code.target.partCodeId).toBe(60);
-  });
-
-  it("answers the report stub with 501", async () => {
-    await seedWorld();
-    const res = await app.request("/api/v1/projects/1/report/preview");
-    expect(res.status).toBe(501);
-    const body = (await res.json()) as Record<string, any>;
-    expect(body.code).toBe("not_implemented");
   });
 });

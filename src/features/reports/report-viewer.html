@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project Report</title>
+
+    <!--
+      The editor and React come from esm.sh, so this page ships no build step
+      and adds no backend dependency. The import map pins ONE React instance:
+      the editor is imported with ?external=react,react-dom, which turns its
+      React imports into bare specifiers that resolve here. Two React copies
+      would break hooks.
+    -->
+    <link
+      rel="stylesheet"
+      href="https://esm.sh/@docx-editor.dev/core@2.24.0/styles/editor.css"
+    />
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.3.1",
+          "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+          "react-dom": "https://esm.sh/react-dom@18.3.1",
+          "react-dom/client": "https://esm.sh/react-dom@18.3.1/client"
+        }
+      }
+    </script>
+
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #f4f4f5;
+        color: #18181b;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 48px 16px;
+      }
+      main[hidden] {
+        display: none;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px;
+      }
+      .sub {
+        margin: 0 0 24px;
+        color: #52525b;
+        font-size: 13px;
+      }
+      .download {
+        display: inline-block;
+        padding: 10px 18px;
+        background: #18181b;
+        color: #fff;
+        border-radius: 6px;
+        text-decoration: none;
+        font-size: 14px;
+      }
+      .download[hidden] {
+        display: none;
+      }
+      .error {
+        color: #b91c1c;
+      }
+      #editor:empty {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Project report</h1>
+      <p class="sub" id="status">Building the report...</p>
+      <a class="download" id="download" hidden>Download report.docx</a>
+    </main>
+    <div id="editor"></div>
+
+    <script type="module">
+      // same origin as the docx route, so no CORS leg is involved
+      const projectId = location.pathname.split("/").filter(Boolean).pop();
+      const docxUrl = `/api/v1/projects/${projectId}/report/docx`;
+      const status = document.getElementById("status");
+      const link = document.getElementById("download");
+      const editorHost = document.getElementById("editor");
+      const heading = document.querySelector("main");
+
+      // the download route is the floor: it works with no CDN at all
+      const offerDownload = () => {
+        link.href = docxUrl;
+        link.hidden = false;
+        status.textContent = `Report ready for project ${projectId}.`;
+      };
+
+      try {
+        const response = await fetch(docxUrl);
+        if (!response.ok) {
+          throw new Error(`${response.status} ${response.statusText}`);
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer());
+
+        // A CDN failure must not blank the page, so the editor attempt is
+        // nested and any failure inside it falls back to the download link.
+        try {
+          const React = (await import("react")).default;
+          const { createRoot } = await import("react-dom/client");
+          const { DocxEditor } = await import(
+            "https://esm.sh/@docx-editor.dev/react@2.24.0?external=react,react-dom"
+          );
+
+          const root = createRoot(editorHost);
+          root.render(React.createElement(DocxEditor, { document: bytes, mode: "edit" }));
+          heading.hidden = true;
+        } catch (editorError) {
+          console.warn("report editor unavailable, offering the file instead:", editorError);
+          offerDownload();
+        }
+      } catch (error) {
+        status.className = "error";
+        status.textContent = `Could not build the report: ${error.message}`;
+      }
+    </script>
+  </body>
+</html>
