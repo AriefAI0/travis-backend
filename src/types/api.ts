@@ -620,6 +620,19 @@ export const saveInspectionFormSchema = z.object({
 });
 export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
 
+/* Planned inspections — preassigned types on a target, before any session.
+   One type per target; the table's unique constraint owns the rule. */
+export const createPlannedInspectionSchema = z
+  .object({
+    projectId: id,
+    inspectionTypeCode: inspectionType,
+    descriptionId: id.optional(),
+    partCodeId: id.optional(),
+  })
+  .refine((v) => (v.descriptionId !== undefined) !== (v.partCodeId !== undefined), {
+    message: "exactly one of descriptionId or partCodeId is required",
+  });
+
 /* Inspection lifecycle — task-tree targets, layer, master anchors. Layer
    values are 1 (main) and 2 (one ad-hoc child); a third is refused. */
 export const startInspectionSchema = z

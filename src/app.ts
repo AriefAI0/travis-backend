@@ -10,6 +10,7 @@ import { hlsRoutes } from "./features/playback-stream/hls-routes";
 import { exportRoutes } from "./features/media-export/routes";
 import { sessionRoutes } from "./features/sessions/routes";
 import { taskStructureRoutes } from "./features/task-structure/routes";
+import { plannedInspectionRoutes } from "./features/planned-inspections/routes";
 import { inspectionFormRoutes } from "./features/inspection-forms/routes";
 import { sessionTimelineRoutes } from "./features/session-timeline/routes";
 import { reportRoutes } from "./features/reports/routes";
@@ -29,6 +30,7 @@ app.onError(onError);
 app.route("/", healthRoutesFor(minio, [{ name: "db", check: pingDb }]));
 app.route("/", projectRoutes());
 app.route("/", taskStructureRoutes());
+app.route("/", plannedInspectionRoutes());
 app.route("/", inspectionFormRoutes());
 app.route("/", sessionTimelineRoutes());
 // Stub only: report surface answers 501 until the report work lands.
