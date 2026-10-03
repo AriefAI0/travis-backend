@@ -15,6 +15,13 @@
       "when": 1790866152000,
       "tag": "0001_lame_dorian_gray",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791040965480,
+      "tag": "0002_dry_the_watchers",
+      "breakpoints": true
     }
   ]
 }

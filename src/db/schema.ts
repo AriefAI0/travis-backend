@@ -309,6 +309,54 @@ export const inspectionFormField = pgTable(
 );
 
 /* =========================================================
+   PLANNED INSPECTION (preassigned task, before any session)
+========================================================= */
+export const plannedInspection = pgTable(
+  "planned_inspection",
+  {
+    plannedInspectionId: integer("planned_inspection_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => project.projectId, { onDelete: "cascade" }),
+
+    // target: description XOR part_code (check below), same shape as result
+    descriptionId: integer("description_id").references(() => description.descriptionId, {
+      onDelete: "cascade",
+    }),
+    partCodeId: integer("part_code_id").references(() => partCode.partCodeId, {
+      onDelete: "cascade",
+    }),
+
+    inspectionTypeCode: inspectionType("inspection_type_code").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxPlannedInspectionProjectId: index("idx_planned_inspection_project_id").on(
+      table.projectId
+    ),
+    // one planned type per target; NULLS NOT DISTINCT so the nullable half of
+    // the XOR target cannot slip duplicates past the constraint
+    uqPlannedInspectionTarget: unique("uq_planned_inspection_target")
+      .on(
+        table.projectId,
+        table.descriptionId,
+        table.partCodeId,
+        table.inspectionTypeCode
+      )
+      .nullsNotDistinct(),
+    plannedInspectionTargetCheck: check(
+      "planned_inspection_target_check",
+      sql`num_nonnulls(${table.descriptionId}, ${table.partCodeId}) = 1`,
+    ),
+  })
+);
+
+/* =========================================================
    RESULT (CORE FACT TABLE)
 ========================================================= */
 export const result = pgTable(
