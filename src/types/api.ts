@@ -633,6 +633,20 @@ export const createPlannedInspectionSchema = z
     message: "exactly one of descriptionId or partCodeId is required",
   });
 
+/* Restricted access — a blocked inspection attempt recorded as one RA result
+   row on a target. The partial unique indexes own the one-mark-per-target
+   rule; the type and the is_ra flag never come from the request. */
+export const createRestrictedAccessSchema = z
+  .object({
+    projectId: id,
+    descriptionId: id.optional(),
+    partCodeId: id.optional(),
+    remarks: optionalText,
+  })
+  .refine((v) => (v.descriptionId !== undefined) !== (v.partCodeId !== undefined), {
+    message: "exactly one of descriptionId or partCodeId is required",
+  });
+
 /* Inspection lifecycle — task-tree targets, layer, master anchors. Layer
    values are 1 (main) and 2 (one ad-hoc child); a third is refused. */
 export const startInspectionSchema = z

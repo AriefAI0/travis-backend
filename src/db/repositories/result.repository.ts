@@ -172,3 +172,26 @@ export const deleteResultById = async (
 
   return deletedResults[0] ?? null;
 };
+
+/** Restricted-access marks for a project: is_ra rows only, oldest-first. */
+export const listRestrictedAccessRecordsByProjectId = async (
+  projectId: number,
+  database: DbOrTx = db,
+) =>
+  database.query.result.findMany({
+    where: and(eq(result.projectId, projectId), eq(result.isRa, true), isNull(result.archivedAt)),
+    orderBy: asc(result.resultId),
+  });
+
+/** Unmark restricted access: deletes only is_ra rows, never a real result. */
+export const deleteRestrictedAccessById = async (
+  resultId: number,
+  database: DbOrTx = db,
+) => {
+  const deletedResults = await database
+    .delete(result)
+    .where(and(eq(result.resultId, resultId), eq(result.isRa, true)))
+    .returning();
+
+  return deletedResults[0] ?? null;
+};
