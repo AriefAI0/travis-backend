@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 /* =================== ENUMERATIONS =================== */
 
-export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
+export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "RA"]);
 
 export const mgiCriteriaPreset = pgEnum("mgi_criteria_preset", [
   "project_default",
@@ -367,7 +367,12 @@ export const result = pgTable(
     inspectionTypeCode: inspectionType("inspection_type_code").notNull(),
 
     projectId: integer("project_id").notNull(),
-    sessionId: integer("session_id").notNull(),
+    // null on RA rows only; a restricted-access mark has no session
+    sessionId: integer("session_id"),
+
+    // mirrors type = 'RA' for the unique indexes below: a partial index
+    // predicate cannot use an enum value added in the same migration txn
+    isRa: boolean("is_ra").notNull().default(false),
 
     // target: description XOR part_code (check below)
     descriptionId: integer("description_id").references(() => description.descriptionId, {
@@ -423,6 +428,14 @@ export const result = pgTable(
       table.sessionId,
       table.displayNumber
     ),
+    // one RA row per target, split by target kind: the XOR check makes exactly
+    // one branch reachable per row, so plain NULL semantics stay correct
+    uqResultRaDescription: uniqueIndex("uq_result_ra_description")
+      .on(table.projectId, table.descriptionId)
+      .where(sql`${table.isRa} AND ${table.descriptionId} IS NOT NULL`),
+    uqResultRaPartCode: uniqueIndex("uq_result_ra_part_code")
+      .on(table.projectId, table.partCodeId)
+      .where(sql`${table.isRa} AND ${table.partCodeId} IS NOT NULL`),
   })
 );
 

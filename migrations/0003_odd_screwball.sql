@@ -1,0 +1,1 @@
+ALTER TYPE "public"."inspection_type" ADD VALUE 'RA';
