@@ -17,9 +17,15 @@ export type ReportResultRow = {
   result_value: string;
   remarks: string;
   created_at: string;
-  // MinIO object key for the row's image; "" when the result has none
+  // MinIO object key for the row's image; NO_IMAGE when the result has none
   image: string;
 };
+
+// The image module's resolve() breaks on falsy tag values under renderAsync
+// (it returns a plain object where a promise is expected), so the row value
+// must never be "". This sentinel resolves to the transparent placeholder.
+// ponytail: switch back to "" when the module fixes its empty-value path.
+export const NO_IMAGE = "none";
 
 // The full variable set handed to docxtemplater.
 export type ReportTemplateData = {
@@ -153,7 +159,7 @@ export const gatherReportData = async (
     result_value: row.resultValue,
     remarks: row.remarks ?? "",
     created_at: row.createdAt,
-    image: imageKeys.get(row.resultId) ?? "",
+    image: imageKeys.get(row.resultId) ?? NO_IMAGE,
   });
 
   const rows: ReportResultRow[] = [];

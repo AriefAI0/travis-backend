@@ -63,6 +63,18 @@ const seed = async () => {
     contentType: "image/png",
     hasAnnotated: false,
   });
+
+  // second result with NO image row: exercises the empty image-tag path
+  await testDb.insert(schema.result).values({
+    resultId: 5002,
+    displayNumber: 2,
+    projectId: 1,
+    sessionId: 101,
+    inspectionTypeCode: "GVI",
+    partCodeId: 300,
+    layer: 1,
+    masterStartMs: 1000,
+  });
 };
 
 describe("generateReport", () => {
@@ -86,7 +98,9 @@ describe("generateReport", () => {
     expect(xml).not.toContain("{#result_rows}");
     expect(xml).not.toContain("{%image}");
 
-    expect(mediaEntriesIn(buf)).toHaveLength(1);
+    // every result block embeds one picture: the real image when the row has
+    // one, the transparent placeholder when it does not
+    expect(mediaEntriesIn(buf)).toHaveLength(2);
   });
 
   it("renders a project that has no results and embeds no image", async () => {

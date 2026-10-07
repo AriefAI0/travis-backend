@@ -5,7 +5,7 @@ import {
   testDb,
   truncateTestDatabase,
 } from "../../helpers/db";
-import { gatherReportData } from "../../../src/features/reports/report-data";
+import { gatherReportData, NO_IMAGE } from "../../../src/features/reports/report-data";
 import * as schema from "../../../src/db/schema";
 
 beforeAll(ensureTestDatabase);
@@ -103,7 +103,7 @@ describe("gatherReportData", () => {
     const data = await gatherReportData(1, testDb);
 
     expect(data.result_rows[0].image).toBe("1-alpha/session-1/evidence-img/9001.png");
-    expect(data.result_rows[1].image).toBe("");
+    expect(data.result_rows[1].image).toBe(NO_IMAGE);
   });
 
   it("prefers the annotated twin when the column says it exists", async () => {
