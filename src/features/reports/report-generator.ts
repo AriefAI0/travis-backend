@@ -50,6 +50,17 @@ export const loadTemplate = async (projectId: number): Promise<Buffer> => {
   }
 };
 
+// Whether the project has its own uploaded template, and when it was stored.
+// flow: stat the key > any miss = bundled default in play
+export const templateStatus = async (projectId: number) => {
+  try {
+    const stat = await minio.statObject(env.BUCKET_MEDIA, reportTemplateKey(projectId));
+    return { custom: true, updatedAt: stat.lastModified?.toISOString() ?? null };
+  } catch {
+    return { custom: false, updatedAt: null };
+  }
+};
+
 // One evidence image by object key. A miss is not fatal: a report with one
 // blank picture beats no report at all.
 const loadImage = async (objectKey: string): Promise<Buffer> => {

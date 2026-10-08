@@ -7,7 +7,7 @@ import { minio } from "../../lib/minio_storage/clients";
 import { parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
 import { generateReport } from "./generator-client";
-import { loadTemplate, reportTemplateKey } from "./report-generator";
+import { loadTemplate, reportTemplateKey, templateStatus } from "./report-generator";
 
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -38,6 +38,18 @@ export const reportRoutes = (database?: DbOrTx) => {
       "content-disposition": `attachment; filename="report-${projectId}.docx"`,
       "cache-control": "no-store",
     });
+  });
+
+  // which template is in play: uploaded or the bundled default
+  routes.get("/api/v1/projects/:projectId/report/status", async (c) => {
+    const projectId = parseId(c, "projectId");
+
+    const project = await getProjectById(projectId, database);
+    if (!project) {
+      throw new AppError(404, "project_not_found", `No project with id ${projectId}`);
+    }
+
+    return ok(c, await templateStatus(projectId));
   });
 
   // admin download: the layout to edit in Word, then upload back
