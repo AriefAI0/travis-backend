@@ -3,7 +3,7 @@ import type { DbOrTx } from "../../db/client";
 import { env } from "../../config/env";
 import { AppError } from "../../lib/error";
 import { minio } from "../../lib/minio_storage/clients";
-import { gatherReportData } from "./report-data";
+import { gatherReportData } from "../../db/services/report.service";
 
 // All three ship CommonJS only, so one require form covers them. The image
 // module must be required by its installed name: the older

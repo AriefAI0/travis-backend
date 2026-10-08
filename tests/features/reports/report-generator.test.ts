@@ -75,6 +75,12 @@ const seed = async () => {
     layer: 1,
     masterStartMs: 1000,
   });
+
+  // the type table reads these columns, not a formatted summary string
+  await testDb.insert(schema.resultGvi).values([
+    { resultId: 5001, kpRange: "KP-1", condition: "not_ok" },
+    { resultId: 5002, kpRange: "KP-2", gviCP: -900, condition: "ok" },
+  ]);
 };
 
 describe("generateReport", () => {
@@ -91,15 +97,19 @@ describe("generateReport", () => {
     expect(xml).toContain("DOC-1");
     expect(xml).toContain("100");
     expect(xml).toContain("Leg A");
+    expect(xml).toContain("GVI Results");
+    expect(xml).toContain("KP-2");
+    expect(xml).toContain("Good Condition");
     expect(xml).toContain("looks fine");
 
     // no placeholder text may survive the render
     expect(xml).not.toContain("{task_group}");
-    expect(xml).not.toContain("{#result_rows}");
+    expect(xml).not.toContain("{#items}");
+    expect(xml).not.toContain("{#sections}");
     expect(xml).not.toContain("{%image}");
 
-    // every result block embeds one picture: the real image when the row has
-    // one, the transparent placeholder when it does not
+    // every section embeds one picture: the real image when the row has one,
+    // the transparent placeholder when it does not
     expect(mediaEntriesIn(buf)).toHaveLength(2);
   });
 
