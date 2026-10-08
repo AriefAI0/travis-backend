@@ -6,122 +6,367 @@
     <title>Project Report</title>
 
     <!--
-      The editor and React come from esm.sh, so this page ships no build step
-      and adds no backend dependency. The import map pins ONE React instance:
-      the editor is imported with ?external=react,react-dom, which turns its
-      React imports into bare specifiers that resolve here. Two React copies
-      would break hooks.
+      Self-contained: no CDN, no build step, no framework. The page opens the
+      report only when asked, so a slow project never blocks the first paint.
     -->
-    <link
-      rel="stylesheet"
-      href="https://esm.sh/@docx-editor.dev/core@2.24.0/styles/editor.css"
-    />
-    <script type="importmap">
-      {
-        "imports": {
-          "react": "https://esm.sh/react@18.3.1",
-          "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
-          "react-dom": "https://esm.sh/react-dom@18.3.1",
-          "react-dom/client": "https://esm.sh/react-dom@18.3.1/client"
-        }
-      }
-    </script>
-
     <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :root {
+        --bg:        #f4f4f5;
+        --surface:   #ffffff;
+        --raised:    #fafafa;
+        --border:    #e4e4e7;
+        --text:      #18181b;
+        --muted:     #71717a;
+        --accent:    #18181b;
+        --accent-fg: #ffffff;
+        --danger:    #b91c1c;
+        --success:   #15803d;
+        --radius-sm: 4px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+      }
+
       body {
-        margin: 0;
-        font-family: system-ui, sans-serif;
-        background: #f4f4f5;
-        color: #18181b;
-      }
-      main {
-        max-width: 720px;
-        margin: 0 auto;
-        padding: 48px 16px;
-      }
-      main[hidden] {
-        display: none;
-      }
-      h1 {
-        font-size: 20px;
-        margin: 0 0 4px;
-      }
-      .sub {
-        margin: 0 0 24px;
-        color: #52525b;
-        font-size: 13px;
-      }
-      .download {
-        display: inline-block;
-        padding: 10px 18px;
-        background: #18181b;
-        color: #fff;
-        border-radius: 6px;
-        text-decoration: none;
+        font-family: system-ui, -apple-system, sans-serif;
         font-size: 14px;
+        background: var(--bg);
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 24px;
       }
-      .download[hidden] {
+
+      .dialog {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: 0 4px 24px rgba(0, 0, 0, .12);
+        width: 100%;
+        max-width: 480px;
+        overflow: hidden;
+      }
+
+      .dialog-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+      }
+      .dialog-header h2 { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+      .dialog-header .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+      .close-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: var(--muted);
+        padding: 4px;
+        border-radius: var(--radius-sm);
+        line-height: 1;
+        font-size: 18px;
+      }
+      .close-btn:hover { background: var(--bg); color: var(--text); }
+
+      .section { padding: 20px; }
+      .section + .section { border-top: 1px solid var(--border); }
+
+      .section-label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+
+      .state { display: none; }
+      .state.active { display: block; }
+
+      .btn-primary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 10px 18px;
+        background: var(--accent);
+        color: var(--accent-fg);
+        border: none;
+        border-radius: var(--radius-md);
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        min-height: 40px;
+        text-decoration: none;
+        transition: opacity 120ms;
+      }
+      .btn-primary:hover { opacity: .85; }
+      .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+
+      .btn-ghost {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        font-size: 13px;
+        cursor: pointer;
+        color: var(--text);
+        min-height: 36px;
+        transition: background 120ms;
+      }
+      .btn-ghost:hover { background: var(--bg); }
+      .btn-ghost:disabled { opacity: .45; cursor: not-allowed; }
+
+      :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      /* state: generating */
+      .progress-row { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--border);
+        border-top-color: var(--text);
+        border-radius: 50%;
+        animation: spin 700ms linear infinite;
+        flex-shrink: 0;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        .spinner { animation: none; border-top-color: var(--accent); }
+      }
+
+      /* state: ready */
+      .result-box {
+        background: var(--raised);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .result-box .filename { font-size: 13px; font-weight: 500; }
+      .result-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+      .copy-msg {
+        font-size: 12px;
+        color: var(--success);
         display: none;
       }
-      .error {
-        color: #b91c1c;
+      .copy-msg.visible { display: block; }
+
+      /* state: error */
+      .error-box {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        border-radius: var(--radius-md);
+        padding: 12px 14px;
+        font-size: 13px;
+        color: var(--danger);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
       }
-      #editor:empty {
-        display: none;
+      .error-box .retry { align-self: flex-start; color: var(--text); }
+
+      /* template section */
+      .template-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
       }
+      .template-info { display: flex; flex-direction: column; gap: 2px; }
+      .template-name { font-size: 13px; font-weight: 500; }
+      .template-meta { font-size: 12px; color: var(--muted); }
+      .template-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+      .upload-msg { font-size: 12px; color: var(--muted); margin-top: 10px; display: none; }
+      .upload-msg.visible { display: block; }
+      .upload-msg.error { color: var(--danger); }
+      .upload-msg.ok { color: var(--success); }
+
+      [hidden] { display: none !important; }
     </style>
   </head>
   <body>
-    <main>
-      <h1>Project report</h1>
-      <p class="sub" id="status">Building the report...</p>
-      <a class="download" id="download" hidden>Download report.docx</a>
-    </main>
-    <div id="editor"></div>
+    <div class="dialog" role="dialog" aria-labelledby="dialog-title">
+      <div class="dialog-header">
+        <div>
+          <h2 id="dialog-title">Report</h2>
+          <p class="meta" id="dialog-meta">Loading project&hellip;</p>
+        </div>
+        <button class="close-btn" id="close-btn" aria-label="Close">&#x2715;</button>
+      </div>
 
-    <script type="module">
-      // same origin as the docx route, so no CORS leg is involved
+      <div class="section">
+        <p class="section-label" id="generate-label">Generate</p>
+        <div aria-labelledby="generate-label">
+          <div class="state active" id="state-idle">
+            <button class="btn-primary" id="btn-generate" type="button">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+                <path d="M7.5 1v13M1 7.5h13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+              Generate report
+            </button>
+          </div>
+
+          <div class="state" id="state-generating">
+            <div class="progress-row" role="status">
+              <div class="spinner" aria-hidden="true"></div>
+              <span>Building report &mdash; gathering results and images&hellip;</span>
+            </div>
+          </div>
+
+          <div class="state" id="state-ready">
+            <div class="result-box">
+              <div class="filename" id="result-name">report.docx</div>
+              <div class="result-actions">
+                <a class="btn-primary" id="download-link" download>Download</a>
+                <button class="btn-ghost" id="copy-btn" type="button">Copy link</button>
+                <button class="btn-ghost" id="regenerate-btn" type="button">Regenerate</button>
+              </div>
+              <span class="copy-msg" id="copy-msg" role="status">Link copied</span>
+            </div>
+          </div>
+
+          <div class="state" id="state-error">
+            <div class="error-box">
+              <strong>Generation failed</strong>
+              <span id="error-msg"></span>
+              <button class="btn-ghost retry" id="retry-btn" type="button">Try again</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="section-label" id="template-label">Template</p>
+        <div class="template-row" aria-labelledby="template-label">
+          <div class="template-info">
+            <span class="template-name">Project template</span>
+            <span class="template-meta">Used instead of the built-in layout once uploaded</span>
+          </div>
+          <div class="template-actions">
+            <a class="btn-ghost" id="template-download" download>Download</a>
+            <button class="btn-ghost" id="template-replace" type="button">Replace</button>
+            <input type="file" id="template-file" accept=".docx" hidden />
+          </div>
+        </div>
+        <p class="upload-msg" id="upload-msg" role="status"></p>
+      </div>
+    </div>
+
+    <script>
+      // The docx route is the same origin as this page, so no CORS leg runs.
       const projectId = location.pathname.split("/").filter(Boolean).pop();
       const docxUrl = `/api/v1/projects/${projectId}/report/docx`;
-      const status = document.getElementById("status");
-      const link = document.getElementById("download");
-      const editorHost = document.getElementById("editor");
-      const heading = document.querySelector("main");
+      const templateUrl = `/api/v1/projects/${projectId}/report/template`;
+      const DOCX_MIME =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-      // the download route is the floor: it works with no CDN at all
-      const offerDownload = () => {
-        link.href = docxUrl;
-        link.hidden = false;
-        status.textContent = `Report ready for project ${projectId}.`;
+      const el = (id) => document.getElementById(id);
+      const states = ["idle", "generating", "ready", "error"];
+      const show = (name) => {
+        for (const state of states) {
+          el(`state-${state}`).classList.toggle("active", state === name);
+        }
       };
 
-      try {
-        const response = await fetch(docxUrl);
-        if (!response.ok) {
-          throw new Error(`${response.status} ${response.statusText}`);
-        }
-        const bytes = new Uint8Array(await response.arrayBuffer());
+      el("dialog-meta").textContent = `Project #${projectId}`;
+      el("result-name").textContent = `report-${projectId}.docx`;
+      el("download-link").download = `report-${projectId}.docx`;
+      el("template-download").href = templateUrl;
+      el("template-download").download = `template-${projectId}.docx`;
 
-        // A CDN failure must not blank the page, so the editor attempt is
-        // nested and any failure inside it falls back to the download link.
+      el("close-btn").addEventListener("click", () => window.close());
+
+      // Downloading the whole report is the only way to surface a failure to
+      // the user, so the blob is fetched rather than linked.
+      let objectUrl = null;
+
+      const startGenerate = async () => {
+        show("generating");
+        el("btn-generate").disabled = true;
+
         try {
-          const React = (await import("react")).default;
-          const { createRoot } = await import("react-dom/client");
-          const { DocxEditor } = await import(
-            "https://esm.sh/@docx-editor.dev/react@2.24.0?external=react,react-dom"
-          );
+          const response = await fetch(docxUrl);
+          if (!response.ok) {
+            const detail = (await response.text()).trim();
+            throw new Error(detail || `${response.status} ${response.statusText}`);
+          }
 
-          const root = createRoot(editorHost);
-          root.render(React.createElement(DocxEditor, { document: bytes, mode: "edit" }));
-          heading.hidden = true;
-        } catch (editorError) {
-          console.warn("report editor unavailable, offering the file instead:", editorError);
-          offerDownload();
+          // the previous blob is dead once a new one replaces it
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+          objectUrl = URL.createObjectURL(await response.blob());
+          el("download-link").href = objectUrl;
+          show("ready");
+        } catch (error) {
+          el("error-msg").textContent = error.message;
+          show("error");
+        } finally {
+          el("btn-generate").disabled = false;
         }
-      } catch (error) {
-        status.className = "error";
-        status.textContent = `Could not build the report: ${error.message}`;
-      }
+      };
+
+      el("btn-generate").addEventListener("click", startGenerate);
+      el("regenerate-btn").addEventListener("click", startGenerate);
+      el("retry-btn").addEventListener("click", startGenerate);
+
+      el("copy-btn").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(new URL(docxUrl, location.origin).href);
+          el("copy-msg").classList.add("visible");
+          setTimeout(() => el("copy-msg").classList.remove("visible"), 2000);
+        } catch {
+          // a denied clipboard is not worth an error state
+        }
+      });
+
+      const uploadMsg = el("upload-msg");
+      const setUploadMsg = (text, kind) => {
+        uploadMsg.textContent = text;
+        uploadMsg.className = `upload-msg visible${kind ? ` ${kind}` : ""}`;
+      };
+
+      el("template-replace").addEventListener("click", () => el("template-file").click());
+
+      el("template-file").addEventListener("change", async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        el("template-replace").disabled = true;
+        setUploadMsg("Uploading template...");
+
+        try {
+          const response = await fetch(templateUrl, {
+            method: "PUT",
+            headers: { "Content-Type": DOCX_MIME },
+            body: await file.arrayBuffer(),
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => null);
+            throw new Error(body?.error ?? `${response.status} ${response.statusText}`);
+          }
+          setUploadMsg("Template replaced. Generate the report again to use it.", "ok");
+        } catch (error) {
+          setUploadMsg(`Upload failed: ${error.message}`, "error");
+        } finally {
+          el("template-replace").disabled = false;
+          // clearing lets the same file be picked again after a failure
+          event.target.value = "";
+        }
+      });
     </script>
   </body>
 </html>

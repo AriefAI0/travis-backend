@@ -19,19 +19,25 @@ const seedProject = () =>
   testDb.insert(schema.project).values({ projectId: 1, displayNumber: 1, title: "Alpha" });
 
 describe("report routes", () => {
-  it("serves the viewer page with an editor attempt and a download fallback", async () => {
+  it("serves the dialog, which generates only on request", async () => {
     const res = await app.request("/reports/projects/1");
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
 
     const html = await res.text();
-    expect(html).toContain("Project report");
-    // the CDN editor attempt...
-    expect(html).toContain("@docx-editor.dev/react");
-    // ...and the fallback that runs when the CDN is unreachable
-    expect(html).toContain("offerDownload");
+    expect(html).toContain("Generate report");
+    // the report is fetched on click, never on load
     expect(html).toContain("/report/docx");
+    expect(html).toContain("startGenerate");
+    // template management rides the same page
+    expect(html).toContain("/report/template");
+    // no CDN leg remains
+    expect(html).not.toContain("esm.sh");
+
+    // the inline script must parse: a syntax error blanks the whole dialog
+    const script = html.slice(html.lastIndexOf("<script>") + 8, html.lastIndexOf("</script>"));
+    expect(() => new Function(script)).not.toThrow();
   });
 
   it("serves the filled document as a docx", async () => {
