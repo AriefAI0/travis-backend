@@ -4,9 +4,7 @@
 import type { InspectionTypeCode } from "../../types/api";
 import { db, type DbOrTx } from "../client";
 import { AppError, notFound } from "../../lib/error";
-import { log } from "../../lib/logger";
-import { minio } from "../../lib/minio_storage/clients";
-import { env } from "../../config/env";
+import { removeMediaPrefix } from "../../lib/minio_storage/cleanup";
 import { listIngestRecordsByClipIds } from "../repositories/recording-ingest.repository";
 import { listInspectionFormFieldRecordsByFormId } from "../repositories/inspection-form.repository";
 import { getSessionById } from "./session.service";
@@ -281,20 +279,6 @@ export const stopInspection = async (
   return database ? run(database) : db.transaction(run);
 };
 
-// best-effort removal of uploaded segment objects under an ingest prefix
-const removeIngestObjects = async (keyPrefix: string) => {
-  try {
-    const objects = minio.listObjects(env.BUCKET_MEDIA, keyPrefix, true);
-    const keys: string[] = [];
-    for await (const obj of objects) {
-      if (obj.name) keys.push(obj.name);
-    }
-    if (keys.length > 0) await minio.removeObjects(env.BUCKET_MEDIA, keys);
-  } catch (err) {
-    log.warn("cancel object cleanup failed", { keyPrefix, err: String(err) });
-  }
-};
-
 // cancel removes the open row, its clip, and the clip's uploaded media
 export const cancelInspection = async (resultId: number, database?: DbOrTx) => {
   const result = await getResultById(resultId, database);
@@ -317,7 +301,7 @@ export const cancelInspection = async (resultId: number, database?: DbOrTx) => {
     database,
   );
   for (const ingest of ingestRows) {
-    await removeIngestObjects(ingest.keyPrefix);
+    await removeMediaPrefix(ingest.keyPrefix);
   }
 
   const deleted = await deleteResult(resultId, database);
@@ -366,11 +350,11 @@ export const listActiveBySessionId = async (
 
 /* ---------- session timeline: rows for the event table, markers for playback ---------- */
 export type SessionInspectionBreadcrumb = {
-  taskGroup: { code: string; label: string };
-  taskCode: { code: string; label: string };
+  taskGroup: { code: string };
+  taskCode: { code: string };
   description: { label: string };
-  type: { code: string; label: string } | null;
-  partCode: { code: string; label: string | null } | null;
+  type: { code: string } | null;
+  partCode: { code: string } | null;
 };
 
 export type SessionInspectionRow = {
@@ -417,11 +401,11 @@ const buildBreadcrumb = async (
 
   return {
     breadcrumb: {
-      taskGroup: { code: group.code, label: group.label },
-      taskCode: { code: taskCode.code, label: taskCode.label },
+      taskGroup: { code: group.code },
+      taskCode: { code: taskCode.code },
       description: { label: comp.label },
-      type: type ? { code: type.code, label: type.label } : null,
-      partCode: partCode ? { code: partCode.code, label: partCode.label } : null,
+      type: type ? { code: type.code } : null,
+      partCode: partCode ? { code: partCode.code } : null,
     },
     label: partCode ? partCode.code : comp.label,
   };

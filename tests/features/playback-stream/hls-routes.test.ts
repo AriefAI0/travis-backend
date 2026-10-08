@@ -118,10 +118,10 @@ describe("hls routes", () => {
     // v2 target chain replaces the item chain
     await testDb
       .insert(schema.taskGroup)
-      .values({ taskGroupId: PROJECT_ID, projectId: PROJECT_ID, code: "100", label: "G" });
+      .values({ taskGroupId: PROJECT_ID, projectId: PROJECT_ID, code: "100" });
     await testDb
       .insert(schema.taskCode)
-      .values({ taskCodeId: PROJECT_ID, taskGroupId: PROJECT_ID, code: "101", label: "C" });
+      .values({ taskCodeId: PROJECT_ID, taskGroupId: PROJECT_ID, code: "101" });
     await testDb
       .insert(schema.description)
       .values({ descriptionId: PROJECT_ID, taskCodeId: PROJECT_ID, label: "I" });

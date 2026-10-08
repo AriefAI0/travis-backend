@@ -10,19 +10,18 @@ import {
 import { json } from "../../helpers/json";
 import { sessionTimelineRoutes } from "../../../src/features/session-timeline/routes";
 import { resultRoutes } from "../../../src/features/results/routes";
-import { reportRoutes } from "../../../src/features/reports/routes";
 import { projectRoutes } from "../../../src/features/projects/routes";
 import * as schema from "../../../src/db/schema";
 
-const app = appFor(testDb, sessionTimelineRoutes, resultRoutes, reportRoutes, projectRoutes);
+const app = appFor(testDb, sessionTimelineRoutes, resultRoutes, projectRoutes);
 
 // project > tree chain > session > capturing master, fixed ids
 const seedWorld = async () => {
   await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
-  await testDb.insert(schema.taskGroup).values({ taskGroupId: 10, projectId: 1, code: "100", label: "Rows" });
-  await testDb.insert(schema.taskCode).values({ taskCodeId: 20, taskGroupId: 10, code: "101", label: "Row A" });
+  await testDb.insert(schema.taskGroup).values({ taskGroupId: 10, projectId: 1, code: "100" });
+  await testDb.insert(schema.taskCode).values({ taskCodeId: 20, taskGroupId: 10, code: "101" });
   await testDb.insert(schema.description).values({ descriptionId: 30, taskCodeId: 20, label: "Row A" });
-  await testDb.insert(schema.type).values({ typeId: 50, descriptionId: 30, code: "VDM", label: "VDM" });
+  await testDb.insert(schema.type).values({ typeId: 50, descriptionId: 30, code: "VDM" });
   await testDb.insert(schema.partCode).values({ partCodeId: 60, typeId: 50, code: "101-105" });
   await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 101, projectId: 1, name: "Run 1", startEpoch: 1000 });
   await testDb.insert(schema.recordingIngest).values({
@@ -50,7 +49,7 @@ const insertResult = async (overrides: Partial<typeof schema.result.$inferInsert
   });
 };
 
-// flow: rows > markers > sidebars > report stub
+// flow: rows > markers > sidebars
 describe("session timeline routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
@@ -116,13 +115,5 @@ describe("session timeline routes", () => {
       .data as Record<string, any>;
     expect(code.sessions[0]!.results).toHaveLength(1);
     expect(code.target.partCodeId).toBe(60);
-  });
-
-  it("answers the report stub with 501", async () => {
-    await seedWorld();
-    const res = await app.request("/api/v1/projects/1/report/preview");
-    expect(res.status).toBe(501);
-    const body = (await res.json()) as Record<string, any>;
-    expect(body.code).toBe("not_implemented");
   });
 });

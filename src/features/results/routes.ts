@@ -19,10 +19,10 @@ import {
   removeResultImage,
 } from "../../db/services/result-image.service";
 import { listSessionRecordingsByProjectId } from "../../db/services/video.service";
-import { getTargetResultSidebar } from "../../db/services/target-results.service";
+import { getTargetResultSidebar, getTargetResultsBatch } from "../../db/services/target-results.service";
 import { parseBody, parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
-import { createResultImageSchema, resultIdsSchema } from "../../types/api";
+import { createResultImageSchema, resultIdsSchema, targetIdsSchema } from "../../types/api";
 
 // read-only views: sidebar, summary, evidence, typed details.
 // App parity: "no data" is data:null, never 404.
@@ -35,6 +35,10 @@ export const resultRoutes = (database?: DbOrTx) => {
     ok(c, await getTargetResultSidebar({ descriptionId: parseId(c, "id") }, database)));
   routes.get("/api/v1/part-codes/:id/results", async (c) =>
     ok(c, await getTargetResultSidebar({ partCodeId: parseId(c, "id") }, database)));
+
+  // batch target sidebars: one call for every visible grid row, capped at 100 ids
+  routes.post("/api/v1/targets/results", async (c) =>
+    ok(c, await getTargetResultsBatch(await parseBody(c, targetIdsSchema), database)));
 
   // mirrors the app's result:listProjectRecordings channel
   routes.get("/api/v1/projects/:projectId/recordings", async (c) => {

@@ -17,7 +17,7 @@ export const listTaskGroupRecordsByProjectId = async (
 ) =>
   database.query.taskGroup.findMany({
     where: and(eq(taskGroup.projectId, projectId), isNull(taskGroup.archivedAt)),
-    orderBy: [asc(taskGroup.displayOrder), asc(taskGroup.taskGroupId)],
+    orderBy: [asc(taskGroup.taskGroupId)],
   });
 
 export const findTaskGroupById = async (taskGroupId: number, database: DbOrTx = db) =>

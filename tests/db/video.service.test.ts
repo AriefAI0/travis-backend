@@ -51,14 +51,12 @@ const seedVideoContext = async () => {
     taskGroupId: 1,
     projectId: 1,
     code: "100",
-    label: "Rows",
   });
 
   await testDb.insert(schema.taskCode).values({
     taskCodeId: 10,
     taskGroupId: 1,
     code: "101",
-    label: "Row A",
   });
 
   await testDb.insert(schema.description).values({
@@ -71,7 +69,6 @@ const seedVideoContext = async () => {
     typeId: 1,
     descriptionId: 100,
     code: "VDM",
-    label: "VDM",
   });
 
   await testDb.insert(schema.inspectionForm).values({

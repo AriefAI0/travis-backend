@@ -17,7 +17,7 @@ export const listTypeRecordsByDescriptionId = async (
 ) =>
   database.query.type.findMany({
     where: and(eq(type.descriptionId, descriptionId), isNull(type.archivedAt)),
-    orderBy: [asc(type.displayOrder), asc(type.typeId)],
+    orderBy: [asc(type.typeId)],
   });
 
 // batched tree read: all types under a set of descriptions
@@ -28,7 +28,7 @@ export const listTypeRecordsByDescriptionIds = async (
   descriptionIds.length
     ? database.query.type.findMany({
         where: and(inArray(type.descriptionId, descriptionIds), isNull(type.archivedAt)),
-        orderBy: [asc(type.displayOrder), asc(type.typeId)],
+        orderBy: [asc(type.typeId)],
       })
     : [];
 
@@ -65,14 +65,14 @@ export const deleteTypeById = async (typeId: number, database: DbOrTx = db) => {
   return deleted[0] ?? null;
 };
 
-// project-wide type vocabulary for autocomplete: distinct code+label pairs
+// project-wide type vocabulary for autocomplete: the distinct type codes
 // walked down the tree chain (no catalog table anymore)
 export const listTypeCatalogByProjectId = async (
   projectId: number,
   database: DbOrTx = db,
 ) =>
   database
-    .selectDistinct({ code: type.code, label: type.label })
+    .selectDistinct({ code: type.code })
     .from(type)
     .innerJoin(description, eq(description.descriptionId, type.descriptionId))
     .innerJoin(taskCode, eq(taskCode.taskCodeId, description.taskCodeId))

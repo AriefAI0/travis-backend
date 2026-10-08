@@ -17,7 +17,7 @@ export const listTaskCodeRecordsByTaskGroupId = async (
 ) =>
   database.query.taskCode.findMany({
     where: and(eq(taskCode.taskGroupId, taskGroupId), isNull(taskCode.archivedAt)),
-    orderBy: [asc(taskCode.displayOrder), asc(taskCode.taskCodeId)],
+    orderBy: [asc(taskCode.taskCodeId)],
   });
 
 // batched tree read: all codes under a set of groups
@@ -28,7 +28,7 @@ export const listTaskCodeRecordsByTaskGroupIds = async (
   taskGroupIds.length
     ? database.query.taskCode.findMany({
         where: and(inArray(taskCode.taskGroupId, taskGroupIds), isNull(taskCode.archivedAt)),
-        orderBy: [asc(taskCode.displayOrder), asc(taskCode.taskCodeId)],
+        orderBy: [asc(taskCode.taskCodeId)],
       })
     : [];
 

@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 /* =================== ENUMERATIONS =================== */
 
-export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
+export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RA"]);
 
 export const mgiCriteriaPreset = pgEnum("mgi_criteria_preset", [
   "project_default",
@@ -140,8 +140,6 @@ export const taskGroup = pgTable(
       .references(() => project.projectId, { onDelete: "cascade" }),
 
     code: text("code").notNull(),
-    label: text("label").notNull(),
-    displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
     ...updatedAt,
@@ -166,8 +164,6 @@ export const taskCode = pgTable(
       .references(() => taskGroup.taskGroupId, { onDelete: "cascade" }),
 
     code: text("code").notNull(),
-    label: text("label").notNull(),
-    displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
     ...updatedAt,
@@ -190,7 +186,6 @@ export const description = pgTable(
       .references(() => taskCode.taskCodeId, { onDelete: "cascade" }),
 
     label: text("label").notNull(),
-    displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
     ...updatedAt,
@@ -216,8 +211,6 @@ export const type = pgTable(
       .references(() => description.descriptionId, { onDelete: "cascade" }),
 
     code: text("code").notNull(),
-    label: text("label").notNull(),
-    displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
     ...updatedAt,
@@ -242,8 +235,6 @@ export const partCode = pgTable(
       .references(() => type.typeId, { onDelete: "cascade" }),
 
     code: text("code").notNull(),
-    label: text("label"),
-    displayOrder: integer("display_order").notNull().default(0),
 
     ...createdAt,
     ...updatedAt,
@@ -318,6 +309,54 @@ export const inspectionFormField = pgTable(
 );
 
 /* =========================================================
+   PLANNED INSPECTION (preassigned task, before any session)
+========================================================= */
+export const plannedInspection = pgTable(
+  "planned_inspection",
+  {
+    plannedInspectionId: integer("planned_inspection_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => project.projectId, { onDelete: "cascade" }),
+
+    // target: description XOR part_code (check below), same shape as result
+    descriptionId: integer("description_id").references(() => description.descriptionId, {
+      onDelete: "cascade",
+    }),
+    partCodeId: integer("part_code_id").references(() => partCode.partCodeId, {
+      onDelete: "cascade",
+    }),
+
+    inspectionTypeCode: inspectionType("inspection_type_code").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxPlannedInspectionProjectId: index("idx_planned_inspection_project_id").on(
+      table.projectId
+    ),
+    // one planned type per target; NULLS NOT DISTINCT so the nullable half of
+    // the XOR target cannot slip duplicates past the constraint
+    uqPlannedInspectionTarget: unique("uq_planned_inspection_target")
+      .on(
+        table.projectId,
+        table.descriptionId,
+        table.partCodeId,
+        table.inspectionTypeCode
+      )
+      .nullsNotDistinct(),
+    plannedInspectionTargetCheck: check(
+      "planned_inspection_target_check",
+      sql`num_nonnulls(${table.descriptionId}, ${table.partCodeId}) = 1`,
+    ),
+  })
+);
+
+/* =========================================================
    RESULT (CORE FACT TABLE)
 ========================================================= */
 export const result = pgTable(
@@ -328,7 +367,12 @@ export const result = pgTable(
     inspectionTypeCode: inspectionType("inspection_type_code").notNull(),
 
     projectId: integer("project_id").notNull(),
-    sessionId: integer("session_id").notNull(),
+    // null on RA rows only; a restricted-access mark has no session
+    sessionId: integer("session_id"),
+
+    // mirrors type = 'RA' for the unique indexes below: a partial index
+    // predicate cannot use an enum value added in the same migration txn
+    isRa: boolean("is_ra").notNull().default(false),
 
     // target: description XOR part_code (check below)
     descriptionId: integer("description_id").references(() => description.descriptionId, {
@@ -384,6 +428,14 @@ export const result = pgTable(
       table.sessionId,
       table.displayNumber
     ),
+    // one RA row per target, split by target kind: the XOR check makes exactly
+    // one branch reachable per row, so plain NULL semantics stay correct
+    uqResultRaDescription: uniqueIndex("uq_result_ra_description")
+      .on(table.projectId, table.descriptionId)
+      .where(sql`${table.isRa} AND ${table.descriptionId} IS NOT NULL`),
+    uqResultRaPartCode: uniqueIndex("uq_result_ra_part_code")
+      .on(table.projectId, table.partCodeId)
+      .where(sql`${table.isRa} AND ${table.partCodeId} IS NOT NULL`),
   })
 );
 
@@ -746,10 +798,10 @@ export const videoClip = pgTable(
       .notNull()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
-    // clips survive independent of the session master row
+    // cascade: a project teardown drops the session, so its clips follow
     sessionId: integer("session_id")
       .notNull()
-      .references(() => session.sessionId),
+      .references(() => session.sessionId, { onDelete: "cascade" }),
 
     startOffsetMs: integer("start_offset_ms").notNull(),
     endOffsetMs: integer("end_offset_ms"),

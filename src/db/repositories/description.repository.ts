@@ -17,7 +17,7 @@ export const listDescriptionRecordsByTaskCodeId = async (
 ) =>
   database.query.description.findMany({
     where: and(eq(description.taskCodeId, taskCodeId), isNull(description.archivedAt)),
-    orderBy: [asc(description.displayOrder), asc(description.descriptionId)],
+    orderBy: [asc(description.descriptionId)],
   });
 
 // batched tree read: all descriptions under a set of task codes
@@ -31,7 +31,7 @@ export const listDescriptionRecordsByTaskCodeIds = async (
           inArray(description.taskCodeId, taskCodeIds),
           isNull(description.archivedAt),
         ),
-        orderBy: [asc(description.displayOrder), asc(description.descriptionId)],
+        orderBy: [asc(description.descriptionId)],
       })
     : [];
 

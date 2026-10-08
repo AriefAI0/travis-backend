@@ -49,6 +49,19 @@ export const listVideoClipRecordsByResultId = async (
     orderBy: asc(videoClip.startOffsetMs),
   });
 
+/** Batched clip read across many results (bulk delete key collection). */
+export const listVideoClipRecordsByResultIds = async (
+  resultIds: number[],
+  database: DbOrTx = db,
+) => {
+  if (resultIds.length === 0) return [];
+
+  return database.query.videoClip.findMany({
+    where: inArray(videoClip.resultId, resultIds),
+    orderBy: asc(videoClip.clipId),
+  });
+};
+
 export const findActiveVideoClipByResultId = async (
   resultId: number,
   database: DbOrTx = db,
