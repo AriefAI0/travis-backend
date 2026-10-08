@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 /* =================== ENUMERATIONS =================== */
 
-export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RA"]);
+export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RA"]);
 
 export const mgiCriteriaPreset = pgEnum("mgi_criteria_preset", [
   "project_default",
@@ -20,6 +20,8 @@ export const scourExposedPile = pgEnum("scour_exposed_pile", ["exposed", "not_ex
 export const gviCondition = pgEnum("gvi_condition", ["ok", "not_ok"]);
 
 export const cviMemberType = pgEnum("cvi_member_type", ["chord", "brace"]);
+
+export const dviMemberType = pgEnum("dvi_member_type", ["chord", "brace"]);
 
 export const bsiGapCondition = pgEnum("bsi_gap_condition", ["gap", "no_gap"]);
 
