@@ -5,7 +5,8 @@ import { AppError } from "../../lib/error";
 import { minio } from "../../lib/minio_storage/clients";
 import { parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
-import { generateReport, reportTemplateKey } from "./report-generator";
+import { generateReport } from "./generator-client";
+import { reportTemplateKey } from "./report-generator";
 
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";

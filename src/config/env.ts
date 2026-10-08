@@ -18,6 +18,9 @@ const schema = z.object({
   // packaged renderer loads from file://, which sends Origin: null.
   CORS_ALLOWED_ORIGINS: z.string().default("http://localhost:5173,null"),
   RECORDING_V2_TOKEN: z.string().min(1).optional(),
+  // Where the standalone report renderer listens. Unset means this process
+  // renders reports itself, which is the local-dev default.
+  REPORT_GENERATOR_URL: z.string().url().optional(),
   // signing key for scoped playback tokens; required, separate from ingest tickets
   PLAYBACK_TOKEN_SECRET: z
     .string()

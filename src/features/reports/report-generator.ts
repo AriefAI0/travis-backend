@@ -95,17 +95,12 @@ const describeTemplateError = (err: unknown): string => {
   return err instanceof Error ? err.message : String(err);
 };
 
-// Fill a project's report template and return the finished .docx.
-// flow: load template + data > prefetch images > wire image module > render
-export const generateReport = async (
-  projectId: number,
-  database?: DbOrTx,
+// Fill a template with gathered data and return the finished .docx.
+// flow: prefetch images > wire image module > render
+export const renderReport = async (
+  template: Buffer,
+  data: ReportTemplateData,
 ): Promise<Buffer> => {
-  const [template, data] = await Promise.all([
-    loadTemplate(projectId),
-    gatherReportData(projectId, database),
-  ]);
-
   // one parallel MinIO batch replaces a round-trip per image tag
   const imageMap = await prefetchImages(collectImageKeys(data));
 
@@ -134,4 +129,24 @@ export const generateReport = async (
   }
 
   return doc.getZip().generate({ type: "nodebuffer" }) as Buffer;
+};
+
+// A project's template and data. Both report paths start here, so the template
+// lookup and its bundled fallback stay in one place.
+export const loadReportInputs = async (projectId: number, database?: DbOrTx) => {
+  const [template, data] = await Promise.all([
+    loadTemplate(projectId),
+    gatherReportData(projectId, database),
+  ]);
+
+  return { template, data };
+};
+
+// Render a project's report in this process.
+export const generateReport = async (
+  projectId: number,
+  database?: DbOrTx,
+): Promise<Buffer> => {
+  const { template, data } = await loadReportInputs(projectId, database);
+  return renderReport(template, data);
 };
