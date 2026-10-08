@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 /* =================== ENUMERATIONS =================== */
 
-export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RA"]);
+export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RA"]);
 
 export const mgiCriteriaPreset = pgEnum("mgi_criteria_preset", [
   "project_default",
@@ -623,7 +623,7 @@ export const resultDviPosition = pgTable(
 
     resultId: integer("result_id")
       .notNull()
-      .references(() => resultCvi.resultId, { onDelete: "cascade" }),
+      .references(() => resultDvi.resultId, { onDelete: "cascade" }),
 
     clockPosition: text("clock_position").notNull(),
     utMm: doublePrecision("ut_mm"),
