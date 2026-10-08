@@ -4,6 +4,7 @@ import {
   getBsiDetailByResultId,
   getCpDetailByResultId,
   getCviDetailByResultId,
+  getDviDetailByResultId,
   getFmdDetailByResultId,
   getGviDetailByResultId,
   getResultEvidence,
@@ -65,6 +66,8 @@ export const resultRoutes = (database?: DbOrTx) => {
     ok(c, await getGviDetailByResultId(parseId(c, "id"), database)));
   routes.get("/api/v1/results/:id/cvi", async (c) =>
     ok(c, await getCviDetailByResultId(parseId(c, "id"), database)));
+  routes.get("/api/v1/results/:id/dvi", async (c) =>
+    ok(c, await getDviDetailByResultId(parseId(c, "id"), database)));
   routes.get("/api/v1/results/:id/bsi", async (c) =>
     ok(c, await getBsiDetailByResultId(parseId(c, "id"), database)));
 
