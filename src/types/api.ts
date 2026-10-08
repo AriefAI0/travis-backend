@@ -128,7 +128,7 @@ export type ProjectRecord = {
 /* =========================================================
    result (app: src/shared/result.ts)
 ========================================================= */
-export type InspectionTypeCode = "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
+export type InspectionTypeCode = "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON";
 
 export type MgiDetail = {
   resultId: number;
@@ -477,7 +477,7 @@ export type ReportGatherData = {
 const id = z.number().int().positive();
 const optionalText = z.string().min(1).nullable().optional();
 const itemStatus = z.enum(["not_set", "pending", "complete"]);
-const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
+export const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON"]);
 
 // projects — Create/UpdateProjectInput share one shape (title required)
 export const projectInputSchema = z.object({
@@ -605,6 +605,52 @@ export const bulkDeleteTaskStructureSchema = z.object({
     .min(1)
     .max(500),
 });
+
+// One import carries a whole sheet. A row names the levels it fills, and a null
+// description, type, or part code means the row stops at the level above it.
+export const importTaskStructureSchema = z.object({
+  projectId: id,
+  mode: z.enum(["append", "replace"]),
+  // preview: the same walk and the same counts, rolled back before it commits
+  dryRun: z.boolean().optional(),
+  rows: z
+    .array(
+      z.object({
+        taskGroup: z.string().min(1),
+        taskCode: z.string().min(1),
+        description: z.string().min(1).nullable(),
+        type: z.string().min(1).nullable(),
+        partCode: z.string().min(1).nullable(),
+        preAssigned: z.array(z.string().min(1)).max(20),
+      }),
+    )
+    .min(1)
+    .max(20000),
+});
+
+export type ImportRowInput = z.infer<typeof importTaskStructureSchema>["rows"][number];
+export type ImportTaskStructureInput = z.infer<typeof importTaskStructureSchema>;
+
+// What one import did, in the words the import dialog shows the operator.
+// Rows with no usable task code never reach here: the app drops them as it reads
+// the sheet, so `total` always equals `imported + matched`.
+export type ImportTaskStructureSummary = {
+  rows: {
+    total: number;
+    // the row's deepest node was new
+    imported: number;
+    // every node in the row already existed, so the row wrote nothing
+    matched: number;
+  };
+  nodesCreated: number;
+  inspections: {
+    planned: number;
+    // idempotent: the pair was already planned, which is not an error
+    alreadyPlanned: number;
+    // a code outside the seven, or a row with no target the route accepts
+    skipped: number;
+  };
+};
 
 /* inspection forms — save-on-confirm posts the custom fields only;
    builtins come from the server registry, never the request */

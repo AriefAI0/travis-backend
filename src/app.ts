@@ -13,6 +13,7 @@ import { taskStructureRoutes } from "./features/task-structure/routes";
 import { plannedInspectionRoutes } from "./features/planned-inspections/routes";
 import { restrictedAccessRoutes } from "./features/restricted-access/routes";
 import { inspectionFormRoutes } from "./features/inspection-forms/routes";
+import { importRoutes } from "./features/import/routes";
 import { sessionTimelineRoutes } from "./features/session-timeline/routes";
 import { reportRoutes } from "./features/reports/routes";
 import { env } from "./config/env";
@@ -34,6 +35,7 @@ app.route("/", taskStructureRoutes());
 app.route("/", plannedInspectionRoutes());
 app.route("/", restrictedAccessRoutes());
 app.route("/", inspectionFormRoutes());
+app.route("/", importRoutes());
 app.route("/", sessionTimelineRoutes());
 // Stub only: report surface answers 501 until the report work lands.
 app.route("/", reportRoutes());
