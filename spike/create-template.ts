@@ -70,9 +70,13 @@ const conditional = (type: string, body: string) =>
 
 /* ---------- per-type blocks ---------- */
 
+// Emission order across the whole document.
+const TYPE_ORDER = ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI"] as const;
+type InspectionType = (typeof TYPE_ORDER)[number];
+
 // One row per result, except CVI/DVI and MGI which repeat the parent fields
 // down each child row. Word cannot nest a loop inside a table row.
-const BLOCKS: Record<string, string> = {
+const BLOCKS: Record<InspectionType, string> = {
   GVI: loopTable(
     7,
     ["KP Range", "Depth/El", "GVI CP", "GVI UT", "Condition", "Remarks", "Recorded"],
@@ -115,10 +119,9 @@ const BLOCKS: Record<string, string> = {
     ["{no_mg_observed}", "{criteria_preset}", "{growth_type}", "{species}", "{coverage_percent}", "{thickness_mm}", "{remarks}"],
     "rows",
   ),
-};
 
-// BSI carries 24 columns, so it splits over four tables.
-BLOCKS.BSI =
+  // BSI carries 24 columns, so it splits over four tables.
+  BSI:
   loopTable(
     8,
     ["Clamp Type", "Depth/El", "Bolt/Nut Qty", "Outboard CP", "CP Anomaly Rec.", "Hinge Pin", "Hinge Bolt/Nut Qty", "Liners"],
@@ -142,10 +145,8 @@ BLOCKS.BSI =
     ["Clamp Missing Bolts", "Clamp Missing Washers", "Hinge Missing Bolts", "Hinge Missing Washers", "Remarks", "Recorded"],
     ["{clamp_missing_bolts}", "{clamp_missing_washers}", "{hinge_missing_bolts}", "{hinge_missing_washers}", "{remarks}", "{recorded}"],
     "rows",
-  );
-
-// Emission order across the whole document.
-const TYPE_ORDER = ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI"];
+  ),
+};
 
 /* ---------- document ---------- */
 
@@ -207,14 +208,18 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>
 </w:styles>`;
 
-// Assemble the zip parts.
+// Assemble the zip parts. Every entry carries the same fixed timestamp so
+// regenerating the template only changes the file when its content changes.
+const ZIP_DATE = new Date(0);
+
 const buildTemplate = () => {
   const zip = new PizZip();
-  zip.file("[Content_Types].xml", CONTENT_TYPES);
-  zip.file("_rels/.rels", ROOT_RELS);
-  zip.file("word/document.xml", DOCUMENT_XML);
-  zip.file("word/_rels/document.xml.rels", DOC_RELS);
-  zip.file("word/styles.xml", STYLES);
+  const entry = { date: ZIP_DATE };
+  zip.file("[Content_Types].xml", CONTENT_TYPES, entry);
+  zip.file("_rels/.rels", ROOT_RELS, entry);
+  zip.file("word/document.xml", DOCUMENT_XML, entry);
+  zip.file("word/_rels/document.xml.rels", DOC_RELS, entry);
+  zip.file("word/styles.xml", STYLES, entry);
   return zip.generate({ type: "nodebuffer", compression: "DEFLATE" }) as Buffer;
 };
 
@@ -243,11 +248,11 @@ const renderWith = async (buffer: Buffer, data: unknown): Promise<string> => {
   return doc.getZip().files["word/document.xml"].asText();
 };
 
-const flags = (on: string) =>
+const flags = (on: InspectionType) =>
   Object.fromEntries(TYPE_ORDER.map((type) => [`is${type}`, type === on]));
 
 // One representative row per type, keys matching the template tags.
-const ROW_FOR: Record<string, Record<string, string>> = {
+const ROW_FOR: Record<InspectionType, Record<string, string>> = {
   GVI: { kp_range: "KP1", depth_el: "1.5", gvi_cp: "2", gvi_ut: "3", condition: "GOOD", remarks: "gvi-remark", recorded: "2026-10-09" },
   CP: { anode_type: "AL", voltage_mv: "900", depletion: "20", anode_width: "1", anode_height: "2", anode_length: "3", widest_pit: "4", deepest_pit: "5", remarks: "cp-remark", recorded: "2026-10-09" },
   FMD: { depth_el: "1.5", initial_attempt: "PASS", additional_attempt_1: "PASS", additional_attempt_2: "FAIL", additional_attempt_3: "PASS", remarks: "fmd-remark", recorded: "2026-10-09" },
@@ -258,7 +263,7 @@ const ROW_FOR: Record<string, Record<string, string>> = {
   BSI: { clamp_type: "C1", depth_el: "2", clamp_bolt_nut_quantity: "8", outboard_clamp_cp: "1", cp_anomaly_recommendation: "none", hinge_pin: "YES", hinge_bolt_nut_quantity: "4", liners: "NO", inboard_gap_condition: "OK", inboard_estimate_gap: "1", inboard_alignment_condition: "OK", inboard_misaligned_position: "na", inboard_anomaly_recommendation: "inb-rec", outboard_gap_condition: "OK", outboard_estimate_gap: "2", outboard_alignment_condition: "OK", outboard_misaligned_position: "na", outboard_anomaly_recommendation: "outb-rec", clamp_missing_bolts: "1,2", clamp_missing_washers: "3", hinge_missing_bolts: "", hinge_missing_washers: "", remarks: "bsi-remark", recorded: "2026-10-09" },
 };
 
-const section = (on: string) => ({
+const section = (on: InspectionType) => ({
   inspection_type: on,
   image: "none",
   ...flags(on),
