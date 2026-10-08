@@ -128,7 +128,7 @@ export type ProjectRecord = {
 /* =========================================================
    result (app: src/shared/result.ts)
 ========================================================= */
-export type InspectionTypeCode = "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
+export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
 
 export type MgiDetail = {
   resultId: number;
@@ -210,6 +210,22 @@ export type CviDetail = {
   datumReference: string | null;
   memberType: "chord" | "brace";
   positions: CviPositionDetail[];
+  cpPotentialMv: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DviPositionDetail = {
+  clockPosition: string;
+  utMm: number | null;
+  findings: string | null;
+};
+
+export type DviDetail = {
+  resultId: number;
+  datumReference: string | null;
+  memberType: "chord" | "brace";
+  positions: DviPositionDetail[];
   cpPotentialMv: number | null;
   createdAt: string;
   updatedAt: string;
@@ -450,6 +466,7 @@ export type ReportGatherResult = {
     | ScourDetail
     | GviDetail
     | CviDetail
+    | DviDetail
     | ResultMgiWithFindings
     | null;
 };
@@ -620,7 +637,7 @@ export const inspectionFormCustomFieldSchema = z.object({
 export const saveInspectionFormSchema = z.object({
   customFields: z.array(inspectionFormCustomFieldSchema),
 });
-export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
+export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
 
 /* Inspection lifecycle — task-tree targets, layer, master anchors. Layer
    values are 1 (main) and 2 (one ad-hoc child); a third is refused. */
@@ -760,6 +777,22 @@ export const cviPayloadSchema = z.object({
   cpPotentialMv: z.number().nullable(),
 });
 
+export const dviPayloadSchema = z.object({
+  kind: z.literal("dvi"),
+  version: z.literal(1),
+  datumReference: z.string().min(1),
+  memberType: z.enum(["chord", "brace"]),
+  positions: z.array(
+    z.object({
+      // the app's CLOCK_POSITIONS const
+      clockPosition: z.enum(["12", "3", "6", "9"]),
+      utMm: z.number().nullable(),
+      findings: z.string(),
+    }),
+  ),
+  cpPotentialMv: z.number().nullable(),
+});
+
 // field names mirror the app's bsiTypes.ts payload verbatim (CPAnomalyRecommendation included)
 const bsiMissingPosition = z.object({ position: z.string().min(1) });
 
@@ -808,4 +841,5 @@ export type FmdPayloadInput = z.infer<typeof fmdPayloadSchema>;
 export type ScourPayloadInput = z.infer<typeof scourPayloadSchema>;
 export type GviPayloadInput = z.infer<typeof gviPayloadSchema>;
 export type CviPayloadInput = z.infer<typeof cviPayloadSchema>;
+export type DviPayloadInput = z.infer<typeof dviPayloadSchema>;
 export type BsiPayloadInput = z.infer<typeof bsiPayloadSchema>;
