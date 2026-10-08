@@ -548,7 +548,7 @@ export const resultCviPosition = pgTable(
   })
 );
 
-/* DVI — Close Visual Inspection */
+/* DVI — Detailed Visual Inspection */
 export const resultDvi = pgTable(
   "result_dvi",
   {
