@@ -83,6 +83,60 @@ const seed = async () => {
   ]);
 };
 
+// one target carrying three inspection types at once
+const seedMixedTypes = async () => {
+  await seed();
+  await testDb.insert(schema.result).values([
+    {
+      resultId: 5003,
+      displayNumber: 3,
+      projectId: 1,
+      sessionId: 101,
+      inspectionTypeCode: "CVI",
+      descriptionId: 100,
+      layer: 1,
+      masterStartMs: 2000,
+    },
+    {
+      resultId: 5004,
+      displayNumber: 4,
+      projectId: 1,
+      sessionId: 101,
+      inspectionTypeCode: "MGI",
+      descriptionId: 100,
+      layer: 1,
+      masterStartMs: 3000,
+    },
+  ]);
+  await testDb.insert(schema.resultCvi).values({
+    resultId: 5003,
+    datumReference: "D-1",
+    memberType: "chord",
+    cpPotentialMv: -850,
+  });
+  await testDb.insert(schema.resultCviPosition).values({
+    resultId: 5003,
+    clockPosition: "12:00",
+    utMm: 9.5,
+    findings: "pitting",
+    sortOrder: 0,
+  });
+  await testDb.insert(schema.resultMgi).values({
+    resultId: 5004,
+    noMgObserved: 0,
+    criteriaPreset: "client_cnc",
+  });
+  await testDb.insert(schema.resultMgiFinding).values({
+    resultMgiId: 5004,
+    growthType: "hard",
+    species: "Barnacle",
+    coveragePercent: 40,
+    thicknessMm: 12,
+    remarks: "heavy",
+    sortOrder: 0,
+  });
+};
+
 describe("generateReport", () => {
   it("renders the bundled template with data and one embedded image", async () => {
     await seed();
@@ -123,6 +177,37 @@ describe("generateReport", () => {
     expect(buf.subarray(0, 2).toString()).toBe("PK");
     expect(documentXmlIn(buf)).toContain("Empty");
     expect(mediaEntriesIn(buf)).toHaveLength(0);
+  });
+
+  it("renders one table per inspection type with that type's columns", async () => {
+    await seedMixedTypes();
+
+    const buf = await generateReport(1, testDb);
+    const xml = documentXmlIn(buf);
+
+    // one block per type on the target, each with its own heading
+    expect(xml).toContain("GVI Results");
+    expect(xml).toContain("CVI Results");
+    expect(xml).toContain("MGI Results");
+    // a type the project has no result for contributes no block at all
+    expect(xml).not.toContain("BSI Results");
+    expect(xml).not.toContain("SCOUR Results");
+
+    // the columns each type actually reads
+    expect(xml).toContain("KP-2");
+    expect(xml).toContain("Good Condition");
+    expect(xml).toContain("CHORD");
+    expect(xml).toContain("-850");
+    expect(xml).toContain("12:00");
+    expect(xml).toContain("pitting");
+    expect(xml).toContain("Barnacle");
+    expect(xml).toContain("client_cnc");
+
+    expect(xml).not.toContain("{#items}");
+    expect(xml).not.toContain("{#sections}");
+    expect(xml).not.toContain("{#isCVI}");
+    expect(xml).not.toContain("{recorded}");
+    expect(xml).not.toContain("{%image}");
   });
 
   it("rejects an unknown project", async () => {
