@@ -548,6 +548,47 @@ export const resultCviPosition = pgTable(
   })
 );
 
+/* DVI — Close Visual Inspection */
+export const resultDvi = pgTable(
+  "result_dvi",
+  {
+    resultId: integer("result_id")
+      .primaryKey()
+      .references(() => result.resultId, { onDelete: "cascade" }),
+    datumReference: text("datum_reference"),
+    memberType: cviMemberType("member_type").notNull(),
+    cpPotentialMv: integer("cp_potential_mv"),
+
+    ...createdAt,
+    ...updatedAt,
+  }
+);
+
+export const resultDviPosition = pgTable(
+  "result_dvi_position",
+  {
+    positionId: integer("position_id").primaryKey().generatedByDefaultAsIdentity(),
+
+    resultId: integer("result_id")
+      .notNull()
+      .references(() => resultCvi.resultId, { onDelete: "cascade" }),
+
+    clockPosition: text("clock_position").notNull(),
+    utMm: doublePrecision("ut_mm"),
+    findings: text("findings"),
+    sortOrder: integer("sort_order").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultDviPositionResultId: index("idx_result_dvi_position_result_id").on(table.resultId),
+  })
+);
+
+
+
+
 /* BSI — Bolted Support Inspection */
 export const resultBsi = pgTable("result_bsi", {
   resultId: integer("result_id")
