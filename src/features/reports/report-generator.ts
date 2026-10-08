@@ -40,7 +40,7 @@ const drainStream = async (stream: AsyncIterable<Buffer | Uint8Array>) => {
 
 // The project's uploaded template, else the bundled default.
 // flow: try MinIO > on any miss read the bundled file
-const loadTemplate = async (projectId: number): Promise<Buffer> => {
+export const loadTemplate = async (projectId: number): Promise<Buffer> => {
   try {
     const stream = await minio.getObject(env.BUCKET_MEDIA, reportTemplateKey(projectId));
     return await drainStream(stream);

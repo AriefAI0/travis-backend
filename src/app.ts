@@ -37,7 +37,7 @@ app.route("/", restrictedAccessRoutes());
 app.route("/", inspectionFormRoutes());
 app.route("/", importRoutes());
 app.route("/", sessionTimelineRoutes());
-// Stub only: report surface answers 501 until the report work lands.
+// Report dialog, template download/upload, and the filled docx.
 app.route("/", reportRoutes());
 app.route("/", sessionRoutes());
 app.route("/", inspectionRoutes());

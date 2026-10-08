@@ -60,6 +60,25 @@ describe("report routes", () => {
     expect(res.status).toBe(404);
   });
 
+  it("hands back the bundled template when the project has none", async () => {
+    await seedProject();
+
+    const res = await app.request("/api/v1/projects/1/report/template");
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("wordprocessingml.document");
+    expect(res.headers.get("content-disposition")).toContain('template-1.docx');
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.subarray(0, 2).toString()).toBe("PK");
+  });
+
+  it("answers 404 for a template on an unknown project", async () => {
+    const res = await app.request("/api/v1/projects/999/report/template");
+
+    expect(res.status).toBe(404);
+  });
+
   it("rejects a template upload that is not a docx", async () => {
     const res = await app.request("/api/v1/projects/1/report/template", {
       method: "PUT",

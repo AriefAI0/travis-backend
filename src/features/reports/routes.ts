@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import type { DbOrTx } from "../../db/client";
 import { env } from "../../config/env";
+import { getProjectById } from "../../db/services/project.service";
 import { AppError } from "../../lib/error";
 import { minio } from "../../lib/minio_storage/clients";
 import { parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
 import { generateReport } from "./generator-client";
-import { reportTemplateKey } from "./report-generator";
+import { loadTemplate, reportTemplateKey } from "./report-generator";
 
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -35,6 +36,27 @@ export const reportRoutes = (database?: DbOrTx) => {
     return c.body(bytes.buffer, 200, {
       "content-type": DOCX_MIME,
       "content-disposition": `attachment; filename="report-${projectId}.docx"`,
+      "cache-control": "no-store",
+    });
+  });
+
+  // admin download: the layout to edit in Word, then upload back
+  routes.get("/api/v1/projects/:projectId/report/template", async (c) => {
+    const projectId = parseId(c, "projectId");
+
+    const project = await getProjectById(projectId, database);
+    if (!project) {
+      throw new AppError(404, "project_not_found", `No project with id ${projectId}`);
+    }
+
+    // the project's own template, else the bundled default
+    const docx = await loadTemplate(projectId);
+    const bytes = new Uint8Array(docx.byteLength);
+    bytes.set(docx);
+
+    return c.body(bytes.buffer, 200, {
+      "content-type": DOCX_MIME,
+      "content-disposition": `attachment; filename="template-${projectId}.docx"`,
       "cache-control": "no-store",
     });
   });
