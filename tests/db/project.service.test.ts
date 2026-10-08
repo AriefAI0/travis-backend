@@ -133,12 +133,12 @@ describe("project.service", () => {
 
     const group = await testDb
       .insert(schema.taskGroup)
-      .values({ projectId, code: "100", label: "Rows" })
+      .values({ projectId, code: "100" })
       .returning()
       .then((rows) => rows[0]!);
     const taskCode = await testDb
       .insert(schema.taskCode)
-      .values({ taskGroupId: group.taskGroupId, code: "101", label: "Row A" })
+      .values({ taskGroupId: group.taskGroupId, code: "101" })
       .returning()
       .then((rows) => rows[0]!);
     const componentA = await testDb
@@ -270,13 +270,13 @@ describe("project.service", () => {
 
       const group = await testDb
         .insert(schema.taskGroup)
-        .values({ projectId: project!.projectId, code: "100", label: "Rows" })
+        .values({ projectId: project!.projectId, code: "100" })
         .returning()
         .then((rows) => rows[0]!);
 
       const taskCode = await testDb
         .insert(schema.taskCode)
-        .values({ taskGroupId: group.taskGroupId, code: "101", label: "Row A" })
+        .values({ taskGroupId: group.taskGroupId, code: "101" })
         .returning()
         .then((rows) => rows[0]!);
 
@@ -291,7 +291,6 @@ describe("project.service", () => {
         .values({
           descriptionId: component.descriptionId,
           code: "VDM",
-          label: "Vertical Diagonal Member",
         })
         .returning()
         .then((rows) => rows[0]!);

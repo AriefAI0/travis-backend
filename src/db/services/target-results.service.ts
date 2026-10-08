@@ -4,6 +4,7 @@ import type { DbOrTx } from "../client";
 import {
   listResultRecordsByDescriptionId,
   listResultRecordsByPartCodeId,
+  listResultRecordsByTargetIds,
 } from "../repositories/result.repository";
 import { listSessionsByIds } from "./session.service";
 import { listVideoClipPlaybackByResultIds } from "./video.service";
@@ -15,19 +16,17 @@ export type TargetResultsQuery = {
   partCodeId?: number;
 };
 
+export type TargetResultsBatchQuery = {
+  descriptionIds: number[];
+  partCodeIds: number[];
+};
+
+type ResultRow = Awaited<ReturnType<typeof listResultRecordsByDescriptionId>>[number];
+
 const toIsoString = (value: Date) => value.toISOString();
 
-// flow: results by target > sessions + evidence > group by session
-export const getTargetResultSidebar = async (
-  query: TargetResultsQuery,
-  database?: DbOrTx,
-) => {
-  const results = query.descriptionId
-    ? await listResultRecordsByDescriptionId(query.descriptionId, database)
-    : query.partCodeId
-      ? await listResultRecordsByPartCodeId(query.partCodeId, database)
-      : [];
-
+// one evidence pass for a whole result set; the maps keep the loop query-free
+const loadEvidenceLookups = async (results: ResultRow[], database?: DbOrTx) => {
   const sessionIds = [...new Set(results.map((row) => row.sessionId))];
   const resultIds = results.map((row) => row.resultId);
 
@@ -42,17 +41,28 @@ export const getTargetResultSidebar = async (
     database,
   );
 
-  const sessionById = new Map(
-    sessionRecords.map((session) => [session.sessionId, session]),
-  );
-  const resultsBySessionId = new Map<number, typeof results>();
+  return {
+    sessionById: new Map(sessionRecords.map((session) => [session.sessionId, session])),
+    imagesByResultId,
+    clipsByResultId,
+    playableClipIds,
+  };
+};
+
+type EvidenceLookups = Awaited<ReturnType<typeof loadEvidenceLookups>>;
+
+// flow: rows + lookups > group by session > sidebar sessions
+const buildSessions = async (results: ResultRow[], lookups: EvidenceLookups) => {
+  const { sessionById, imagesByResultId, clipsByResultId, playableClipIds } = lookups;
+
+  const resultsBySessionId = new Map<number, ResultRow[]>();
   for (const row of results) {
     const bucket = resultsBySessionId.get(row.sessionId) ?? [];
     bucket.push(row);
     resultsBySessionId.set(row.sessionId, bucket);
   }
 
-  const sessions = await Promise.all(
+  return Promise.all(
     [...resultsBySessionId.keys()]
       .sort((a, b) => a - b)
       .map(async (sessionId) => {
@@ -100,12 +110,69 @@ export const getTargetResultSidebar = async (
         };
       }),
   );
+};
+
+// flow: results by target > lookups > group by session
+export const getTargetResultSidebar = async (
+  query: TargetResultsQuery,
+  database?: DbOrTx,
+) => {
+  const results = query.descriptionId
+    ? await listResultRecordsByDescriptionId(query.descriptionId, database)
+    : query.partCodeId
+      ? await listResultRecordsByPartCodeId(query.partCodeId, database)
+      : [];
 
   return {
     target: {
       descriptionId: query.descriptionId ?? null,
       partCodeId: query.partCodeId ?? null,
     },
-    sessions,
+    sessions: await buildSessions(results, await loadEvidenceLookups(results, database)),
   };
+};
+
+// flow: results by target ids > one lookup pass > one sidebar per target
+// keys match the app's node keys: "description:<id>" / "partCode:<id>"
+export const getTargetResultsBatch = async (
+  query: TargetResultsBatchQuery,
+  database?: DbOrTx,
+) => {
+  const results = await listResultRecordsByTargetIds(
+    query.descriptionIds,
+    query.partCodeIds,
+    database,
+  );
+
+  // every requested target gets an entry, empty when it has no results
+  const targets = [
+    ...query.descriptionIds.map((descriptionId) => ({
+      key: `description:${descriptionId}`,
+      target: { descriptionId, partCodeId: null },
+      rows: [] as ResultRow[],
+    })),
+    ...query.partCodeIds.map((partCodeId) => ({
+      key: `partCode:${partCodeId}`,
+      target: { descriptionId: null, partCodeId },
+      rows: [] as ResultRow[],
+    })),
+  ];
+  const targetByKey = new Map(targets.map((entry) => [entry.key, entry]));
+
+  for (const row of results) {
+    const key =
+      row.descriptionId !== null ? `description:${row.descriptionId}` : `partCode:${row.partCodeId}`;
+    targetByKey.get(key)?.rows.push(row);
+  }
+
+  const lookups = await loadEvidenceLookups(results, database);
+
+  return Object.fromEntries(
+    await Promise.all(
+      targets.map(async ({ key, target, rows }) => [
+        key,
+        { target, sessions: await buildSessions(rows, lookups) },
+      ]),
+    ),
+  );
 };

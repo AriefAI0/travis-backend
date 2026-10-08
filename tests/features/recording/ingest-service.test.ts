@@ -28,13 +28,11 @@ const seedDomain = async () => {
     taskGroupId: 9200,
     projectId: 9200,
     code: "100",
-    label: "Rows",
   });
   await testDb.insert(schema.taskCode).values({
     taskCodeId: 9200,
     taskGroupId: 9200,
     code: "101",
-    label: "Row A",
   });
   await testDb.insert(schema.description).values({
     descriptionId: 9200,

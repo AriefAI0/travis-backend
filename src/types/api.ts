@@ -128,7 +128,11 @@ export type ProjectRecord = {
 /* =========================================================
    result (app: src/shared/result.ts)
 ========================================================= */
-export type InspectionTypeCode = "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
+<<<<<<< HEAD
+export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
+=======
+export type InspectionTypeCode = "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON";
+>>>>>>> feat/report-generator
 
 export type MgiDetail = {
   resultId: number;
@@ -210,6 +214,22 @@ export type CviDetail = {
   datumReference: string | null;
   memberType: "chord" | "brace";
   positions: CviPositionDetail[];
+  cpPotentialMv: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DviPositionDetail = {
+  clockPosition: string;
+  utMm: number | null;
+  findings: string | null;
+};
+
+export type DviDetail = {
+  resultId: number;
+  datumReference: string | null;
+  memberType: "chord" | "brace";
+  positions: DviPositionDetail[];
   cpPotentialMv: number | null;
   createdAt: string;
   updatedAt: string;
@@ -450,6 +470,7 @@ export type ReportGatherResult = {
     | ScourDetail
     | GviDetail
     | CviDetail
+    | DviDetail
     | ResultMgiWithFindings
     | null;
 };
@@ -476,9 +497,8 @@ export type ReportGatherData = {
 // body ids are JSON numbers; params/queries coerce from strings
 const id = z.number().int().positive();
 const optionalText = z.string().min(1).nullable().optional();
-const optionalOrder = z.number().int().nonnegative().optional();
 const itemStatus = z.enum(["not_set", "pending", "complete"]);
-const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
+export const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON"]);
 
 // projects — Create/UpdateProjectInput share one shape (title required)
 export const projectInputSchema = z.object({
@@ -516,97 +536,142 @@ export const updateItemSchema = z.object({
 export type TaskStructurePartCodeNode = {
   partCodeId: number;
   code: string;
-  label: string | null;
-  displayOrder: number;
 };
 
 export type TaskStructureTypeNode = {
   typeId: number;
   code: string;
-  label: string;
-  displayOrder: number;
   partCodes: TaskStructurePartCodeNode[];
 };
 
 export type TaskStructureDescriptionNode = {
   descriptionId: number;
   label: string;
-  displayOrder: number;
   types: TaskStructureTypeNode[];
 };
 
 export type TaskStructureTaskCodeNode = {
   taskCodeId: number;
   code: string;
-  label: string;
-  displayOrder: number;
   descriptions: TaskStructureDescriptionNode[];
 };
 
 export type TaskStructureTaskGroupNode = {
   taskGroupId: number;
   code: string;
-  label: string;
-  displayOrder: number;
   taskCodes: TaskStructureTaskCodeNode[];
 };
 
-/* task tree — request schemas */
+/* task tree — request schemas. Every level carries one identifying field:
+   `code`, or `label` for a description. */
 export const createTaskGroupSchema = z.object({
   projectId: id,
   code: z.string().min(1),
-  label: z.string().min(1),
-  displayOrder: optionalOrder,
 });
 export const updateTaskGroupSchema = z.object({
   code: z.string().min(1).optional(),
-  label: z.string().min(1).optional(),
-  displayOrder: optionalOrder,
 });
 export const createTaskCodeSchema = z.object({
   taskGroupId: id,
   code: z.string().min(1),
-  label: z.string().min(1),
-  displayOrder: optionalOrder,
 });
 export const updateTaskCodeSchema = z.object({
   code: z.string().min(1).optional(),
-  label: z.string().min(1).optional(),
-  displayOrder: optionalOrder,
 });
 export const createDescriptionSchema = z.object({
   taskCodeId: id,
   label: z.string().min(1),
-  displayOrder: optionalOrder,
 });
 export const updateDescriptionSchema = z.object({
   label: z.string().min(1).optional(),
-  displayOrder: optionalOrder,
 });
 // create a type under a description; same code under it is refused
 export const createTypeSchema = z.object({
   descriptionId: id,
   code: z.string().min(1),
-  label: z.string().min(1),
 });
 export const updateTypeSchema = z.object({
   code: z.string().min(1).optional(),
-  label: z.string().min(1).optional(),
-  displayOrder: optionalOrder,
 });
 export const createPartCodeSchema = z.object({
   typeId: id,
   code: z.string().min(1),
-  label: optionalText,
-  displayOrder: optionalOrder,
 });
 export const updatePartCodeSchema = z.object({
   code: z.string().min(1).optional(),
-  label: optionalText,
-  displayOrder: optionalOrder,
 });
-// project type vocabulary: distinct code+label pairs from the tree, for autocomplete
+// project type vocabulary: the distinct type codes already used in the tree
 export const typeCatalogQuerySchema = z.object({ q: z.string().min(1).optional() });
+
+// The five levels a grid row can point at. A delete selection is a set of these.
+export const taskStructureNodeKindSchema = z.enum([
+  "task_group",
+  "task_code",
+  "description",
+  "type",
+  "part_code",
+]);
+export type TaskStructureNodeKind = z.infer<typeof taskStructureNodeKindSchema>;
+
+// One request carries a whole ticked selection, so the cap is generous but present.
+export const bulkDeleteTaskStructureSchema = z.object({
+  mode: z.enum(["preview", "delete"]),
+  nodes: z
+    .array(
+      z.object({
+        kind: taskStructureNodeKindSchema,
+        id: z.number().int().positive(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+
+// One import carries a whole sheet. A row names the levels it fills, and a null
+// description, type, or part code means the row stops at the level above it.
+export const importTaskStructureSchema = z.object({
+  projectId: id,
+  mode: z.enum(["append", "replace"]),
+  // preview: the same walk and the same counts, rolled back before it commits
+  dryRun: z.boolean().optional(),
+  rows: z
+    .array(
+      z.object({
+        taskGroup: z.string().min(1),
+        taskCode: z.string().min(1),
+        description: z.string().min(1).nullable(),
+        type: z.string().min(1).nullable(),
+        partCode: z.string().min(1).nullable(),
+        preAssigned: z.array(z.string().min(1)).max(20),
+      }),
+    )
+    .min(1)
+    .max(20000),
+});
+
+export type ImportRowInput = z.infer<typeof importTaskStructureSchema>["rows"][number];
+export type ImportTaskStructureInput = z.infer<typeof importTaskStructureSchema>;
+
+// What one import did, in the words the import dialog shows the operator.
+// Rows with no usable task code never reach here: the app drops them as it reads
+// the sheet, so `total` always equals `imported + matched`.
+export type ImportTaskStructureSummary = {
+  rows: {
+    total: number;
+    // the row's deepest node was new
+    imported: number;
+    // every node in the row already existed, so the row wrote nothing
+    matched: number;
+  };
+  nodesCreated: number;
+  inspections: {
+    planned: number;
+    // idempotent: the pair was already planned, which is not an error
+    alreadyPlanned: number;
+    // a code outside the seven, or a row with no target the route accepts
+    skipped: number;
+  };
+};
 
 /* inspection forms — save-on-confirm posts the custom fields only;
    builtins come from the server registry, never the request */
@@ -620,7 +685,34 @@ export const inspectionFormCustomFieldSchema = z.object({
 export const saveInspectionFormSchema = z.object({
   customFields: z.array(inspectionFormCustomFieldSchema),
 });
-export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR"]);
+export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
+
+/* Planned inspections — preassigned types on a target, before any session.
+   One type per target; the table's unique constraint owns the rule. */
+export const createPlannedInspectionSchema = z
+  .object({
+    projectId: id,
+    inspectionTypeCode: inspectionType,
+    descriptionId: id.optional(),
+    partCodeId: id.optional(),
+  })
+  .refine((v) => (v.descriptionId !== undefined) !== (v.partCodeId !== undefined), {
+    message: "exactly one of descriptionId or partCodeId is required",
+  });
+
+/* Restricted access — a blocked inspection attempt recorded as one RA result
+   row on a target. The partial unique indexes own the one-mark-per-target
+   rule; the type and the is_ra flag never come from the request. */
+export const createRestrictedAccessSchema = z
+  .object({
+    projectId: id,
+    descriptionId: id.optional(),
+    partCodeId: id.optional(),
+    remarks: optionalText,
+  })
+  .refine((v) => (v.descriptionId !== undefined) !== (v.partCodeId !== undefined), {
+    message: "exactly one of descriptionId or partCodeId is required",
+  });
 
 /* Inspection lifecycle — task-tree targets, layer, master anchors. Layer
    values are 1 (main) and 2 (one ad-hoc child); a third is refused. */
@@ -652,6 +744,16 @@ export const updateSessionSchema = z.object({ name: optionalText });
 
 // batch reads for the report gatherer
 export const resultIdsSchema = z.object({ resultIds: z.array(id) });
+
+// batch target read — two id lists, capped so one call cannot fan out wide
+export const targetIdsSchema = z
+  .object({
+    descriptionIds: z.array(id).default([]),
+    partCodeIds: z.array(id).default([]),
+  })
+  .refine((body) => body.descriptionIds.length + body.partCodeIds.length <= 100, {
+    message: "expected 100 or fewer ids",
+  });
 
 // evidence image write — contentType drives the stored extension.
 // strict: an unknown key is a 400, matching the ingest create contract.
@@ -760,6 +862,22 @@ export const cviPayloadSchema = z.object({
   cpPotentialMv: z.number().nullable(),
 });
 
+export const dviPayloadSchema = z.object({
+  kind: z.literal("dvi"),
+  version: z.literal(1),
+  datumReference: z.string().min(1),
+  memberType: z.enum(["chord", "brace"]),
+  positions: z.array(
+    z.object({
+      // the app's CLOCK_POSITIONS const
+      clockPosition: z.enum(["12", "3", "6", "9"]),
+      utMm: z.number().nullable(),
+      findings: z.string(),
+    }),
+  ),
+  cpPotentialMv: z.number().nullable(),
+});
+
 // field names mirror the app's bsiTypes.ts payload verbatim (CPAnomalyRecommendation included)
 const bsiMissingPosition = z.object({ position: z.string().min(1) });
 
@@ -808,4 +926,5 @@ export type FmdPayloadInput = z.infer<typeof fmdPayloadSchema>;
 export type ScourPayloadInput = z.infer<typeof scourPayloadSchema>;
 export type GviPayloadInput = z.infer<typeof gviPayloadSchema>;
 export type CviPayloadInput = z.infer<typeof cviPayloadSchema>;
+export type DviPayloadInput = z.infer<typeof dviPayloadSchema>;
 export type BsiPayloadInput = z.infer<typeof bsiPayloadSchema>;

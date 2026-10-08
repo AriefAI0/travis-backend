@@ -1,1 +1,0 @@
-ALTER TABLE "recording_ingest" ALTER COLUMN "key_prefix" SET NOT NULL;

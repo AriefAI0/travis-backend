@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, type SQL } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { result } from "../schema";
@@ -86,6 +86,67 @@ export const listResultRecordsByPartCodeId = async (
     orderBy: asc(result.resultId),
   });
 
+// A result points at a description OR a part code, so a target set is two lists.
+// Null when neither list carries an id, so callers skip the query entirely.
+const targetMatchesFor = (descriptionIds: number[], partCodeIds: number[]): SQL | null => {
+  const matches: SQL[] = [];
+  if (descriptionIds.length > 0) {
+    matches.push(inArray(result.descriptionId, descriptionIds));
+  }
+  if (partCodeIds.length > 0) {
+    matches.push(inArray(result.partCodeId, partCodeIds));
+  }
+  return matches.length > 0 ? or(...matches)! : null;
+};
+
+/** Target reads: results pointing at any of the given targets, oldest-first. */
+export const listResultRecordsByTargetIds = async (
+  descriptionIds: number[],
+  partCodeIds: number[],
+  database: DbOrTx = db,
+) => {
+  const targetMatch = targetMatchesFor(descriptionIds, partCodeIds);
+  if (!targetMatch) return [];
+
+  return database.query.result.findMany({
+    where: and(targetMatch, isNull(result.archivedAt)),
+    orderBy: asc(result.resultId),
+  });
+};
+
+/**
+ * Every row the target set owns, archived included: these are the rows a
+ * cascade removes, so their media keys must be collected before the delete.
+ */
+export const listAllResultRecordsByTargetIds = async (
+  descriptionIds: number[],
+  partCodeIds: number[],
+  database: DbOrTx = db,
+) => {
+  const targetMatch = targetMatchesFor(descriptionIds, partCodeIds);
+  if (!targetMatch) return [];
+
+  return database.query.result.findMany({
+    where: targetMatch,
+    orderBy: asc(result.resultId),
+  });
+};
+
+/** Live inspections under the target set: started (layer set) and not stopped. */
+export const listOpenResultRecordsByTargetIds = async (
+  descriptionIds: number[],
+  partCodeIds: number[],
+  database: DbOrTx = db,
+) => {
+  const targetMatch = targetMatchesFor(descriptionIds, partCodeIds);
+  if (!targetMatch) return [];
+
+  return database.query.result.findMany({
+    where: and(targetMatch, isNotNull(result.layer), isNull(result.masterEndMs)),
+    orderBy: asc(result.resultId),
+  });
+};
+
 export const updateResultById = async (
   resultId: number,
   data: Partial<typeof result.$inferInsert>,
@@ -107,6 +168,29 @@ export const deleteResultById = async (
   const deletedResults = await database
     .delete(result)
     .where(eq(result.resultId, resultId))
+    .returning();
+
+  return deletedResults[0] ?? null;
+};
+
+/** Restricted-access marks for a project: is_ra rows only, oldest-first. */
+export const listRestrictedAccessRecordsByProjectId = async (
+  projectId: number,
+  database: DbOrTx = db,
+) =>
+  database.query.result.findMany({
+    where: and(eq(result.projectId, projectId), eq(result.isRa, true), isNull(result.archivedAt)),
+    orderBy: asc(result.resultId),
+  });
+
+/** Unmark restricted access: deletes only is_ra rows, never a real result. */
+export const deleteRestrictedAccessById = async (
+  resultId: number,
+  database: DbOrTx = db,
+) => {
+  const deletedResults = await database
+    .delete(result)
+    .where(and(eq(result.resultId, resultId), eq(result.isRa, true)))
     .returning();
 
   return deletedResults[0] ?? null;

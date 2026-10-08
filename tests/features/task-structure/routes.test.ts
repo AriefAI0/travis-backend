@@ -34,7 +34,6 @@ const seedChain = async () => {
   const groupRes = await post("/api/v1/task-groups", {
     projectId,
     code: "100",
-    label: "Row inspections",
   });
   expect(groupRes.status).toBe(201);
   const taskGroupId = (await json(groupRes)).data.taskGroupId as number;
@@ -42,7 +41,6 @@ const seedChain = async () => {
   const codeRes = await post("/api/v1/task-codes", {
     taskGroupId,
     code: "101",
-    label: "Row A tasks",
   });
   expect(codeRes.status).toBe(201);
   const taskCodeId = (await json(codeRes)).data.taskCodeId as number;
@@ -57,7 +55,6 @@ const seedChain = async () => {
   const typeRes = await post("/api/v1/types", {
     descriptionId,
     code: "VDM",
-    label: "Vertical Diagonal Member",
   });
   expect(typeRes.status).toBe(201);
   const typeId = (await json(typeRes)).data.typeId as number;
@@ -88,13 +85,12 @@ describe("task structure routes", () => {
 
     // anode-style branch: description with no type children
     const anodeGroup = await json(
-      await post("/api/v1/task-groups", { projectId, code: "800", label: "Anodes" }),
+      await post("/api/v1/task-groups", { projectId, code: "800" }),
     );
     const anodeCode = await json(
       await post("/api/v1/task-codes", {
         taskGroupId: anodeGroup.data.taskGroupId,
         code: "801",
-        label: "Anode A-1",
       }),
     );
     await post("/api/v1/descriptions", {
@@ -118,9 +114,9 @@ describe("task structure routes", () => {
 
   it("rejects a duplicate group code within the project", async () => {
     const projectId = await seedProject();
-    await post("/api/v1/task-groups", { projectId, code: "100", label: "First" });
+    await post("/api/v1/task-groups", { projectId, code: "100" });
 
-    const dup = await post("/api/v1/task-groups", { projectId, code: "100", label: "Second" });
+    const dup = await post("/api/v1/task-groups", { projectId, code: "100" });
     expect(dup.status).toBe(409);
   });
 
@@ -130,7 +126,6 @@ describe("task structure routes", () => {
     const dup = await post("/api/v1/types", {
       descriptionId,
       code: "VDM",
-      label: "Vertical Diagonal Member",
     });
     expect(dup.status).toBe(409);
 
@@ -140,19 +135,17 @@ describe("task structure routes", () => {
     const elsewhere = await post("/api/v1/types", {
       descriptionId: comp2.data.descriptionId,
       code: "VDM",
-      label: "Vertical Diagonal Member",
     });
     expect(elsewhere.status).toBe(201);
   });
 
-  it("type-catalog lists distinct code+label pairs across the tree", async () => {
+  it("type-catalog lists the distinct type codes across the tree", async () => {
     const { projectId, taskCodeId } = await seedChain();
 
     const comp2 = await json(await post("/api/v1/descriptions", { taskCodeId, label: "Row B" }));
     await post("/api/v1/types", {
       descriptionId: comp2.data.descriptionId,
       code: "VDM",
-      label: "Vertical Diagonal Member",
     });
 
     const catalogRes = await app.request(`/api/v1/projects/${projectId}/type-catalog`);
@@ -166,7 +159,6 @@ describe("task structure routes", () => {
 
     const renamed = await patch(`/api/v1/types/${typeId}`, {
       code: "VHM",
-      label: "Vertical Horizontal Member",
     });
     expect(renamed.status).toBe(200);
     expect((await json(renamed)).data.typeId).toBe(typeId);
@@ -187,5 +179,22 @@ describe("task structure routes", () => {
       await app.request(`/api/v1/projects/${projectId}/task-structure`),
     )).data as unknown[];
     expect(tree).toHaveLength(0);
+  });
+
+  // codes are free text, so no alphabetical rule can order them: the row order
+  // is the order the operator added them
+  it("lists groups in creation order, not code order", async () => {
+    const projectId = await seedProject();
+
+    for (const code of ["103", "101", "102"]) {
+      const created = await post("/api/v1/task-groups", { projectId, code });
+      expect(created.status).toBe(201);
+    }
+
+    const tree = (await json(
+      await app.request(`/api/v1/projects/${projectId}/task-structure`),
+    )).data as Array<Record<string, any>>;
+
+    expect(tree.map((row) => row.code)).toEqual(["103", "101", "102"]);
   });
 });

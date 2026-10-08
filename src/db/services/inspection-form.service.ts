@@ -46,6 +46,12 @@ const BUILTIN_FIELDS: Record<string, Array<{ label: string; dataType: FormDataTy
     { label: "CP potential mV", dataType: "integer" },
     { label: "Clock positions", dataType: "text" },
   ],
+  DVI: [
+    { label: "Member type", dataType: "text" },
+    { label: "Datum reference", dataType: "text" },
+    { label: "CP potential mV", dataType: "integer" },
+    { label: "Clock positions", dataType: "text" },
+  ],
   MGI: [
     { label: "Criteria preset", dataType: "text" },
     { label: "No MG observed", dataType: "boolean" },

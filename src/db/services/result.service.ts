@@ -1,4 +1,4 @@
-import type { CpDetail, CviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput } from "../../types/api";
+import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput } from "../../types/api";
 import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
@@ -143,6 +143,16 @@ import {
 } from "../repositories/result-cvi-position.repository";
 
 import {
+  createResultDvi,
+  getResultDviByResultId,
+  listResultDviByResultIds,
+} from "../repositories/result-dvi.repository";
+import { 
+  createResultDviPosition,
+  getResultDviPositions,
+} from "../repositories/result-dvi-position.repository";
+
+import {
   createResultMgi,
   createResultMgiFinding,
   getResultMgiByResultId as fetchResultMgiByResultId,
@@ -156,7 +166,7 @@ import {
  * kind that disagrees with the result's inspection type, then writes through.
  */
 export const writeTypedDetail = async (
-  inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI",
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI",
   payload: unknown,
   resultId: number,
   database?: DbOrTx,
@@ -194,6 +204,8 @@ export const writeTypedDetail = async (
       return writeGviDetail(data, resultId, database);
     case "cvi":
       return writeCviDetail(data, resultId, database);
+    case "dvi":
+      return writeDviDetail(data, resultId, database);
     case "bsi":
       return writeBsiDetail(data, resultId, database);
   }
@@ -418,6 +430,43 @@ const writeCviDetail = async (
   return database ? run(database) : db.transaction(run);
 };
 
+/**
+ * DVI detail writer (Phase 6)
+ */
+const writeDviDetail = async (
+  payload: DviPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  // flow: insert result_cvi > insert positions, one tx
+  const run = async (tx: DbOrTx): Promise<void> => {
+    await createResultDvi(
+      {
+        resultId,
+        datumReference: payload.datumReference,
+        memberType: payload.memberType,
+        cpPotentialMv: payload.cpPotentialMv,
+      },
+      tx,
+    );
+
+    for (const [index, position] of payload.positions.entries()) {
+      await createResultDviPosition(
+        {
+          resultId,
+          clockPosition: position.clockPosition,
+          utMm: position.utMm,
+          findings: position.findings,
+          sortOrder: index,
+        },
+        tx,
+      );
+    }
+  };
+
+  return database ? run(database) : db.transaction(run);
+};
+
 // Ordinal assignment mirrors createSession. startInspection passes its own
 // transaction, so that path gets a single attempt and the uniq
 // (session_id, display_number) index is the backstop.
@@ -429,7 +478,7 @@ export const listResults = async (database?: DbOrTx) =>
 export type CreateResultInput = {
   sessionId: number;
   projectId: number;
-  inspectionTypeCode: "GVI" | "CVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
   descriptionId?: number;
   partCodeId?: number;
   layer: number;
@@ -516,6 +565,7 @@ export const listProjectSummary = async (
   const resultIdsByCode: Record<InspectionTypeCode, number[]> = {
     GVI: [],
     CVI: [],
+    DVI: [],
     MGI: [],
     CP: [],
     FMD: [],
@@ -526,9 +576,10 @@ export const listProjectSummary = async (
     resultIdsByCode[resultRecord.inspectionTypeCode].push(resultRecord.resultId);
   }
 
-  const [gvi, cvi, mgi, cp, fmd, scour, bsi] = await Promise.all([
+  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi] = await Promise.all([
     listResultGviByResultIds(resultIdsByCode.GVI, database),
     listResultCviByResultIds(resultIdsByCode.CVI, database),
+    listResultDviByResultIds(resultIdsByCode.DVI, database),
     listResultMgiSummaryByResultIds(resultIdsByCode.MGI, database),
     listResultCpByResultIds(resultIdsByCode.CP, database),
     listResultFmdByResultIds(resultIdsByCode.FMD, database),
@@ -546,6 +597,14 @@ export const listProjectSummary = async (
       }
       case "CVI": {
         const detail = cvi.get(resultRecord.resultId);
+        return detail ? { 
+          datumReference: detail.datumReference,
+          memberType: detail.memberType,
+          cpPotentialMv: detail.cpPotentialMv,
+         } : null;
+      }
+      case "DVI": {
+        const detail = dvi.get(resultRecord.resultId);
         return detail ? { 
           datumReference: detail.datumReference,
           memberType: detail.memberType,
@@ -861,5 +920,31 @@ export const getCviDetailByResultId = async (
     positions,
     createdAt: toIsoString(resultCvi.createdAt),
     updatedAt: toIsoString(resultCvi.updatedAt),
+  };
+};
+
+/* =========================================================
+   DVI readback (Phase 6)
+   ========================================================= */
+
+export const getDviDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<DviDetail | null> => {
+  const resultDvi = await getResultDviByResultId(resultId, database);
+  if (!resultDvi) {
+    return null;
+  }
+
+  const positions = await getResultDviPositions(
+    resultId,
+    database,
+  );
+
+  return {
+    ...resultDvi,
+    positions,
+    createdAt: toIsoString(resultDvi.createdAt),
+    updatedAt: toIsoString(resultDvi.updatedAt),
   };
 };

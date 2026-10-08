@@ -27,6 +27,14 @@ export const formatResultValue = (
 
       return `${memberType.toUpperCase()} | CP ${cpText}`;
     }
+    case "DVI": {
+      const memberType = detail.memberType ?? "chord";
+      const cpText = detail.cpPotentialMv != null
+        ? `${detail.cpPotentialMv} mV`
+        : "N/A";
+
+      return `${memberType.toUpperCase()} | CP ${cpText}`;
+    }
     case "CP":
       return detail.voltageMv == null ? "—" : `${detail.voltageMv} mV`;
     case "FMD":
