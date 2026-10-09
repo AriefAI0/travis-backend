@@ -546,6 +546,7 @@ export const resultScour = pgTable(
   }
 );
 
+
 /* GVI — General Visual Inspection */
 export const resultGvi = pgTable(
   "result_gvi",
@@ -553,16 +554,88 @@ export const resultGvi = pgTable(
     resultId: integer("result_id")
       .primaryKey()
       .references(() => result.resultId, { onDelete: "cascade" }),
-    kpRange: text("kp_range"),
+
     depthEl: doublePrecision("depth_el"),
-    gviCP: integer("gvi_cp"),
-    gviUT: integer("gvi_ut"),
+
     condition: gviCondition("condition").notNull(),
 
     ...createdAt,
     ...updatedAt,
   }
 );
+
+/* GVI — CP Findings */
+export const resultGviFinding = pgTable(
+  "result_gvi_finding",
+  {
+    findingId: integer("finding_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+
+    resultGviId: integer("result_gvi_id")
+      .notNull()
+      .references(() => resultGvi.resultId, { onDelete: "cascade" }),
+
+    value: doublePrecision("value"),
+    remark: text("remark"),
+    sortOrder: integer("sort_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultGviFindingGvi: index("idx_result_gvi_finding_gvi").on(
+      table.resultGviId
+    ),
+  })
+);
+
+
+
+/* GVI — Marine Growth Inspection */
+export const resultGviMgi = pgTable(
+  "result_gvi_mgi",
+  {
+    resultId: integer("result_id")
+      .primaryKey()
+      .references(() => resultGvi.resultId, { onDelete: "cascade" }),
+
+    ...createdAt,
+    ...updatedAt,
+  }
+);
+
+
+
+/* GVI — Marine Growth Findings */
+export const resultGviMgiFinding = pgTable(
+  "result_gvi_mgi_finding",
+  {
+    findingId: integer("finding_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+
+    resultGviMgiId: integer("result_gvi_mgi_id")
+      .notNull()
+      .references(() => resultGviMgi.resultId, { onDelete: "cascade" }),
+
+    depth: doublePrecision("depth"),
+    softCoveragePercent: integer("soft_coverage_percent"),
+    hardCoveragePercent: integer("hard_coverage_percent"),
+    remarks: text("remarks"),
+    sortOrder: integer("sort_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultGviMgiFindingMgi: index(
+      "idx_result_gvi_mgi_finding_mgi"
+    ).on(table.resultGviMgiId),
+  })
+);
+
+
 
 /* CVI — Close Visual Inspection */
 export const resultCvi = pgTable(
