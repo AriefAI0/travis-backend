@@ -637,31 +637,31 @@ export const resultGviMgiFinding = pgTable(
 
 
 
-/* CVI — Close Visual Inspection */
-export const resultCvi = pgTable(
-  "result_cvi",
-  {
-    resultId: integer("result_id")
-      .primaryKey()
-      .references(() => result.resultId, { onDelete: "cascade" }),
-    datumReference: text("datum_reference"),
-    memberType: cviMemberType("member_type").notNull(),
-    cpPotentialMv: integer("cp_potential_mv"),
 
-    ...createdAt,
-    ...updatedAt,
-  }
-);
+/* CVI — Close Visual Inspection */
+export const resultCvi = pgTable("result_cvi", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  datumReference: text("datum_reference"),
+
+  ...createdAt,
+  ...updatedAt,
+});
 
 export const resultCviPosition = pgTable(
   "result_cvi_position",
   {
-    positionId: integer("position_id").primaryKey().generatedByDefaultAsIdentity(),
+    positionId: integer("position_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
 
     resultId: integer("result_id")
       .notNull()
       .references(() => resultCvi.resultId, { onDelete: "cascade" }),
 
+    memberType: cviMemberType("member_type").notNull(),
     clockPosition: text("clock_position").notNull(),
     utMm: doublePrecision("ut_mm"),
     findings: text("findings"),
@@ -671,9 +671,37 @@ export const resultCviPosition = pgTable(
     ...updatedAt,
   },
   (table) => ({
-    idxResultCviPositionResultId: index("idx_result_cvi_position_result_id").on(table.resultId),
+    idxResultCviPositionResultId: index(
+      "idx_result_cvi_position_result_id"
+    ).on(table.resultId),
   })
 );
+
+export const resultCviFinding = pgTable(
+  "result_cvi_finding",
+  {
+    findingId: integer("finding_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+
+    resultId: integer("result_id")
+      .notNull()
+      .references(() => resultCvi.resultId, { onDelete: "cascade" }),
+
+    value: doublePrecision("value"),
+    remark: text("remark"),
+    sortOrder: integer("sort_order").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultCviFindingResultId: index(
+      "idx_result_cvi_finding_result_id"
+    ).on(table.resultId),
+  })
+);
+
 
 /* DVI — Detailed Visual Inspection */
 export const resultDvi = pgTable(

@@ -236,14 +236,29 @@ export type CviPositionDetail = {
   clockPosition: string;
   utMm: number | null;
   findings: string | null;
+  sortOrder: number;
+};
+
+export type CviMemberDetail = {
+  memberType: "chord" | "brace";
+  positions: CviPositionDetail[];
+};
+
+export type CviFindingDetail = {
+  findingId: number;
+  resultId: number;
+  value: number | null;
+  remark: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CviDetail = {
   resultId: number;
   datumReference: string | null;
-  memberType: "chord" | "brace";
-  positions: CviPositionDetail[];
-  cpPotentialMv: number | null;
+  members: CviMemberDetail[];
+  cpFindings: CviFindingDetail[];
   createdAt: string;
   updatedAt: string;
 };
@@ -888,21 +903,34 @@ export const gviPayloadSchema = z.object({
 });
 
 
+
 export const cviPayloadSchema = z.object({
   kind: z.literal("cvi"),
   version: z.literal(1),
+
   datumReference: z.string().min(1),
-  memberType: z.enum(["chord", "brace"]),
-  positions: z.array(
+
+  members: z.array(
     z.object({
-      // the app's CLOCK_POSITIONS const
-      clockPosition: z.enum(["12", "3", "6", "9"]),
-      utMm: z.number().nullable(),
-      findings: z.string(),
+      memberType: z.enum(["chord", "brace"]),
+      positions: z.array(
+        z.object({
+          clockPosition: z.enum(["12", "3", "6", "9"]),
+          utMm: z.number().nullable(),
+          findings: z.string(),
+        }),
+      ),
     }),
   ),
-  cpPotentialMv: z.number().nullable(),
+
+  cpFindings: z.array(
+    z.object({
+      value: z.number().nullable(),
+      remark: z.string(),
+    }),
+  ),
 });
+
 
 export const dviPayloadSchema = z.object({
   kind: z.literal("dvi"),

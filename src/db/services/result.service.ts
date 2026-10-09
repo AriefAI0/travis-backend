@@ -150,10 +150,16 @@ import {
   getResultCviByResultId,
   listResultCviByResultIds,
 } from "../repositories/result-cvi.repository";
-import { 
+
+import {
   createResultCviPosition,
   getResultCviPositions,
 } from "../repositories/result-cvi-position.repository";
+
+import {
+  createResultCviFinding,
+  listResultCviFindingsByResultId,
+} from "../repositories/result-cvi-finding.repository";
 
 import {
   createResultDvi,
@@ -457,32 +463,47 @@ const writeBsiDetail = async (
 };
 
 /**
- * CVI detail writer (Phase 6)
+ * CVI detail writer
  */
 const writeCviDetail = async (
   payload: CviPayloadInput,
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  // flow: insert result_cvi > insert positions, one tx
   const run = async (tx: DbOrTx): Promise<void> => {
+    // 1. Create the parent CVI record.
     await createResultCvi(
       {
         resultId,
         datumReference: payload.datumReference,
-        memberType: payload.memberType,
-        cpPotentialMv: payload.cpPotentialMv,
       },
       tx,
     );
 
-    for (const [index, position] of payload.positions.entries()) {
-      await createResultCviPosition(
+    // 2. Save CHORD and BRACE inspection positions.
+    for (const member of payload.members) {
+      for (const [index, position] of member.positions.entries()) {
+        await createResultCviPosition(
+          {
+            resultId,
+            memberType: member.memberType,
+            clockPosition: position.clockPosition,
+            utMm: position.utMm,
+            findings: position.findings,
+            sortOrder: index,
+          },
+          tx,
+        );
+      }
+    }
+
+    // 3. Save CP findings.
+    for (const [index, finding] of payload.cpFindings.entries()) {
+      await createResultCviFinding(
         {
           resultId,
-          clockPosition: position.clockPosition,
-          utMm: position.utMm,
-          findings: position.findings,
+          value: finding.value,
+          remark: finding.remark,
           sortOrder: index,
         },
         tx,
@@ -658,14 +679,19 @@ export const listProjectSummary = async (
         const detail = gvi.get(resultRecord.resultId);
         return detail ? { condition: detail.condition } : null;
       }
+
       case "CVI": {
         const detail = cvi.get(resultRecord.resultId);
-        return detail ? { 
-          datumReference: detail.datumReference,
-          memberType: detail.memberType,
-          cpPotentialMv: detail.cpPotentialMv,
-         } : null;
+
+        return detail
+          ? {
+              datumReference: detail.datumReference,
+              members: detail.members,
+              cpFindings: detail.cpFindings,
+            }
+          : null;
       }
+
       case "DVI": {
         const detail = dvi.get(resultRecord.resultId);
         return detail ? { 
@@ -1001,7 +1027,7 @@ export const getBsiDetailByResultId = async (
 };
 
 /* =========================================================
-   CVI readback (Phase 6)
+   CVI readback
    ========================================================= */
 
 export const getCviDetailByResultId = async (
@@ -1009,18 +1035,42 @@ export const getCviDetailByResultId = async (
   database?: DbOrTx,
 ): Promise<CviDetail | null> => {
   const resultCvi = await getResultCviByResultId(resultId, database);
+
   if (!resultCvi) {
     return null;
   }
 
-  const positions = await getResultCviPositions(
-    resultId,
-    database,
-  );
+  const [positions, cpFindings] = await Promise.all([
+    getResultCviPositions(resultId, database),
+    listResultCviFindingsByResultId(resultId, database),
+  ]);
+
+  const members = (["chord", "brace"] as const).map((memberType) => ({
+    memberType,
+    positions: positions
+      .filter((position) => position.memberType === memberType)
+      .map(({ clockPosition, utMm, findings, sortOrder }) => ({
+        clockPosition,
+        utMm,
+        findings,
+        sortOrder,
+      })),
+  }));
 
   return {
     ...resultCvi,
-    positions,
+    members,
+    cpFindings: cpFindings.map(
+      ({ findingId, resultId, value, remark, sortOrder, createdAt, updatedAt }) => ({
+        findingId,
+        resultId,
+        value,
+        remark,
+        sortOrder,
+        createdAt: toIsoString(createdAt),
+        updatedAt: toIsoString(updatedAt),
+      }),
+    ),
     createdAt: toIsoString(resultCvi.createdAt),
     updatedAt: toIsoString(resultCvi.updatedAt),
   };
