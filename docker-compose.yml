@@ -2,7 +2,7 @@
 # Postgres and MinIO run as their own containers — create the shared
 # network first: docker network create travis
 services:
-  # one-shot: pushes src/db/schema.ts to the database, then exits.
+  # one-shot: preflight-checks postgres+minio, pushes schema, then exits.
   # drizzle.config.ts imports src/config/env, so all four vars must parse.
   migrate:
     build:
@@ -19,7 +19,8 @@ services:
       PLAYBACK_TOKEN_SECRET: ${PLAYBACK_TOKEN_SECRET}
     networks:
       - travis
-    restart: "no"
+    # auto-retry on failure (backoff caps at 1m); exit 0 stays down
+    restart: "on-failure"
 
   app:
     build:

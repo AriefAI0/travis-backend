@@ -19,6 +19,7 @@
     "test": "bun test",
     "test:live": "bun run tests/checks/run-demo-recording.ts",
     "minio:buckets": "bun run scripts/minio-buckets.ts",
+    "migrate_log": "bun scripts/migrate_log.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push"

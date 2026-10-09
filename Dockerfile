@@ -13,8 +13,9 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY drizzle.config.ts ./
 COPY src ./src
-# --force: auto-accept statements so the push never blocks on a prompt
-CMD ["bunx", "drizzle-kit", "push", "--force"]
+COPY scripts ./scripts
+# migrate_log names the broken connection; --force auto-accepts push statements
+CMD ["sh", "-c", "bun scripts/migrate_log.ts && bunx drizzle-kit push --force"]
 
 # runtime: bun + ffmpeg (ffprobe ships with the ffmpeg package)
 FROM oven/bun:1.3-debian AS runtime
