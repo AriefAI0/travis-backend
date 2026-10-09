@@ -7,11 +7,10 @@
 
     <!--
       The dialog is the default DOM: it works on its own with no script beyond
-      the inline bootstrap. The editor is a progressive enhancement loaded only
-      once a report exists, so a failed bundle degrades to the dialog rather
-      than a blank page.
+      the inline bootstrap. The editor is a progressive enhancement: its module
+      loads from esm.sh, and any failure leaves the dialog in place.
     -->
-    <link rel="stylesheet" href="/reports/assets/editor.css?v=__ASSET_V__" />
+    <link rel="stylesheet" href="https://esm.sh/@docx-editor.dev/core@2.27.0/dist/editor.css" />
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -192,11 +191,7 @@
         flex-wrap: wrap;
         margin-bottom: 12px;
       }
-      .editor-toolbar .status {
-        font-size: 12px;
-        color: var(--muted);
-        margin-left: auto;
-      }
+      .editor-toolbar .status { font-size: 12px; color: var(--muted); margin-left: auto; }
       .editor-host {
         height: min(70vh, 720px);
         border: 1px solid var(--border);
@@ -204,9 +199,6 @@
         background: var(--surface);
         overflow: auto;
       }
-      /* the editor injects its own chrome; keep it inside the rounded frame */
-      .editor-host .docx-editor,
-      .editor-host > div { border-radius: var(--radius-md); }
 
       /* template section */
       .template-row {
@@ -313,10 +305,131 @@
       </div>
     </div>
 
+    <script type="module">
+      // The editor comes from esm.sh, so nothing is bundled or built here.
+      // This module only defines window.mountReportEditor; the bootstrap below
+      // calls it and falls back to the dialog if it never arrived.
+      import { createDocxEditor } from "https://esm.sh/@docx-editor.dev/core@2.27.0";
+
+      const DOCX_MIME =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+      const must = (selector) => {
+        const found = document.querySelector(selector);
+        if (!found) throw new Error(`missing element: ${selector}`);
+        return found;
+      };
+
+      const readProblem = async (response) => {
+        const body = await response.json().catch(() => null);
+        return body?.title || `${response.status} ${response.statusText}`;
+      };
+
+      let editor = null;
+
+      // Mount the editor over bytes the page already fetched, and wire the toolbar.
+      // flow: create editor > wire save/regenerate/download > dirty tracking
+      window.mountReportEditor = (bytes, projectId) => {
+        const status = must("[data-report-status]");
+        const saveButton = must("[data-report-save]");
+        const regenerateButton = must("[data-report-regenerate]");
+        const downloadLink = must("[data-report-download]");
+
+        editor?.destroy();
+
+        editor = createDocxEditor({
+          container: must("[data-report-editor]"),
+          document: bytes,
+          mode: "edit",
+          // no `fonts` config on purpose: layout uses the fixed-width measurer,
+          // so the HarfBuzz wasm is never fetched
+          onFontError: (error) => console.warn("report editor font error:", error),
+        });
+
+        let dirty = false;
+        const setDirty = (value) => {
+          dirty = value;
+          saveButton.disabled = !value;
+        };
+
+        editor.on?.("change", () => {
+          if (!dirty) setDirty(true);
+          status.textContent = "Unsaved changes";
+        });
+
+        // closing the tab mid-edit is the one loss no dialog can prevent
+        window.addEventListener("beforeunload", (event) => {
+          if (dirty) event.preventDefault();
+        });
+
+        // save() can reject on a write refusal; keep the editor mounted and say so
+        saveButton.addEventListener("click", async () => {
+          saveButton.disabled = true;
+          status.textContent = "Saving…";
+          try {
+            const saved = await editor.save();
+            const response = await fetch(`/api/v1/projects/${projectId}/report/saved`, {
+              method: "PUT",
+              headers: { "Content-Type": DOCX_MIME },
+              body: new Uint8Array(saved),
+            });
+            if (!response.ok) throw new Error(await readProblem(response));
+            setDirty(false);
+            status.textContent = "Saved";
+          } catch (error) {
+            status.textContent = `Could not save: ${error.message}`;
+            saveButton.disabled = false;
+          }
+        });
+
+        // Regenerate rebuilds from current data and replaces the stored report,
+        // so reopening the link shows what this session ended with.
+        regenerateButton.addEventListener("click", async () => {
+          if (dirty && !confirm("Replace the report with a fresh render? Unsaved changes will be lost.")) {
+            return;
+          }
+          status.textContent = "Rebuilding…";
+          try {
+            const response = await fetch(`/api/v1/projects/${projectId}/report/docx`);
+            if (!response.ok) throw new Error(await readProblem(response));
+            const fresh = new Uint8Array(await response.arrayBuffer());
+
+            // store first: the editor should never show something the server lacks
+            const stored = await fetch(`/api/v1/projects/${projectId}/report/saved`, {
+              method: "PUT",
+              headers: { "Content-Type": DOCX_MIME },
+              body: fresh,
+            });
+            if (!stored.ok) throw new Error(await readProblem(stored));
+
+            editor.load(fresh);
+            setDirty(false);
+            status.textContent = "Regenerated";
+          } catch (error) {
+            status.textContent = `Could not regenerate: ${error.message}`;
+          }
+        });
+
+        // Download hands back what is on screen, not a stored copy
+        downloadLink.addEventListener("click", async (event) => {
+          event.preventDefault();
+          const current = await editor.save();
+          const url = URL.createObjectURL(new Blob([current], { type: DOCX_MIME }));
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = `report-${projectId}.docx`;
+          anchor.click();
+          URL.revokeObjectURL(url);
+        });
+
+        setDirty(false);
+        status.textContent = "";
+      };
+    </script>
+
     <script>
-      // Classic inline bootstrap: it defines the fallback the editor module
-      // calls when it cannot start, so a failed bundle leaves a working page.
-      // The docx routes are same-origin, so no CORS leg runs.
+      // Classic bootstrap. It drives the dialog and calls the editor module; if
+      // that module never loaded, the dialog stays usable on its own.
       const projectId = location.pathname.split("/").filter(Boolean).pop();
       const docxUrl = `/api/v1/projects/${projectId}/report/docx`;
       const savedUrl = `/api/v1/projects/${projectId}/report/saved`;
@@ -356,11 +469,7 @@
         return body?.title || `${response.status} ${response.statusText}`;
       };
 
-      let modulePromise = null;
-      const loadModule = () =>
-        (modulePromise ??= import("/reports/assets/editor-client.js?v=__ASSET_V__"));
-
-      // what the editor module calls when it cannot start
+      // what the page falls back to when the editor cannot start
       window.reportEditorFallback = () => {
         editorSection.hidden = true;
         generateSection.hidden = false;
@@ -386,21 +495,16 @@
         if (!response.ok) throw new Error(await problem(response));
       };
 
-      // flow: reveal the pane > load the module > hand it the bytes
-      const openEditor = async (bytes) => {
+      // flow: reveal the pane > call the module > hand it the bytes
+      const openEditor = (bytes) => {
         generateSection.hidden = true;
         editorSection.hidden = false;
         dialog.classList.add("wide");
 
-        try {
-          const module = await loadModule();
-          module.mount(bytes, projectId);
-        } catch (error) {
-          console.warn("report editor unavailable, keeping the dialog:", error);
-          window.reportEditorFallback();
-          el("error-msg").textContent = `The editor could not load: ${error.message}`;
-          show("error");
+        if (typeof window.mountReportEditor !== "function") {
+          throw new Error("the editor module did not load");
         }
+        window.mountReportEditor(bytes, projectId);
       };
 
       // Downloading the whole report is the only way to surface a failure to
@@ -416,8 +520,10 @@
           const bytes = new Uint8Array(await response.arrayBuffer());
           rememberDownload(bytes);
           await storeReport(bytes);
-          await openEditor(bytes);
+          openEditor(bytes);
         } catch (error) {
+          console.warn("report editor unavailable, keeping the dialog:", error);
+          window.reportEditorFallback();
           el("error-msg").textContent = error.message;
           show("error");
         } finally {
@@ -465,9 +571,9 @@
         }
       });
 
-      // On load: an edited copy opens straight in the editor; anything else
-      // waits for the user to press Generate.
-      // flow: status > saved? > open editor : idle
+      // On load: a stored report opens straight in the editor; anything else
+      // waits for Generate.
+      // flow: status > stored? > open editor : idle
       (async () => {
         try {
           const response = await fetch(statusUrl);
@@ -481,9 +587,10 @@
 
           const bytes = new Uint8Array(await saved.arrayBuffer());
           rememberDownload(bytes);
-          await openEditor(bytes);
-        } catch {
-          // a failed status check just means the idle dialog stays up
+          openEditor(bytes);
+        } catch (error) {
+          console.warn("report editor unavailable, keeping the dialog:", error);
+          window.reportEditorFallback();
         }
       })();
     </script>

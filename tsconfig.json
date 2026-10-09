@@ -26,8 +26,5 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  },
-  // frontend/ is browser code: it needs the DOM lib, which this config omits.
-  // It is bundled by `bun run build:editor`, never typechecked here.
-  "exclude": ["frontend"]
+  }
 }

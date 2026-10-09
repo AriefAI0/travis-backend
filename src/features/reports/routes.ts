@@ -19,16 +19,6 @@ import {
   templateStatus,
 } from "./report-generator";
 
-// Bumped when the editor bundle is rebuilt. The page interpolates it into the
-// asset URLs so a long immutable cache cannot serve a stale editor.
-const EDITOR_ASSET_VERSION = "2.27.0";
-
-// Allowlist, not a path join: the map is what keeps :file from reaching disk.
-const REPORT_ASSETS: Record<string, string> = {
-  "editor-client.js": "text/javascript; charset=utf-8",
-  "editor.css": "text/css; charset=utf-8",
-};
-
 // A docx is a zip, and the editor refuses anything else — so does this.
 const isZip = (bytes: Uint8Array): boolean => bytes[0] === 0x50 && bytes[1] === 0x4b;
 
@@ -38,30 +28,12 @@ const isZip = (bytes: Uint8Array): boolean => bytes[0] === 0x50 && bytes[1] === 
 export const reportRoutes = (database?: DbOrTx) => {
   const routes = new Hono();
 
-  // what the Report dialog's link opens
+  // what the Report dialog's link opens. The editor itself comes from esm.sh,
+  // so this page has no build step and no bundled assets.
   routes.get("/reports/projects/:projectId", async (c) => {
     parseId(c, "projectId");
-    const page = await Bun.file(new URL("./report-viewer.html", import.meta.url)).text();
-    // no-store: a cached page would keep pointing at the previous asset version
-    return c.html(page.replaceAll("__ASSET_V__", EDITOR_ASSET_VERSION), 200, {
-      "cache-control": "no-store",
-    });
-  });
-
-  // the editor bundle and its stylesheet; content is fixed per deploy, so the
-  // versioned URL is safe to cache forever
-  routes.get("/reports/assets/:file", async (c) => {
-    const name = c.req.param("file");
-    const type = REPORT_ASSETS[name];
-    if (!type) {
-      throw new AppError(404, "asset_not_found", `No report asset named ${name}`);
-    }
-
-    const asset = Bun.file(new URL(`./${name}`, import.meta.url));
-    return c.body(asset.stream(), 200, {
-      "content-type": type,
-      "cache-control": "public, max-age=31536000, immutable",
-    });
+    const page = await Bun.file(new URL("./report-viewer.html", import.meta.url));
+    return c.html(await page.text());
   });
 
   // the filled document; the viewer fetches it and the download link points here

@@ -33,8 +33,9 @@ describe("report routes", () => {
     expect(html).toContain("startGenerate");
     // template management rides the same page
     expect(html).toContain("/report/template");
-    // no CDN leg remains
-    expect(html).not.toContain("esm.sh");
+    // the editor is hosted, not bundled: no build step ships with this page
+    expect(html).toContain("esm.sh/@docx-editor.dev/core");
+    expect(html).toContain("mountReportEditor");
 
     // the inline script must parse: a syntax error blanks the whole dialog
     const script = html.slice(html.lastIndexOf("<script>") + 8, html.lastIndexOf("</script>"));
@@ -108,42 +109,34 @@ describe("report routes", () => {
   });
 });
 
-describe("report editor assets", () => {
-  it("serves the editor bundle as javascript", async () => {
-    const res = await app.request("/reports/assets/editor-client.js");
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("javascript");
-    expect(res.headers.get("cache-control")).toContain("immutable");
-    expect(await res.text()).toContain("mount");
-  });
-
-  it("serves the editor stylesheet as css", async () => {
-    const res = await app.request("/reports/assets/editor.css");
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("text/css");
-  });
-
-  it("refuses any asset off the allowlist", async () => {
-    // the allowlist is what stops :file reaching the filesystem
-    for (const name of ["routes.ts", "..%2F..%2Fpackage.json", "report-viewer.html"]) {
-      const res = await app.request(`/reports/assets/${name}`);
-      expect(res.status).toBe(404);
-    }
-  });
-
-  it("points the page at the versioned assets and ships no CDN leg", async () => {
+describe("report editor page", () => {
+  it("loads the editor module from esm.sh and its stylesheet", async () => {
     const res = await app.request("/reports/projects/1");
     const html = await res.text();
 
-    expect(html).toContain("/reports/assets/editor-client.js?v=");
-    expect(html).toContain("/reports/assets/editor.css?v=");
-    // the placeholder must never reach the browser unresolved
-    expect(html).not.toContain("__ASSET_V__");
-    expect(html).not.toContain("esm.sh");
-    // a cached page would keep pointing at a stale asset version
-    expect(res.headers.get("cache-control")).toContain("no-store");
+    expect(html).toContain('import { createDocxEditor } from "https://esm.sh/@docx-editor.dev/core@');
+    expect(html).toContain('link rel="stylesheet" href="https://esm.sh/@docx-editor.dev/core@');
+
+    // the editor is hosted, so the page must ship no bundled asset of its own
+    expect(res.status).toBe(200);
+    for (const gone of ["__ASSET_V__", "/reports/assets/editor-client.js"]) {
+      expect(html).not.toContain(gone);
+    }
+  });
+
+  it("keeps the dialog usable when the editor module never arrives", async () => {
+    const res = await app.request("/reports/projects/1");
+    const html = await res.text();
+
+    // the bootstrap checks for the module and falls back instead of throwing
+    expect(html).toContain("reportEditorFallback");
+    expect(html).toContain('typeof window.mountReportEditor !== "function"');
+  });
+
+  it("serves no editor assets of its own any more", async () => {
+    const res = await app.request("/reports/assets/editor-client.js");
+
+    expect(res.status).toBe(404);
   });
 });
 
