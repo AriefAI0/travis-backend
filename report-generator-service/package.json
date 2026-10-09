@@ -1,0 +1,16 @@
+{
+  "name": "report-generator-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "docxtemplater": "^3.71.0",
+    "docxtemplater-image-module-free": "^1.1.1",
+    "minio": "^8.0.7",
+    "pizzip": "^3.3.0"
+  }
+}

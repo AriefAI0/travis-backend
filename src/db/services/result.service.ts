@@ -562,29 +562,24 @@ export const listProjectSummary = async (
 
   // Group resultIds by code so each typed-detail table is read once (≤5 queries
   // regardless of row count) — same round-1/round-2 batching shape as getItemResultSidebar.
-  const resultIdsByCode: Record<InspectionTypeCode, number[]> = {
-    GVI: [],
-    CVI: [],
-    DVI: [],
-    MGI: [],
-    CP: [],
-    FMD: [],
-    SCOUR: [],
-    BSI: [],
-  };
+  // A code with no detail table (RA, CAISSON) simply gets a bucket nothing reads.
+  const bucketsByCode = new Map<string, number[]>();
   for (const resultRecord of results) {
-    resultIdsByCode[resultRecord.inspectionTypeCode].push(resultRecord.resultId);
+    const bucket = bucketsByCode.get(resultRecord.inspectionTypeCode) ?? [];
+    bucket.push(resultRecord.resultId);
+    bucketsByCode.set(resultRecord.inspectionTypeCode, bucket);
   }
+  const resultIdsFor = (code: string) => bucketsByCode.get(code) ?? [];
 
   const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi] = await Promise.all([
-    listResultGviByResultIds(resultIdsByCode.GVI, database),
-    listResultCviByResultIds(resultIdsByCode.CVI, database),
-    listResultDviByResultIds(resultIdsByCode.DVI, database),
-    listResultMgiSummaryByResultIds(resultIdsByCode.MGI, database),
-    listResultCpByResultIds(resultIdsByCode.CP, database),
-    listResultFmdByResultIds(resultIdsByCode.FMD, database),
-    listResultScourByResultIds(resultIdsByCode.SCOUR, database),
-    listResultBsiByResultIds(resultIdsByCode.BSI, database),
+    listResultGviByResultIds(resultIdsFor("GVI"), database),
+    listResultCviByResultIds(resultIdsFor("CVI"), database),
+    listResultDviByResultIds(resultIdsFor("DVI"), database),
+    listResultMgiSummaryByResultIds(resultIdsFor("MGI"), database),
+    listResultCpByResultIds(resultIdsFor("CP"), database),
+    listResultFmdByResultIds(resultIdsFor("FMD"), database),
+    listResultScourByResultIds(resultIdsFor("SCOUR"), database),
+    listResultBsiByResultIds(resultIdsFor("BSI"), database),
   ]);
 
   const detailFor = (
