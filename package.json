@@ -16,6 +16,7 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
+    "build:editor": "bun build frontend/editor-client.ts --target=browser --format=esm --minify --outfile=src/features/reports/editor-client.js && cp node_modules/@docx-editor.dev/core/dist/editor.css src/features/reports/editor.css",
     "test": "bun test",
     "test:live": "bun run tests/checks/run-demo-recording.ts",
     "minio:buckets": "bun run scripts/minio-buckets.ts",

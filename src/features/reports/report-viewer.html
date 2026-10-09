@@ -6,9 +6,12 @@
     <title>Project Report</title>
 
     <!--
-      Self-contained: no CDN, no build step, no framework. The page opens the
-      report only when asked, so a slow project never blocks the first paint.
+      The dialog is the default DOM: it works on its own with no script beyond
+      the inline bootstrap. The editor is a progressive enhancement loaded only
+      once a report exists, so a failed bundle degrades to the dialog rather
+      than a blank page.
     -->
+    <link rel="stylesheet" href="/reports/assets/editor.css?v=__ASSET_V__" />
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -48,7 +51,10 @@
         width: 100%;
         max-width: 480px;
         overflow: hidden;
+        transition: max-width 160ms;
       }
+      /* the editor needs room; the dialog is narrow only while generating */
+      .dialog.wide { max-width: 1100px; }
 
       .dialog-header {
         display: flex;
@@ -178,6 +184,30 @@
       }
       .error-box .retry { align-self: flex-start; color: var(--text); }
 
+      /* editor */
+      .editor-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .editor-toolbar .status {
+        font-size: 12px;
+        color: var(--muted);
+        margin-left: auto;
+      }
+      .editor-host {
+        height: min(70vh, 720px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        overflow: auto;
+      }
+      /* the editor injects its own chrome; keep it inside the rounded frame */
+      .editor-host .docx-editor,
+      .editor-host > div { border-radius: var(--radius-md); }
+
       /* template section */
       .template-row {
         display: flex;
@@ -209,7 +239,8 @@
         <button class="close-btn" id="close-btn" aria-label="Close">&#x2715;</button>
       </div>
 
-      <div class="section">
+      <!-- Generate: the default surface, and the fallback if the editor fails -->
+      <div class="section" id="generate-section">
         <p class="section-label" id="generate-label">Generate</p>
         <div aria-labelledby="generate-label">
           <div class="state active" id="state-idle">
@@ -250,6 +281,21 @@
         </div>
       </div>
 
+      <!-- Editor: revealed only when a report can actually be edited -->
+      <div class="section" id="editor-section" hidden>
+        <p class="section-label">Report</p>
+        <div class="editor-toolbar">
+          <button class="btn-primary" id="save-btn" data-report-save type="button" disabled>Save</button>
+          <button class="btn-ghost" id="editor-regenerate-btn" data-report-regenerate type="button">
+            Regenerate
+          </button>
+          <a class="btn-ghost" id="editor-download-link" data-report-download download>Download</a>
+          <span class="status" data-report-status role="status"></span>
+        </div>
+        <div class="editor-host" data-report-editor></div>
+      </div>
+
+      <!-- Template: admin download, edit in Word, upload back -->
       <div class="section">
         <p class="section-label" id="template-label">Template</p>
         <div class="template-row" aria-labelledby="template-label">
@@ -268,9 +314,13 @@
     </div>
 
     <script>
-      // The docx route is the same origin as this page, so no CORS leg runs.
+      // Classic inline bootstrap: it defines the fallback the editor module
+      // calls when it cannot start, so a failed bundle leaves a working page.
+      // The docx routes are same-origin, so no CORS leg runs.
       const projectId = location.pathname.split("/").filter(Boolean).pop();
       const docxUrl = `/api/v1/projects/${projectId}/report/docx`;
+      const savedUrl = `/api/v1/projects/${projectId}/report/saved`;
+      const statusUrl = `/api/v1/projects/${projectId}/report/status`;
       const templateUrl = `/api/v1/projects/${projectId}/report/template`;
       const DOCX_MIME =
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -283,34 +333,78 @@
         }
       };
 
+      const dialog = document.querySelector(".dialog");
+      const generateSection = el("generate-section");
+      const editorSection = el("editor-section");
+      const uploadMsg = el("upload-msg");
+      const setUploadMsg = (text, kind) => {
+        uploadMsg.textContent = text;
+        uploadMsg.className = `upload-msg visible${kind ? ` ${kind}` : ""}`;
+      };
+
       el("dialog-meta").textContent = `Project #${projectId}`;
       el("result-name").textContent = `report-${projectId}.docx`;
       el("download-link").download = `report-${projectId}.docx`;
+      el("editor-download-link").download = `report-${projectId}.docx`;
       el("template-download").href = templateUrl;
       el("template-download").download = `template-${projectId}.docx`;
-
       el("close-btn").addEventListener("click", () => window.close());
+
+      // the error responses are problem+json, so the caller-facing text is `title`
+      const problem = async (response) => {
+        const body = await response.json().catch(() => null);
+        return body?.title || `${response.status} ${response.statusText}`;
+      };
+
+      let modulePromise = null;
+      const loadModule = () =>
+        (modulePromise ??= import("/reports/assets/editor-client.js?v=__ASSET_V__"));
+
+      // what the editor module calls when it cannot start
+      window.reportEditorFallback = () => {
+        editorSection.hidden = true;
+        generateSection.hidden = false;
+        dialog.classList.remove("wide");
+        show("idle");
+      };
+
+      let objectUrl = null;
+      const rememberDownload = (bytes) => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: DOCX_MIME }));
+        el("download-link").href = objectUrl;
+      };
+
+      // flow: reveal the pane > load the module > hand it the bytes
+      const openEditor = async (bytes) => {
+        generateSection.hidden = true;
+        editorSection.hidden = false;
+        dialog.classList.add("wide");
+
+        try {
+          const module = await loadModule();
+          module.mount(bytes, projectId);
+        } catch (error) {
+          console.warn("report editor unavailable, keeping the dialog:", error);
+          window.reportEditorFallback();
+          el("error-msg").textContent = `The editor could not load: ${error.message}`;
+          show("error");
+        }
+      };
 
       // Downloading the whole report is the only way to surface a failure to
       // the user, so the blob is fetched rather than linked.
-      let objectUrl = null;
-
       const startGenerate = async () => {
         show("generating");
         el("btn-generate").disabled = true;
 
         try {
           const response = await fetch(docxUrl);
-          if (!response.ok) {
-            const detail = (await response.text()).trim();
-            throw new Error(detail || `${response.status} ${response.statusText}`);
-          }
+          if (!response.ok) throw new Error(await problem(response));
 
-          // the previous blob is dead once a new one replaces it
-          if (objectUrl) URL.revokeObjectURL(objectUrl);
-          objectUrl = URL.createObjectURL(await response.blob());
-          el("download-link").href = objectUrl;
-          show("ready");
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          rememberDownload(bytes);
+          await openEditor(bytes);
         } catch (error) {
           el("error-msg").textContent = error.message;
           show("error");
@@ -325,19 +419,13 @@
 
       el("copy-btn").addEventListener("click", async () => {
         try {
-          await navigator.clipboard.writeText(new URL(docxUrl, location.origin).href);
+          await navigator.clipboard.writeText(location.href);
           el("copy-msg").classList.add("visible");
           setTimeout(() => el("copy-msg").classList.remove("visible"), 2000);
         } catch {
           // a denied clipboard is not worth an error state
         }
       });
-
-      const uploadMsg = el("upload-msg");
-      const setUploadMsg = (text, kind) => {
-        uploadMsg.textContent = text;
-        uploadMsg.className = `upload-msg visible${kind ? ` ${kind}` : ""}`;
-      };
 
       el("template-replace").addEventListener("click", () => el("template-file").click());
 
@@ -354,10 +442,7 @@
             headers: { "Content-Type": DOCX_MIME },
             body: await file.arrayBuffer(),
           });
-          if (!response.ok) {
-            const body = await response.json().catch(() => null);
-            throw new Error(body?.error ?? `${response.status} ${response.statusText}`);
-          }
+          if (!response.ok) throw new Error(await problem(response));
           setUploadMsg("Template replaced. Generate the report again to use it.", "ok");
         } catch (error) {
           setUploadMsg(`Upload failed: ${error.message}`, "error");
@@ -367,6 +452,28 @@
           event.target.value = "";
         }
       });
+
+      // On load: an edited copy opens straight in the editor; anything else
+      // waits for the user to press Generate.
+      // flow: status > saved? > open editor : idle
+      (async () => {
+        try {
+          const response = await fetch(statusUrl);
+          if (!response.ok) return;
+
+          const body = await response.json();
+          if (!body?.data?.saved) return;
+
+          const saved = await fetch(savedUrl);
+          if (!saved.ok) return;
+
+          const bytes = new Uint8Array(await saved.arrayBuffer());
+          rememberDownload(bytes);
+          await openEditor(bytes);
+        } catch {
+          // a failed status check just means the idle dialog stays up
+        }
+      })();
     </script>
   </body>
 </html>

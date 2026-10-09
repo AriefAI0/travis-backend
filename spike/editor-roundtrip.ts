@@ -70,18 +70,19 @@ if (!reread.ok) {
 console.log(`package written: ${roundTripped.byteLength} bytes`);
 
 // canonical fingerprints ignore node ids, so this compares what the document SAYS
-const parts = Object.keys((original.package as { parts?: Record<string, unknown> }).parts ?? {});
+const parts = [...original.package.parts.keys()].sort();
 console.log(`package parts: ${parts.length}`);
 
 let mismatch = 0;
 for (const name of parts) {
-  const a = canonicalOoxmlFingerprint(
-    (original.package as { parts: Record<string, never> }).parts[name],
-  );
-  const b = canonicalOoxmlFingerprint(
-    (reread.package as { parts: Record<string, never> }).parts[name],
-  );
-  if (a !== b) {
+  const before = original.package.parts.get(name);
+  const after = reread.package.parts.get(name);
+  if (!before || !after) {
+    mismatch += 1;
+    console.log(`  PART MISSING after round-trip: ${name}`);
+    continue;
+  }
+  if (canonicalOoxmlFingerprint(before) !== canonicalOoxmlFingerprint(after)) {
     mismatch += 1;
     console.log(`  FINGERPRINT MISMATCH: ${name}`);
   }

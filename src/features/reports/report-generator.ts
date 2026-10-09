@@ -31,6 +31,12 @@ const IMAGE_HEIGHT_PX = 150;
 // Object key of a project's uploaded template.
 export const reportTemplateKey = (projectId: number) => `reports/templates/${projectId}.docx`;
 
+// Object key of a project's saved report — the hand-edited copy.
+export const reportSavedKey = (projectId: number) => `reports/saved/${projectId}.docx`;
+
+export const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
 // Drain a MinIO object stream into one Buffer.
 const drainStream = async (stream: AsyncIterable<Buffer | Uint8Array>) => {
   const chunks: Buffer[] = [];
@@ -58,6 +64,44 @@ export const templateStatus = async (projectId: number) => {
     return { custom: true, updatedAt: stat.lastModified?.toISOString() ?? null };
   } catch {
     return { custom: false, updatedAt: null };
+  }
+};
+
+// Whether the project has a saved (hand-edited) report, and when it was stored.
+// flow: stat the key > any miss = fall back to a fresh render
+export const savedReportStatus = async (projectId: number) => {
+  try {
+    const stat = await minio.statObject(env.BUCKET_MEDIA, reportSavedKey(projectId));
+    return { saved: true, savedAt: stat.lastModified?.toISOString() ?? null };
+  } catch {
+    return { saved: false, savedAt: null };
+  }
+};
+
+// The project's saved report, or null when nothing has been saved. Any MinIO
+// throw means absent, matching loadTemplate.
+export const loadSavedReport = async (projectId: number): Promise<Buffer | null> => {
+  try {
+    const stream = await minio.getObject(env.BUCKET_MEDIA, reportSavedKey(projectId));
+    return await drainStream(stream);
+  } catch {
+    return null;
+  }
+};
+
+// Store the edited report. Regeneration never calls this — only a user Save does.
+export const saveReportEdit = async (projectId: number, bytes: Buffer): Promise<void> => {
+  await minio.putObject(env.BUCKET_MEDIA, reportSavedKey(projectId), bytes, bytes.byteLength, {
+    "Content-Type": DOCX_MIME,
+  });
+};
+
+// Drop the saved copy. Best-effort: a missing object is not an error.
+export const removeSavedReport = async (projectId: number): Promise<void> => {
+  try {
+    await minio.removeObject(env.BUCKET_MEDIA, reportSavedKey(projectId));
+  } catch {
+    // already gone, or MinIO is unhappy — either way the caller is done
   }
 };
 

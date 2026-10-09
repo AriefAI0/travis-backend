@@ -24,13 +24,12 @@ const attempt = async (label: string, fn: () => unknown): Promise<void> => {
 
 const store = await import("@docx-editor.dev/core/store");
 const exportMod = await import("@docx-editor.dev/core/export");
-const root = await import("@docx-editor.dev/core");
 
 console.log(`input: ${target} (${bytes.byteLength} bytes)\n`);
 
 await attempt("store.readOoxmlPackage", () => store.readOoxmlPackage(bytes));
 await attempt("store.readZip", () => store.readZip(bytes));
-await attempt("openHeadlessDocument", () => root.openHeadlessDocument(bytes));
+await attempt("store.openHeadlessDocument", () => store.openHeadlessDocument(bytes));
 
 const openForExport = (exportMod as { openDocumentForExport?: (b: Uint8Array) => unknown })
   .openDocumentForExport;
