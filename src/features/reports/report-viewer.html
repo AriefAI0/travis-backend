@@ -375,6 +375,17 @@
         el("download-link").href = objectUrl;
       };
 
+      // a generated report and an edited one are the same thing: the stored
+      // document. Storing here is what makes the link open the report next time.
+      const storeReport = async (bytes) => {
+        const response = await fetch(savedUrl, {
+          method: "PUT",
+          headers: { "Content-Type": DOCX_MIME },
+          body: bytes,
+        });
+        if (!response.ok) throw new Error(await problem(response));
+      };
+
       // flow: reveal the pane > load the module > hand it the bytes
       const openEditor = async (bytes) => {
         generateSection.hidden = true;
@@ -404,6 +415,7 @@
 
           const bytes = new Uint8Array(await response.arrayBuffer());
           rememberDownload(bytes);
+          await storeReport(bytes);
           await openEditor(bytes);
         } catch (error) {
           el("error-msg").textContent = error.message;

@@ -83,8 +83,8 @@ export const mount = (bytes: Uint8Array, projectId: string): void => {
     }
   });
 
-  // Regenerate replaces what is shown but leaves the stored copy alone until
-  // Save is pressed, so a reflex click cannot destroy a manual edit.
+  // Regenerate rebuilds from current data and replaces the stored report, so
+  // reopening the link shows what this session ended with.
   regenerateButton.addEventListener("click", async () => {
     if (dirty && !confirm("Replace the report with a fresh render? Unsaved changes will be lost.")) {
       return;
@@ -95,9 +95,17 @@ export const mount = (bytes: Uint8Array, projectId: string): void => {
       if (!response.ok) throw new Error(await readProblem(response));
       const fresh = new Uint8Array(await response.arrayBuffer());
 
+      // store first: the editor should never show something the server lacks
+      const stored = await fetch(`/api/v1/projects/${projectId}/report/saved`, {
+        method: "PUT",
+        headers: { "Content-Type": DOCX_MIME },
+        body: fresh,
+      });
+      if (!stored.ok) throw new Error(await readProblem(stored));
+
       editor!.load(fresh);
-      setDirty(true);
-      status.textContent = "Regenerated — save to keep this version";
+      setDirty(false);
+      status.textContent = "Regenerated";
     } catch (error) {
       status.textContent = `Could not regenerate: ${error instanceof Error ? error.message : String(error)}`;
     }
