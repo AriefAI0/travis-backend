@@ -189,16 +189,48 @@ export type ScourDetail = {
   updatedAt: string;
 };
 
-export type GviDetail = {
-  resultId: number;
-  kpRange: string | null;
-  depthEl: number | null;
-  gviCP: number | null;
-  gviUT: number | null;
-  condition: "ok" | "not_ok";
+
+export type GviCPFindingDetail = {
+  findingId: number;
+  resultGviId: number;
+  value: number | null;
+  remark: string | null;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 };
+
+export type GviMgiFindingDetail = {
+  findingId: number;
+  resultGviMgiId: number;
+  depth: number | null;
+  softCoveragePercent: number | null;
+  hardCoveragePercent: number | null;
+  remarks: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GviMgiDetail = {
+  resultId: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GviDetail = {
+  resultId: number;
+  depthEl: number | null;
+  condition: "ok" | "not_ok";
+  createdAt: string;
+  updatedAt: string;
+  cpFindings: GviCPFindingDetail[];
+  mgi: {
+    detail: GviMgiDetail;
+    findings: GviMgiFindingDetail[];
+  } | null;
+};
+
 
 export type CviPositionDetail = {
   clockPosition: string;
@@ -833,15 +865,28 @@ export const scourPayloadSchema = z.object({
   heightLeg2: z.number().nullable(),
 });
 
+
 export const gviPayloadSchema = z.object({
   kind: z.literal("gvi"),
   version: z.literal(1),
-  kpRange: z.string().nullish(),
-  depthEl: z.number().nullish(),
-  gviCP: z.number().nullish(),
-  gviUT: z.number().nullish(),
+  depthEl: z.number().nullable(),
+  gviCP: z.array(
+    z.object({
+      value: z.number().nullable(),
+      remark: z.string(),
+    }),
+  ).optional(),
+  mgi: z.array(
+    z.object({
+      depth: z.number().nullable(),
+      softCoveragePercent: z.number().min(0).max(100),
+      hardCoveragePercent: z.number().min(0).max(100),
+      remarks: z.string(),
+    }),
+  ).optional(),
   condition: z.enum(["ok", "not_ok"]),
 });
+
 
 export const cviPayloadSchema = z.object({
   kind: z.literal("cvi"),

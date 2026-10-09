@@ -2,14 +2,13 @@ import { eq, inArray } from "drizzle-orm";
 import { db, type DbOrTx } from "../client";
 import { resultGvi } from "../schema";
 
+
 export type CreateResultGviInput = {
   resultId: number;
-  kpRange?: string | null;
   depthEl?: number | null;
-  gviCP?: number | null;
-  gviUT?: number | null;
   condition: "ok" | "not_ok";
 };
+
 
 export const createResultGvi = async (
   data: CreateResultGviInput,

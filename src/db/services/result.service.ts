@@ -125,6 +125,19 @@ import {
   listResultGviByResultIds,
 } from "../repositories/result-gvi.repository";
 import {
+  createResultGviFinding,
+  listResultGviFindingsByResultGviId,
+} from "../repositories/result-gvi-finding.repository";
+
+import {
+  createResultGviMgi,
+  createResultGviMgiFinding,
+  getResultGviMgiByResultId,
+  listResultGviMgiFindingsByResultGviMgiId,
+} from "../repositories/result-gvi-mgi.repository";
+
+
+import {
   createBsiMissingParts,
   createResultBsi,
   getResultBsiByResultId,
@@ -321,25 +334,75 @@ const writeScourDetail = async (
   );
 };
 
+
 /**
  * GVI detail writer (Phase 6)
+ * Creates the GVI record, CP findings, and optional MGI findings
+ * within one transaction.
  */
 const writeGviDetail = async (
   payload: GviPayloadInput,
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  await createResultGvi(
-    {
-      resultId,
-      kpRange: payload.kpRange ?? null,
-      depthEl: payload.depthEl ?? null,
-      gviCP: payload.gviCP ?? null,
-      gviUT: payload.gviUT ?? null,
-      condition: payload.condition,
-    },
-    database,
-  );
+  const run = async (tx: DbOrTx): Promise<void> => {
+    // 1. Create the GVI parent record
+    const resultGvi = await createResultGvi(
+      {
+        resultId,
+        depthEl: payload.depthEl ?? null,
+        condition: payload.condition,
+      },
+      tx,
+    );
+
+    if (!resultGvi) {
+      throw new Error("Failed to create GVI detail");
+    }
+
+    // 2. Save CP findings
+    for (const [index, finding] of (payload.gviCP ?? []).entries()) {
+      await createResultGviFinding(
+        {
+          resultGviId: resultGvi.resultId,
+          value: finding.value,
+          remark: finding.remark,
+          sortOrder: index,
+        },
+        tx,
+      );
+    }
+
+    // 3. Save embedded MGI findings when present
+    const mgiFindings = payload.mgi ?? [];
+
+    if (mgiFindings.length > 0) {
+      const resultGviMgi = await createResultGviMgi(
+        { resultId: resultGvi.resultId },
+        tx,
+      );
+
+      if (!resultGviMgi) {
+        throw new Error("Failed to create GVI MGI detail");
+      }
+
+      for (const [index, finding] of mgiFindings.entries()) {
+        await createResultGviMgiFinding(
+          {
+            resultGviMgiId: resultGviMgi.resultId,
+            depth: finding.depth,
+            softCoveragePercent: finding.softCoveragePercent,
+            hardCoveragePercent: finding.hardCoveragePercent,
+            remarks: finding.remarks,
+            sortOrder: index,
+          },
+          tx,
+        );
+      }
+    }
+  };
+
+  return database ? run(database) : db.transaction(run);
 };
 
 /**
@@ -845,6 +908,7 @@ export const getScourDetailByResultId = async (
 };
 
 
+
 /* =========================================================
    GVI readback (Phase 6)
    ========================================================= */
@@ -854,16 +918,55 @@ export const getGviDetailByResultId = async (
   database?: DbOrTx,
 ): Promise<GviDetail | null> => {
   const resultGvi = await getResultGviByResultId(resultId, database);
+
   if (!resultGvi) {
     return null;
   }
 
+  // Load CP findings and the optional embedded MGI parent together.
+  const [cpFindings, resultGviMgi] = await Promise.all([
+    listResultGviFindingsByResultGviId(resultGvi.resultId, database),
+    getResultGviMgiByResultId(resultGvi.resultId, database),
+  ]);
+
+  // Load MGI findings only when an MGI parent exists.
+  const mgiFindings = resultGviMgi
+    ? await listResultGviMgiFindingsByResultGviMgiId(
+        resultGviMgi.resultId,
+        database,
+      )
+    : [];
+
   return {
-    ...resultGvi,
+    resultId: resultGvi.resultId,
+    depthEl: resultGvi.depthEl,
+    condition: resultGvi.condition,
     createdAt: toIsoString(resultGvi.createdAt),
     updatedAt: toIsoString(resultGvi.updatedAt),
+
+    cpFindings: cpFindings.map((finding) => ({
+      ...finding,
+      createdAt: toIsoString(finding.createdAt),
+      updatedAt: toIsoString(finding.updatedAt),
+    })),
+
+    mgi: resultGviMgi
+      ? {
+          detail: {
+            resultId: resultGviMgi.resultId,
+            createdAt: toIsoString(resultGviMgi.createdAt),
+            updatedAt: toIsoString(resultGviMgi.updatedAt),
+          },
+          findings: mgiFindings.map((finding) => ({
+            ...finding,
+            createdAt: toIsoString(finding.createdAt),
+            updatedAt: toIsoString(finding.updatedAt),
+          })),
+        }
+      : null,
   };
 };
+
 
 /* =========================================================
    BSI readback — main row plus the four missing-part lists
