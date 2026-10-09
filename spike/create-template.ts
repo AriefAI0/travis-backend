@@ -168,7 +168,7 @@ const BODY =
   para("{/items}");
 
 const DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main">
 <w:body>
 ${BODY}
 <w:sectPr>
@@ -333,6 +333,27 @@ const main = async () => {
 
   const multi = await renderWith(template, multiRowPayload);
   assert.equal((multi.match(/<w:tr>/g) ?? []).length, 6, "GVI row loop did not repeat");
+
+  // The image module injects <w:drawing><wp:inline> markup and expects the
+  // document root to declare the drawing namespaces, the way Word's own files
+  // do. Word tolerates an undeclared prefix; strict readers reject the whole
+  // document with "undeclared-prefix", so the editor cannot open the report.
+  const rootTag = full.match(/<w:document\b[^>]*>/)?.[0];
+  assert.ok(rootTag, "rendered output has no <w:document> root");
+  for (const prefix of ["w", "r", "wp", "a", "pic", "a14"]) {
+    assert.ok(
+      new RegExp(`xmlns:${prefix}=`).test(rootTag),
+      `xmlns:${prefix} missing from the document root`,
+    );
+  }
+  // xml: is implicitly bound and needs no declaration
+  for (const used of new Set([...full.matchAll(/<\/?([A-Za-z0-9_.-]+):/g)].map((m) => m[1]!))) {
+    if (used === "xml") continue;
+    assert.ok(
+      new RegExp(`xmlns:${used}=`).test(rootTag),
+      `output uses the ${used}: prefix but the root never declares it`,
+    );
+  }
 
   await Bun.write(OUT_PATH, template);
   console.log(`checks passed > wrote ${OUT_PATH.pathname} (${template.length} bytes)`);
