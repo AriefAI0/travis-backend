@@ -5,6 +5,7 @@
   "private": true,
   "devDependencies": {
     "@clack/prompts": "^1.7.0",
+    "@docx-editor.dev/core": "2.27.0",
     "@types/bun": "latest",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.10"
