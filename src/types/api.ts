@@ -129,7 +129,7 @@ export type ProjectRecord = {
    result (app: src/shared/result.ts)
 ========================================================= */
 
-export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON";
+export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON" | "CGB";
 
 export type MgiDetail = {
   resultId: number;
@@ -311,6 +311,19 @@ export type BsiDetail = {
   createdAt: string;
   updatedAt: string;
 };
+
+
+
+export type CgbDetail = {
+  resultId: number;
+  movement: "yes" | "no" | null;
+  remark: string | null;
+  debris: "yes" | "no" | null;
+  debrisType: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 
 export type ItemResultSidebarClip = {
   clipId: number;
@@ -516,6 +529,7 @@ export type ReportGatherResult = {
     | CviDetail
     | DviDetail
     | ResultMgiWithFindings
+    | CgbDetail
     | null;
 };
 
@@ -978,6 +992,19 @@ export const bsiPayloadSchema = z.object({
   outboardAnomalyRecommendation: z.string(),
 });
 
+
+export const cgbPayloadSchema = z.object({
+  kind: z.literal("cgb"),
+  version: z.literal(1),
+
+  movement: z.enum(["yes", "no"]).nullable(),
+  remark: z.string().nullable(),
+
+  debris: z.enum(["yes", "no"]).nullable(),
+  debrisType: z.string().nullable(),
+});
+
+
 // one payload field, one union — never one API per inspection type
 export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   mgiPayloadSchema,
@@ -987,6 +1014,7 @@ export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   gviPayloadSchema,
   cviPayloadSchema,
   bsiPayloadSchema,
+  cgbPayloadSchema
 ]);
 
 export type InspectionPayload = z.infer<typeof inspectionPayloadSchema>;
@@ -998,3 +1026,4 @@ export type GviPayloadInput = z.infer<typeof gviPayloadSchema>;
 export type CviPayloadInput = z.infer<typeof cviPayloadSchema>;
 export type DviPayloadInput = z.infer<typeof dviPayloadSchema>;
 export type BsiPayloadInput = z.infer<typeof bsiPayloadSchema>;
+export type CgbPayloadInput = z.infer<typeof cgbPayloadSchema>;

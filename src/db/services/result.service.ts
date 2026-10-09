@@ -1,4 +1,4 @@
-import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput } from "../../types/api";
+import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, CgbDetail, InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput } from "../../types/api";
 import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
@@ -179,13 +179,19 @@ import {
   listResultMgiSummaryByResultIds,
 } from "../repositories/result-mgi.repository";
 
+import {
+  createResultCgb,
+  getResultCgbByResultId,
+  listResultCgbByResultIds,
+} from "../repositories/result-cgb.repository";
+
 /**
  * Dispatcher for typed detail tables (result_mgi, result_cp, result_fmd,
  * result_scour, result_gvi, result_cvi). Parses the payload union, rejects a
  * kind that disagrees with the result's inspection type, then writes through.
  */
 export const writeTypedDetail = async (
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI",
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB",
   payload: unknown,
   resultId: number,
   database?: DbOrTx,
@@ -227,6 +233,8 @@ export const writeTypedDetail = async (
       return writeDviDetail(data, resultId, database);
     case "bsi":
       return writeBsiDetail(data, resultId, database);
+    case "cgb":
+      return writeCgbDetail(data, resultId, database);
   }
 };
 
@@ -551,6 +559,33 @@ const writeDviDetail = async (
   return database ? run(database) : db.transaction(run);
 };
 
+
+
+/**
+ * CGB detail writer
+ */
+const writeCgbDetail = async (
+  payload: CgbPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const run = async (tx: DbOrTx): Promise<void> => {
+    await createResultCgb(
+      {
+        resultId,
+        movement: payload.movement,
+        remark: payload.remark,
+        debris: payload.debris,
+        debrisType: payload.debrisType,
+      },
+      tx,
+    );
+  };
+
+  return database ? run(database) : db.transaction(run);
+};
+
+
 // Ordinal assignment mirrors createSession. startInspection passes its own
 // transaction, so that path gets a single attempt and the uniq
 // (session_id, display_number) index is the backstop.
@@ -562,7 +597,7 @@ export const listResults = async (database?: DbOrTx) =>
 export type CreateResultInput = {
   sessionId: number;
   projectId: number;
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB";
   descriptionId?: number;
   partCodeId?: number;
   layer: number;
@@ -655,12 +690,13 @@ export const listProjectSummary = async (
     FMD: [],
     SCOUR: [],
     BSI: [],
+    CGB: [],
   };
   for (const resultRecord of results) {
     resultIdsByCode[resultRecord.inspectionTypeCode].push(resultRecord.resultId);
   }
 
-  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi] = await Promise.all([
+  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb] = await Promise.all([
     listResultGviByResultIds(resultIdsByCode.GVI, database),
     listResultCviByResultIds(resultIdsByCode.CVI, database),
     listResultDviByResultIds(resultIdsByCode.DVI, database),
@@ -669,6 +705,7 @@ export const listProjectSummary = async (
     listResultFmdByResultIds(resultIdsByCode.FMD, database),
     listResultScourByResultIds(resultIdsByCode.SCOUR, database),
     listResultBsiByResultIds(resultIdsByCode.BSI, database),
+    listResultCgbByResultIds(resultIdsByCode.CGB, database),
   ]);
 
   const detailFor = (
@@ -735,8 +772,23 @@ export const listProjectSummary = async (
         const detail = bsi.get(resultRecord.resultId);
         return detail ? { clampType: detail.clampType } : null;
       }
+      case "CGB": {
+  const detail = cgb.get(resultRecord.resultId);
+
+  return detail
+    ? {
+        movement: detail.movement,
+        remark: detail.remark,
+        debris: detail.debris,
+        debrisType: detail.debrisType,
+      }
+    : null;
+}
     }
   };
+
+
+
 
   return results.map((resultRecord) => ({
     resultId: resultRecord.resultId,
@@ -1101,3 +1153,26 @@ export const getDviDetailByResultId = async (
     updatedAt: toIsoString(resultDvi.updatedAt),
   };
 };
+
+
+/* =========================================================
+   CGB readback
+   ========================================================= */
+
+export const getCgbDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<CgbDetail | null> => {
+  const resultCgb = await getResultCgbByResultId(resultId, database);
+
+  if (!resultCgb) {
+    return null;
+  }
+
+  return {
+    ...resultCgb,
+    createdAt: toIsoString(resultCgb.createdAt),
+    updatedAt: toIsoString(resultCgb.updatedAt),
+  };
+};
+

@@ -29,6 +29,8 @@ export const bsiAlignmentCondition = pgEnum("bsi_alignment_condition", ["aligned
 
 export const bsiMisalignedPosition = pgEnum("bsi_misaligned_position", ["top", "mid", "bottom"]);
 
+export const cgbYesNo = pgEnum("cgb_yes_no", ["yes", "no"]);
+
 /* =========================================================
    TIMESTAMPS
 ========================================================= */
@@ -859,6 +861,23 @@ export const resultBsiHingeMissingWasher = pgTable(
     ).on(table.resultId),
   }),
 );
+
+
+/* CGB — Conductor Guide Bucket */
+export const resultCgb = pgTable("result_cgb", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  movement: cgbYesNo("movement"),
+  remark: text("remark"),
+  debris: cgbYesNo("debris"),
+  debrisType: text("debris_type"),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
 
 /* =========================================================
    TIMELINE THUMBNAIL (filmstrip for the session master)
