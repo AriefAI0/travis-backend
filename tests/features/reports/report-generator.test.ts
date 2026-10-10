@@ -223,6 +223,119 @@ describe("generateReport", () => {
     expect(xml).not.toContain("{%image}");
   });
 
+  it("renders a section for each newly enabled type", async () => {
+    await seed();
+
+    // one result per type, all on the same target
+    await testDb.insert(schema.result).values([
+      { resultId: 5010, displayNumber: 10, projectId: 1, sessionId: 101, inspectionTypeCode: "CGB", descriptionId: 100, layer: 1, masterStartMs: 10 },
+      { resultId: 5011, displayNumber: 11, projectId: 1, sessionId: 101, inspectionTypeCode: "RISER", descriptionId: 100, layer: 1, masterStartMs: 11 },
+      { resultId: 5012, displayNumber: 12, projectId: 1, sessionId: 101, inspectionTypeCode: "CAISSON", descriptionId: 100, layer: 1, masterStartMs: 12 },
+      { resultId: 5013, displayNumber: 13, projectId: 1, sessionId: 101, inspectionTypeCode: "SEABED", descriptionId: 100, layer: 1, masterStartMs: 13 },
+      { resultId: 5014, displayNumber: 14, projectId: 1, sessionId: 101, inspectionTypeCode: "PIPELINE", descriptionId: 100, layer: 1, masterStartMs: 14 },
+    ]);
+
+    await testDb.insert(schema.resultCgb).values({
+      resultId: 5010,
+      movement: "yes",
+      remark: "cgb-moved",
+      debris: "no",
+      debrisType: "n/a",
+    });
+    await testDb.insert(schema.resultRiser).values({
+      resultId: 5011,
+      touchdownDistanceFromRiserBend: "1.5",
+      riserBendDistanceToMudbraceMember: "2.5",
+      riserBendHeightToSeabed: "3.5",
+      coatingStatus: "present",
+      coatingCondition: "good",
+      kneeBrace: "yes",
+      debris: "no",
+      debrisType: "n/a",
+      anomaly: "no",
+      recommendation: "riser-rec",
+      restrictedAccess: "no",
+    });
+    await testDb.insert(schema.resultCi).values({
+      resultId: 5012,
+      visualDamage: false,
+      visualDamageRecommendation: "vd-note",
+      debrisPresent: true,
+      debrisRecommendation: "deb-note",
+      gratingPresent: true,
+      gratingBlockage: "25_50",
+      gratingAnomalyRecommendation: "gr-note",
+      associatedPipesRecommendation: "pipes-note",
+    });
+    await testDb
+      .insert(schema.resultCiGviAssociatedPipe)
+      .values({ resultId: 5012, position: "P-1" });
+    await testDb.insert(schema.resultCiCpFinding).values({
+      resultId: 5012,
+      cpMv: "-900",
+      remarks: "low",
+    });
+    await testDb.insert(schema.resultSeabed).values({ resultId: 5013 });
+    await testDb.insert(schema.resultSeabedFinding).values({
+      resultId: 5013,
+      rangeMeters: "12.5",
+      fixes: "F-1",
+      debris: "yes",
+      debrisType: "hard",
+    });
+    await testDb.insert(schema.resultPipeline).values({
+      resultId: 5014,
+      location: "KP-1",
+      depthEl: "2.5",
+      orientation: "12_oclock",
+    });
+    await testDb.insert(schema.resultPipelineFinding).values({
+      resultId: 5014,
+      category: "damage",
+      damageDimensions: "10x10",
+      damageType: "crack",
+      debrisDescription: "",
+      stabilizationType: "",
+      burialStart: "",
+      burialEnd: "",
+      freespansStart: "",
+      freespansEnd: "",
+      freespansLength: "",
+      freespansHeight: "",
+      leakType: "",
+      leakDescription: "",
+      crossingGapDistance: "",
+      crossingDamageMovement: "",
+      featuresType: "",
+      remarks: "pi-remark",
+    });
+
+    const xml = documentXmlIn(await generateReport(1, testDb));
+
+    for (const type of ["CGB", "RISER", "CAISSON", "SEABED", "PIPELINE"]) {
+      expect(xml).toContain(`${type} Results`);
+    }
+
+    // one distinctive value per type, so a block cannot render empty
+    expect(xml).toContain("cgb-moved");
+    expect(xml).toContain("riser-rec");
+    expect(xml).toContain("gr-note");
+    expect(xml).toContain("P-1");
+    expect(xml).toContain("-900");
+    expect(xml).toContain("F-1");
+    expect(xml).toContain("12.5");
+    expect(xml).toContain("KP-1");
+    expect(xml).toContain("pi-remark");
+
+    // no placeholder text may survive any new block either
+    expect(xml).not.toContain("{#isCGB}");
+    expect(xml).not.toContain("{#isPIPELINE}");
+    expect(xml).not.toContain("{movement}");
+    expect(xml).not.toContain("{range_meters}");
+    expect(xml).not.toContain("{pipeline_category}");
+    expect(xml).not.toContain("{pipeline_debris}");
+  });
+
   it("rejects an unknown project", async () => {
     await expect(generateReport(999, testDb)).rejects.toThrow();
   });

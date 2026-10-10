@@ -71,7 +71,21 @@ const conditional = (type: string, body: string) =>
 /* ---------- per-type blocks ---------- */
 
 // Emission order across the whole document.
-const TYPE_ORDER = ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI"] as const;
+const TYPE_ORDER = [
+  "GVI",
+  "CVI",
+  "DVI",
+  "MGI",
+  "CP",
+  "FMD",
+  "SCOUR",
+  "BSI",
+  "CGB",
+  "RISER",
+  "CAISSON",
+  "SEABED",
+  "PIPELINE",
+] as const;
 type InspectionType = (typeof TYPE_ORDER)[number];
 
 // One row per result, except CVI/DVI and MGI which repeat the parent fields
@@ -144,6 +158,60 @@ const BLOCKS: Record<InspectionType, string> = {
     6,
     ["Clamp Missing Bolts", "Clamp Missing Washers", "Hinge Missing Bolts", "Hinge Missing Washers", "Remarks", "Recorded"],
     ["{clamp_missing_bolts}", "{clamp_missing_washers}", "{hinge_missing_bolts}", "{hinge_missing_washers}", "{remarks}", "{recorded}"],
+    "rows",
+  ),
+
+  // CGB is one row per result.
+  CGB: loopTable(
+    6,
+    ["Movement", "Movement Remark", "Debris", "Debris Type", "Remarks", "Recorded"],
+    ["{movement}", "{movement_remark}", "{debris}", "{debris_type}", "{remarks}", "{recorded}"],
+    "rows",
+  ),
+
+  // RISER splits over two tables so no row carries thirteen columns.
+  RISER:
+  loopTable(
+    5,
+    ["Touchdown Distance", "Bend to Mudbrace", "Bend Height", "Coating Status", "Coating Condition"],
+    ["{touchdown_distance}", "{mudbrace_distance}", "{bend_height}", "{coating_status}", "{coating_condition}"],
+    "rows",
+  ) +
+  loopTable(
+    8,
+    ["Knee Brace", "Debris", "Debris Type", "Anomaly", "Recommendation", "Restricted Access", "Remarks", "Recorded"],
+    ["{knee_brace}", "{debris}", "{debris_type}", "{anomaly}", "{recommendation}", "{restricted_access}", "{remarks}", "{recorded}"],
+    "rows",
+  ),
+
+  // CAISSON splits into the condition block and the CP/pipe block.
+  CAISSON:
+  loopTable(
+    7,
+    ["Visual Damage", "Visual Note", "Debris Present", "Debris Note", "Grating Present", "Blockage", "Grating Note"],
+    ["{visual_damage}", "{visual_damage_note}", "{debris_present}", "{debris_note}", "{grating_present}", "{grating_blockage}", "{grating_note}"],
+    "rows",
+  ) +
+  loopTable(
+    5,
+    ["Associated Pipes", "Pipes Note", "CP Readings", "Remarks", "Recorded"],
+    ["{associated_pipes}", "{associated_pipes_note}", "{cp_readings}", "{remarks}", "{recorded}"],
+    "rows",
+  ),
+
+  // SEABED is one row per survey line.
+  SEABED: loopTable(
+    6,
+    ["Range (m)", "Fixes", "Debris", "Debris Type", "Remarks", "Recorded"],
+    ["{range_meters}", "{fixes}", "{debris}", "{debris_type}", "{remarks}", "{recorded}"],
+    "rows",
+  ),
+
+  // PIPELINE repeats the parent fields down one row per finding.
+  PIPELINE: loopTable(
+    8,
+    ["Location", "Depth/El", "Orientation", "Category", "Damage Type", "Debris Type", "Remarks", "Recorded"],
+    ["{location}", "{depth_el}", "{orientation}", "{pipeline_category}", "{pipeline_damage}", "{pipeline_debris}", "{remarks}", "{recorded}"],
     "rows",
   ),
 };
@@ -261,6 +329,11 @@ const ROW_FOR: Record<InspectionType, Record<string, string>> = {
   DVI: { datum_reference: "D2", member_type: "BRACE", cp_potential_mv: "-810", clock_position: "3:00", ut_mm: "9.6", findings: "dvi-finding" },
   MGI: { no_mg_observed: "0", criteria_preset: "DNV", growth_type: "HARD", species: "Barnacle", coverage_percent: "40", thickness_mm: "12", remarks: "mgi-remark" },
   BSI: { clamp_type: "C1", depth_el: "2", clamp_bolt_nut_quantity: "8", outboard_clamp_cp: "1", cp_anomaly_recommendation: "none", hinge_pin: "YES", hinge_bolt_nut_quantity: "4", liners: "NO", inboard_gap_condition: "OK", inboard_estimate_gap: "1", inboard_alignment_condition: "OK", inboard_misaligned_position: "na", inboard_anomaly_recommendation: "inb-rec", outboard_gap_condition: "OK", outboard_estimate_gap: "2", outboard_alignment_condition: "OK", outboard_misaligned_position: "na", outboard_anomaly_recommendation: "outb-rec", clamp_missing_bolts: "1,2", clamp_missing_washers: "3", hinge_missing_bolts: "", hinge_missing_washers: "", remarks: "bsi-remark", recorded: "2026-10-09" },
+  CGB: { movement: "YES", movement_remark: "moved", debris: "NO", debris_type: "n/a", remarks: "cgb-remark", recorded: "2026-10-09" },
+  RISER: { touchdown_distance: "1.5", mudbrace_distance: "2.5", bend_height: "3.5", coating_status: "Present", coating_condition: "Good", knee_brace: "YES", debris: "NO", debris_type: "n/a", anomaly: "NO", recommendation: "riser-rec", restricted_access: "NO", remarks: "riser-remark", recorded: "2026-10-09" },
+  CAISSON: { visual_damage: "NO", visual_damage_note: "vd-note", debris_present: "YES", debris_note: "deb-note", grating_present: "YES", grating_blockage: "25-50%", grating_note: "gr-note", associated_pipes: "P-1", associated_pipes_note: "pipes-note", cp_readings: "-900", remarks: "ci-remark", recorded: "2026-10-09" },
+  SEABED: { range_meters: "12.5", fixes: "F-1", debris: "YES", debris_type: "HARD", remarks: "seabed-remark", recorded: "2026-10-09" },
+  PIPELINE: { location: "KP-1", depth_el: "2.5", orientation: "12_oclock", pipeline_category: "damage", pipeline_damage: "CRACK", pipeline_debris: "hard", remarks: "pi-remark", recorded: "2026-10-09" },
 };
 
 const section = (on: InspectionType) => ({
@@ -304,9 +377,15 @@ const multiRowPayload = {
   }],
 };
 
-// Tables in a fully rendered document: item header (2) plus two rows per
-// type block, BSI contributing four blocks.
-const EXPECTED_ROWS = 2 + 2 * (TYPE_ORDER.length - 1) + 8;
+// Tables in a fully rendered document: item header (2) plus a header and one
+// data row per table in each block. BSI splits over four, RISER and CAISSON
+// over two.
+const TABLE_COUNT: Record<InspectionType, number> = {
+  GVI: 1, CVI: 1, DVI: 1, MGI: 1, CP: 1, FMD: 1, SCOUR: 1, BSI: 4,
+  CGB: 1, RISER: 2, CAISSON: 2, SEABED: 1, PIPELINE: 1,
+};
+const EXPECTED_ROWS =
+  2 + TYPE_ORDER.reduce((total, type) => total + 2 * TABLE_COUNT[type], 0);
 
 // Run the checks, then write the file.
 const main = async () => {
@@ -317,7 +396,7 @@ const main = async () => {
   for (const type of TYPE_ORDER) {
     assert.ok(full.includes(`${type} Results`), `missing ${type} block`);
   }
-  for (const marker of ["KP1", "cp-remark", "fmd-remark", "scour-remark", "cvi-finding", "dvi-finding", "Barnacle", "outb-rec"]) {
+  for (const marker of ["KP1", "cp-remark", "fmd-remark", "scour-remark", "cvi-finding", "dvi-finding", "Barnacle", "outb-rec", "cgb-remark", "riser-rec", "gr-note", "seabed-remark", "pi-remark"]) {
     assert.ok(full.includes(marker), `missing value ${marker}`);
   }
   assert.equal((full.match(/<w:tr>/g) ?? []).length, EXPECTED_ROWS, "unexpected row count");

@@ -5,13 +5,18 @@ import { getProjectById } from "./project.service";
 import { listResultImageSummariesByResultIds } from "./result-media.service";
 import {
   getBsiDetailByResultId,
+  getCgbDetailByResultId,
+  getCiDetailByResultId,
   getCpDetailByResultId,
   getCviDetailByResultId,
   getDviDetailByResultId,
   getFmdDetailByResultId,
   getGviDetailByResultId,
+  getPipelineDetailByResultId,
   getResultMgiDetailByResultId,
+  getRiserDetailByResultId,
   getScourDetailByResultId,
+  getSeabedDetailByResultId,
   listProjectSummary,
 } from "./result.service";
 import { listProjectTaskStructureTree } from "./task-structure.service";
@@ -27,7 +32,7 @@ export type ReportRow = Record<string, string>;
 export const NO_IMAGE = "none";
 
 // Flags the template reads. Exactly one is true, or none for a type with no
-// result table yet (CAISSON, RA) — that section then renders nothing.
+// result table yet (RA) — that section then renders nothing.
 type SectionFlags = {
   isGVI: boolean;
   isCVI: boolean;
@@ -37,6 +42,11 @@ type SectionFlags = {
   isFMD: boolean;
   isSCOUR: boolean;
   isBSI: boolean;
+  isCGB: boolean;
+  isRISER: boolean;
+  isCAISSON: boolean;
+  isSEABED: boolean;
+  isPIPELINE: boolean;
 };
 
 export type ReportSection = SectionFlags & {
@@ -64,7 +74,21 @@ export type ReportTemplateData = {
   items: ReportItem[];
 };
 
-const KNOWN_TYPES = ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI"] as const;
+const KNOWN_TYPES = [
+  "GVI",
+  "CVI",
+  "DVI",
+  "MGI",
+  "CP",
+  "FMD",
+  "SCOUR",
+  "BSI",
+  "CGB",
+  "RISER",
+  "CAISSON",
+  "SEABED",
+  "PIPELINE",
+] as const;
 
 // Flags for one section: every known type false, the section's own type true.
 const flagsFor = (type: string): SectionFlags =>
@@ -89,6 +113,15 @@ const PILE_LABEL: Record<string, string> = { exposed: "Exposed", not_exposed: "N
 const GAP_LABEL: Record<string, string> = { gap: "Gap", no_gap: "No Gap" };
 const ALIGN_LABEL: Record<string, string> = { aligned: "Aligned", misaligned: "Misaligned" };
 const POSITION_LABEL: Record<string, string> = { top: "Top", mid: "Mid", bottom: "Bottom" };
+const YES_NO_LABEL: Record<string, string> = { yes: "Yes", no: "No" };
+const COATING_STATUS_LABEL: Record<string, string> = { present: "Present", "not-present": "Not present" };
+const COATING_CONDITION_LABEL: Record<string, string> = { good: "Good", "peel-off": "Peel-off" };
+const BLOCKAGE_LABEL: Record<string, string> = {
+  "0_25": "0-25%",
+  "25_50": "25-50%",
+  "50_75": "50-75%",
+  "75_100": "75-100%",
+};
 
 const text = (value: unknown) => (value === null || value === undefined ? "" : String(value));
 const yesNo = (value: boolean | null) => (value === null ? "" : value ? "Yes" : "No");
@@ -271,6 +304,114 @@ const rowsForResult = async (row: SummaryRow, database?: DbOrTx): Promise<Report
           recorded,
         },
       ];
+    }
+    case "CGB": {
+      const detail = await getCgbDetailByResultId(row.resultId, database);
+      if (!detail) return [];
+      return [
+        {
+          movement: label(YES_NO_LABEL, detail.movement),
+          movement_remark: text(detail.remark),
+          debris: label(YES_NO_LABEL, detail.debris),
+          debris_type: text(detail.debrisType),
+          remarks,
+          recorded,
+        },
+      ];
+    }
+    case "RISER": {
+      const detail = await getRiserDetailByResultId(row.resultId, database);
+      if (!detail) return [];
+      return [
+        {
+          touchdown_distance: text(detail.touchdownDistanceFromRiserBend),
+          mudbrace_distance: text(detail.riserBendDistanceToMudbraceMember),
+          bend_height: text(detail.riserBendHeightToSeabed),
+          coating_status: label(COATING_STATUS_LABEL, detail.coatingStatus),
+          coating_condition: label(COATING_CONDITION_LABEL, detail.coatingCondition),
+          knee_brace: label(YES_NO_LABEL, detail.kneeBrace),
+          debris: label(YES_NO_LABEL, detail.debris),
+          debris_type: text(detail.debrisType),
+          anomaly: label(YES_NO_LABEL, detail.anomaly),
+          recommendation: text(detail.recommendation),
+          restricted_access: label(YES_NO_LABEL, detail.restrictedAccess),
+          remarks,
+          recorded,
+        },
+      ];
+    }
+    case "CAISSON": {
+      const detail = await getCiDetailByResultId(row.resultId, database);
+      if (!detail) return [];
+      return [
+        {
+          visual_damage: yesNo(detail.visualDamage),
+          visual_damage_note: text(detail.visualDamageRecommendation),
+          debris_present: yesNo(detail.debrisPresent),
+          debris_note: text(detail.debrisRecommendation),
+          grating_present: yesNo(detail.gratingPresent),
+          grating_blockage: label(BLOCKAGE_LABEL, detail.gratingBlockage),
+          grating_note: text(detail.gratingAnomalyRecommendation),
+          // the two child lists flatten into one cell each
+          associated_pipes: detail.gviAssociatedPipes
+            .map((pipe) => pipe.position)
+            .join(", "),
+          associated_pipes_note: text(detail.associatedPipesRecommendation),
+          cp_readings: detail.cpFindings
+            .map((finding) => text(finding.cpMv))
+            .filter(Boolean)
+            .join(", "),
+          remarks,
+          recorded,
+        },
+      ];
+    }
+    case "SEABED": {
+      const detail = await getSeabedDetailByResultId(row.resultId, database);
+      if (!detail) return [];
+      const found = detail.findings.map((finding) => ({
+        range_meters: text(finding.rangeMeters),
+        fixes: text(finding.fixes),
+        debris: label(YES_NO_LABEL, finding.debris),
+        debris_type: text(finding.debrisType),
+        remarks,
+        recorded,
+      }));
+      // a survey with no lines still gets its header row
+      return found.length
+        ? found
+        : [{ range_meters: "", fixes: "", debris: "", debris_type: "", remarks, recorded }];
+    }
+    case "PIPELINE": {
+      const detail = await getPipelineDetailByResultId(row.resultId, database);
+      if (!detail) return [];
+      const head = {
+        location: text(detail.location),
+        depth_el: text(detail.depthEl),
+        orientation: text(detail.orientation),
+      };
+      // parent fields repeat down each finding row, as CVI/DVI and MGI do;
+      // the row is a finding, so its own remarks win over the result's
+      const found = detail.findings.map((finding) => ({
+        ...head,
+        pipeline_category: text(finding.category),
+        pipeline_damage: text(finding.damageType),
+        pipeline_debris: text(finding.debrisType),
+        remarks: text(finding.remarks),
+        recorded,
+      }));
+      return found.length
+        ? found
+        : [
+            {
+              ...head,
+              pipeline_category: "",
+              pipeline_damage: "",
+              pipeline_debris: "",
+              remarks,
+              recorded,
+            },
+          ];
     }
     // a type with no result table yet renders an empty section
     default:
