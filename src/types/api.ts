@@ -129,7 +129,7 @@ export type ProjectRecord = {
    result (app: src/shared/result.ts)
 ========================================================= */
 
-export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON" | "CGB" | "RISER" | "CAISSON";
+export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON" | "CGB" | "RISER" | "CAISSON" | "SEABED";
 
 export type MgiDetail = {
   resultId: number;
@@ -378,6 +378,26 @@ export type CiDetail = {
   updatedAt: string;
 };
 
+
+export type SeabedFindingDetail = {
+  findingId: number;
+  resultId: number;
+  rangeMeters: string | null;
+  fixes: string;
+  debris: "yes" | "no" | null;
+  debrisType: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SeabedDetail = {
+  resultId: number;
+  findings: SeabedFindingDetail[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+
 export type ItemResultSidebarClip = {
   clipId: number;
   resultId: number;
@@ -585,6 +605,7 @@ export type ReportGatherResult = {
     | CgbDetail
     | RiserDetail
     | CiDetail
+    | SeabedDetail
     | null;
 };
 
@@ -798,7 +819,7 @@ export const inspectionFormCustomFieldSchema = z.object({
 export const saveInspectionFormSchema = z.object({
   customFields: z.array(inspectionFormCustomFieldSchema),
 });
-export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
+export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CGB", "RISER", "CAISSON", "SEABED"]);
 
 /* Planned inspections — preassigned types on a target, before any session.
    One type per target; the table's unique constraint owns the rule. */
@@ -1095,7 +1116,6 @@ export const ciPayloadSchema = z.object({
       remarks: z.string(),
     }),
   ),
-
   visualDamage: z.boolean().nullable(),
   visualDamageRecommendation: z.string(),
 
@@ -1110,6 +1130,20 @@ export const ciPayloadSchema = z.object({
   gratingAnomalyRecommendation: z.string(),
 });
 
+export const seabedPayloadSchema = z.object({
+  kind: z.literal("seabed"),
+  version: z.literal(1),
+
+  findings: z.array(
+    z.object({
+      rangeMeters: z.number().nullable(),
+      fixes: z.string(),
+      debris: z.enum(["yes", "no"]).nullable(),
+      debrisType: z.string(),
+    }),
+  ),
+});
+
 // one payload field, one union — never one API per inspection type
 export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   mgiPayloadSchema,
@@ -1122,7 +1156,8 @@ export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   bsiPayloadSchema,
   cgbPayloadSchema,
   riserPayloadSchema,
-  ciPayloadSchema
+  ciPayloadSchema,
+  seabedPayloadSchema
 ]);
 
 export type InspectionPayload = z.infer<typeof inspectionPayloadSchema>;
@@ -1137,3 +1172,4 @@ export type BsiPayloadInput = z.infer<typeof bsiPayloadSchema>;
 export type CgbPayloadInput = z.infer<typeof cgbPayloadSchema>;
 export type RiserPayloadInput = z.infer<typeof riserPayloadSchema>;
 export type CiPayloadInput = z.infer<typeof ciPayloadSchema>;
+export type SeabedPayloadInput = z.infer<typeof seabedPayloadSchema>;

@@ -1,7 +1,7 @@
-import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, CgbDetail, RiserDetail, CiDetail, 
-  InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, 
+import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, CgbDetail, RiserDetail, CiDetail, SeabedDetail, 
+  InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, SeabedFindingDetail
   CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput, 
-  CgbPayloadInput, RiserPayloadInput, CiPayloadInput } from "../../types/api";
+  CgbPayloadInput, RiserPayloadInput, CiPayloadInput, SeabedPayloadInput } from "../../types/api";
 import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
@@ -206,13 +206,23 @@ import {
 } from "../repositories/result-ci.repository";
 
 
+import {
+  createResultSeabed,
+  getResultSeabedByResultId,
+  listResultSeabedByResultIds,
+  createResultSeabedFinding,
+  listResultSeabedFindingsByResultId,
+  listResultSeabedFindingsByResultIds,
+} from "../repositories/result-seabed.repository";
+
+
 /**
  * Dispatcher for typed detail tables (result_mgi, result_cp, result_fmd,
  * result_scour, result_gvi, result_cvi). Parses the payload union, rejects a
  * kind that disagrees with the result's inspection type, then writes through.
  */
 export const writeTypedDetail = async (
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER" | "CAISSON",
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER" | "CAISSON" | "SEABED",
   payload: unknown,
   resultId: number,
   database?: DbOrTx,
@@ -260,6 +270,8 @@ export const writeTypedDetail = async (
       return writeRiserDetail(data, resultId, database);
     case "ci":
       return writeCiDetail(data, resultId, database);  
+    case "seabed":
+      return writeSeabedDetail(data, resultId, database);  
   }
 };
 
@@ -690,6 +702,36 @@ const writeCiDetail = async (
 };
 
 
+const writeSeabedDetail = async (
+  payload: SeabedPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const run = async (tx: DbOrTx): Promise<void> => {
+    await createResultSeabed(resultId, tx);
+
+    for (const finding of payload.findings) {
+      await createResultSeabedFinding(
+        {
+          resultId,
+          rangeMeters: finding.rangeMeters?.toString() ?? null,
+          fixes: finding.fixes,
+          debris: finding.debris,
+          debrisType: finding.debrisType,
+        },
+        tx,
+      );
+    }
+  };
+
+  if (database) {
+    await run(database);
+  } else {
+    await db.transaction(run);
+  }
+};
+
+
 // Ordinal assignment mirrors createSession. startInspection passes its own
 // transaction, so that path gets a single attempt and the uniq
 // (session_id, display_number) index is the backstop.
@@ -701,7 +743,7 @@ export const listResults = async (database?: DbOrTx) =>
 export type CreateResultInput = {
   sessionId: number;
   projectId: number;
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER" | "CAISSON";
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER" | "CAISSON" | "SEABED";
   descriptionId?: number;
   partCodeId?: number;
   layer: number;
@@ -797,12 +839,13 @@ export const listProjectSummary = async (
     CGB: [],
     RISER: [],
     CAISSON: [],
+    SEABED: [],
   };
   for (const resultRecord of results) {
     resultIdsByCode[resultRecord.inspectionTypeCode].push(resultRecord.resultId);
   }
 
-  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser, ci] = await Promise.all([
+  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser, ci, seabed] = await Promise.all([
     listResultGviByResultIds(resultIdsByCode.GVI, database),
     listResultCviByResultIds(resultIdsByCode.CVI, database),
     listResultDviByResultIds(resultIdsByCode.DVI, database),
@@ -814,6 +857,7 @@ export const listProjectSummary = async (
     listResultCgbByResultIds(resultIdsByCode.CGB, database),
     listResultRiserByResultIds(resultIdsByCode.RISER, database),
     listResultCiByResultIds(resultIdsByCode.CAISSON, database),
+    listResultSeabedByResultIds(resultIdsByCode.SEABED, database),
   ]);
 
   const detailFor = (
@@ -940,6 +984,25 @@ case "CAISSON": {
     : null;
 }
 
+
+case "SEABED": {
+  const detail = seabed.get(resultRecord.resultId);
+  const findings = seabedFindings.get(resultRecord.resultId) ?? [];
+
+  return detail
+    ? {
+        findings: findings.map(
+          ({ rangeMeters, fixes, debris, debrisType }) => ({
+            rangeMeters:
+              rangeMeters === null ? null : Number(rangeMeters),
+            fixes,
+            debris,
+            debrisType,
+          }),
+        ),
+      }
+    : null;
+}
 
   return results.map((resultRecord) => ({
     resultId: resultRecord.resultId,
@@ -1384,3 +1447,44 @@ export const getCiDetailByResultId = async (
     updatedAt: toIsoString(resultCi.updatedAt),
   };
 };
+
+
+/* =========================================================
+   SEABED readback
+   ========================================================= */
+
+export const getSeabedDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<SeabedDetail | null> => {
+  const resultSeabed = await getResultSeabedByResultId(
+    resultId,
+    database,
+  );
+
+  if (!resultSeabed) {
+    return null;
+  }
+
+  const findings = await listResultSeabedFindingsByResultId(
+    resultId,
+    database,
+  );
+
+  return {
+    resultId: resultSeabed.resultId,
+    findings: findings.map((finding) => ({
+      findingId: finding.findingId,
+      resultId: finding.resultId,
+      rangeMeters: finding.rangeMeters,
+      fixes: finding.fixes,
+      debris: finding.debris,
+      debrisType: finding.debrisType,
+      createdAt: toIsoString(finding.createdAt),
+      updatedAt: toIsoString(finding.updatedAt),
+    })),
+    createdAt: toIsoString(resultSeabed.createdAt),
+    updatedAt: toIsoString(resultSeabed.updatedAt),
+  };
+};
+

@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 /* =================== ENUMERATIONS =================== */
 
-export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RISER", "RA"]);
+export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RISER", "SEABED", "RA"]);
 
 export const mgiCriteriaPreset = pgEnum("mgi_criteria_preset", [
   "project_default",
@@ -965,6 +965,36 @@ export const resultCiCpFinding = pgTable("result_ci_cp_finding", {
 
   cpMv: numeric("cp_mv"),
   remarks: text("remarks").notNull(),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+/* SEABED — Seabed Debris Survey */
+export const resultSeabed = pgTable("result_seabed", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+/* SEABED — Individual Findings */
+export const resultSeabedFinding = pgTable("result_seabed_finding", {
+  findingId: serial("finding_id").primaryKey(),
+
+  resultId: integer("result_id")
+    .notNull()
+    .references(() => resultSeabed.resultId, { onDelete: "cascade" }),
+
+  rangeMeters: numeric("range_meters"),
+  fixes: text("fixes").notNull(),
+
+  debris: cgbYesNo("debris"),
+  debrisType: text("debris_type").notNull(),
 
   ...createdAt,
   ...updatedAt,
