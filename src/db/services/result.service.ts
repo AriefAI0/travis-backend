@@ -1,4 +1,7 @@
-import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput } from "../../types/api";
+import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, CgbDetail, RiserDetail, CiDetail, SeabedDetail, PiDetail, PiFindingDetail,
+  InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, SeabedFindingDetail,
+  CpPayloadInput, CviPayloadInput, DviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput,
+  CgbPayloadInput, RiserPayloadInput, CiPayloadInput, SeabedPayloadInput, PiPayloadInput } from "../../types/api";
 import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
@@ -125,6 +128,19 @@ import {
   listResultGviByResultIds,
 } from "../repositories/result-gvi.repository";
 import {
+  createResultGviFinding,
+  listResultGviFindingsByResultGviId,
+} from "../repositories/result-gvi-finding.repository";
+
+import {
+  createResultGviMgi,
+  createResultGviMgiFinding,
+  getResultGviMgiByResultId,
+  listResultGviMgiFindingsByResultGviMgiId,
+} from "../repositories/result-gvi-mgi.repository";
+
+
+import {
   createBsiMissingParts,
   createResultBsi,
   getResultBsiByResultId,
@@ -137,10 +153,16 @@ import {
   getResultCviByResultId,
   listResultCviByResultIds,
 } from "../repositories/result-cvi.repository";
-import { 
+
+import {
   createResultCviPosition,
   getResultCviPositions,
 } from "../repositories/result-cvi-position.repository";
+
+import {
+  createResultCviFinding,
+  listResultCviFindingsByResultId,
+} from "../repositories/result-cvi-finding.repository";
 
 import {
   createResultDvi,
@@ -160,13 +182,56 @@ import {
   listResultMgiSummaryByResultIds,
 } from "../repositories/result-mgi.repository";
 
+import {
+  createResultCgb,
+  getResultCgbByResultId,
+  listResultCgbByResultIds,
+} from "../repositories/result-cgb.repository";
+
+
+import {
+  createResultRiser,
+  getResultRiserByResultId,
+  listResultRiserByResultIds,
+} from "../repositories/result-riser.repository";
+
+
+import {
+  createResultCi,
+  getResultCiByResultId,
+  listResultCiByResultIds,
+  createResultCiCpFinding,
+  listResultCiCpFindingsByResultId,
+  listResultCiCpFindingsByResultIds,
+} from "../repositories/result-ci.repository";
+
+
+import {
+  createResultSeabed,
+  getResultSeabedByResultId,
+  listResultSeabedByResultIds,
+  createResultSeabedFinding,
+  listResultSeabedFindingsByResultId,
+  listResultSeabedFindingsByResultIds,
+} from "../repositories/result-seabed.repository";
+
+import {
+  createResultPipeline,
+  getResultPipelineByResultId,
+  listResultPipelineByResultIds,
+  createResultPipelineFinding,
+  listResultPipelineFindingsByResultId,
+  listResultPipelineFindingsByResultIds,
+} from "../repositories/result-pipeline.repository";
+
+
 /**
  * Dispatcher for typed detail tables (result_mgi, result_cp, result_fmd,
  * result_scour, result_gvi, result_cvi). Parses the payload union, rejects a
  * kind that disagrees with the result's inspection type, then writes through.
  */
 export const writeTypedDetail = async (
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI",
+  inspectionTypeCode: InspectionTypeCode,
   payload: unknown,
   resultId: number,
   database?: DbOrTx,
@@ -208,6 +273,16 @@ export const writeTypedDetail = async (
       return writeDviDetail(data, resultId, database);
     case "bsi":
       return writeBsiDetail(data, resultId, database);
+    case "cgb":
+      return writeCgbDetail(data, resultId, database);
+    case "riser":
+      return writeRiserDetail(data, resultId, database);
+    case "ci":
+      return writeCiDetail(data, resultId, database);  
+    case "seabed":
+      return writeSeabedDetail(data, resultId, database);
+    case "pipeline":
+      return writePipelineDetail(data, resultId, database);  
   }
 };
 
@@ -321,25 +396,75 @@ const writeScourDetail = async (
   );
 };
 
+
 /**
  * GVI detail writer (Phase 6)
+ * Creates the GVI record, CP findings, and optional MGI findings
+ * within one transaction.
  */
 const writeGviDetail = async (
   payload: GviPayloadInput,
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  await createResultGvi(
-    {
-      resultId,
-      kpRange: payload.kpRange ?? null,
-      depthEl: payload.depthEl ?? null,
-      gviCP: payload.gviCP ?? null,
-      gviUT: payload.gviUT ?? null,
-      condition: payload.condition,
-    },
-    database,
-  );
+  const run = async (tx: DbOrTx): Promise<void> => {
+    // 1. Create the GVI parent record
+    const resultGvi = await createResultGvi(
+      {
+        resultId,
+        depthEl: payload.depthEl ?? null,
+        condition: payload.condition,
+      },
+      tx,
+    );
+
+    if (!resultGvi) {
+      throw new Error("Failed to create GVI detail");
+    }
+
+    // 2. Save CP findings
+    for (const [index, finding] of (payload.gviCP ?? []).entries()) {
+      await createResultGviFinding(
+        {
+          resultGviId: resultGvi.resultId,
+          value: finding.value,
+          remark: finding.remark,
+          sortOrder: index,
+        },
+        tx,
+      );
+    }
+
+    // 3. Save embedded MGI findings when present
+    const mgiFindings = payload.mgi ?? [];
+
+    if (mgiFindings.length > 0) {
+      const resultGviMgi = await createResultGviMgi(
+        { resultId: resultGvi.resultId },
+        tx,
+      );
+
+      if (!resultGviMgi) {
+        throw new Error("Failed to create GVI MGI detail");
+      }
+
+      for (const [index, finding] of mgiFindings.entries()) {
+        await createResultGviMgiFinding(
+          {
+            resultGviMgiId: resultGviMgi.resultId,
+            depth: finding.depth,
+            softCoveragePercent: finding.softCoveragePercent,
+            hardCoveragePercent: finding.hardCoveragePercent,
+            remarks: finding.remarks,
+            sortOrder: index,
+          },
+          tx,
+        );
+      }
+    }
+  };
+
+  return database ? run(database) : db.transaction(run);
 };
 
 /**
@@ -394,32 +519,47 @@ const writeBsiDetail = async (
 };
 
 /**
- * CVI detail writer (Phase 6)
+ * CVI detail writer
  */
 const writeCviDetail = async (
   payload: CviPayloadInput,
   resultId: number,
   database?: DbOrTx,
 ): Promise<void> => {
-  // flow: insert result_cvi > insert positions, one tx
   const run = async (tx: DbOrTx): Promise<void> => {
+    // 1. Create the parent CVI record.
     await createResultCvi(
       {
         resultId,
         datumReference: payload.datumReference,
-        memberType: payload.memberType,
-        cpPotentialMv: payload.cpPotentialMv,
       },
       tx,
     );
 
-    for (const [index, position] of payload.positions.entries()) {
-      await createResultCviPosition(
+    // 2. Save CHORD and BRACE inspection positions.
+    for (const member of payload.members) {
+      for (const [index, position] of member.positions.entries()) {
+        await createResultCviPosition(
+          {
+            resultId,
+            memberType: member.memberType,
+            clockPosition: position.clockPosition,
+            utMm: position.utMm,
+            findings: position.findings,
+            sortOrder: index,
+          },
+          tx,
+        );
+      }
+    }
+
+    // 3. Save CP findings.
+    for (const [index, finding] of payload.cpFindings.entries()) {
+      await createResultCviFinding(
         {
           resultId,
-          clockPosition: position.clockPosition,
-          utMm: position.utMm,
-          findings: position.findings,
+          value: finding.value,
+          remark: finding.remark,
           sortOrder: index,
         },
         tx,
@@ -467,6 +607,176 @@ const writeDviDetail = async (
   return database ? run(database) : db.transaction(run);
 };
 
+
+
+/**
+ * CGB detail writer
+ */
+const writeCgbDetail = async (
+  payload: CgbPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const run = async (tx: DbOrTx): Promise<void> => {
+    await createResultCgb(
+      {
+        resultId,
+        movement: payload.movement,
+        remark: payload.remark,
+        debris: payload.debris,
+        debrisType: payload.debrisType,
+      },
+      tx,
+    );
+  };
+
+  return database ? run(database) : db.transaction(run);
+};
+
+
+
+/**
+ * RISER detail writer
+ */
+const writeRiserDetail = async (
+  payload: RiserPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const run = async (tx: DbOrTx): Promise<void> => {
+    await createResultRiser(
+      {
+        resultId,
+        touchdownDistanceFromRiserBend:
+          payload.touchdownDistanceFromRiserBend?.toString() ?? null,
+        riserBendDistanceToMudbraceMember:
+          payload.riserBendDistanceToMudbraceMember?.toString() ?? null,
+        riserBendHeightToSeabed:
+          payload.riserBendHeightToSeabed?.toString() ?? null,
+        coatingStatus: payload.coatingStatus,
+        coatingCondition: payload.coatingCondition,
+        kneeBrace: payload.kneeBrace,
+        debris: payload.debris,
+        debrisType: payload.debrisType,
+        anomaly: payload.anomaly,
+        recommendation: payload.recommendation,
+        restrictedAccess: payload.restrictedAccess,
+      },
+      tx,
+    );
+  };
+
+  return database ? run(database) : db.transaction(run);
+};
+
+
+
+/**
+ * CAISSON detail writer
+ */
+const writeCiDetail = async (
+  payload: CiPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const run = async (tx: DbOrTx): Promise<void> => {
+    // 1. Create the parent CAISSON record.
+    await createResultCi(
+      {
+        resultId,
+        visualDamage: payload.visualDamage,
+        visualDamageRecommendation: payload.visualDamageRecommendation,
+        debrisPresent: payload.debrisPresent,
+        debrisRecommendation: payload.debrisRecommendation,
+        gratingPresent: payload.gratingPresent,
+        gratingBlockage: payload.gratingBlockage,
+        gratingAnomalyRecommendation:
+          payload.gratingAnomalyRecommendation,
+      },
+      tx,
+    );
+
+    // 2. Save each CP finding.
+    for (const finding of payload.cpFindings) {
+      await createResultCiCpFinding(
+        {
+          resultId,
+          cpMv: finding.cpMv?.toString() ?? null,
+          remarks: finding.remarks,
+        },
+        tx,
+      );
+    }
+  };
+
+  return database ? run(database) : db.transaction(run);
+};
+
+
+const writeSeabedDetail = async (
+  payload: SeabedPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const run = async (tx: DbOrTx): Promise<void> => {
+    await createResultSeabed(resultId, tx);
+
+    for (const finding of payload.findings) {
+      await createResultSeabedFinding(
+        {
+          resultId,
+          rangeMeters: finding.rangeMeters?.toString() ?? null,
+          fixes: finding.fixes,
+          debris: finding.debris,
+          debrisType: finding.debrisType,
+        },
+        tx,
+      );
+    }
+  };
+
+  if (database) {
+    await run(database);
+  } else {
+    await db.transaction(run);
+  }
+};
+
+
+const writePipelineDetail = async (
+  payload: PiPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const run = async (tx: DbOrTx): Promise<void> => {
+    await createResultPipeline(
+      {
+        resultId,
+        location: payload.location,
+        depthEl: payload.depthEl?.toString() ?? null,
+        orientation: payload.orientation,
+      },
+      tx,
+    );
+
+    for (const finding of payload.findings) {
+      await createResultPipelineFinding(
+        {
+          resultId,
+          ...finding,
+        },
+        tx,
+      );
+    }
+  };
+
+  if (database) {
+    await run(database);
+  } else {
+    await db.transaction(run);
+  }
+};
+
 // Ordinal assignment mirrors createSession. startInspection passes its own
 // transaction, so that path gets a single attempt and the uniq
 // (session_id, display_number) index is the backstop.
@@ -478,7 +788,7 @@ export const listResults = async (database?: DbOrTx) =>
 export type CreateResultInput = {
   sessionId: number;
   projectId: number;
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI";
+  inspectionTypeCode: InspectionTypeCode;
   descriptionId?: number;
   partCodeId?: number;
   layer: number;
@@ -562,24 +872,44 @@ export const listProjectSummary = async (
 
   // Group resultIds by code so each typed-detail table is read once (≤5 queries
   // regardless of row count) — same round-1/round-2 batching shape as getItemResultSidebar.
-  // A code with no detail table (RA, CAISSON) simply gets a bucket nothing reads.
-  const bucketsByCode = new Map<string, number[]>();
+  const resultIdsByCode: Record<InspectionTypeCode, number[]> = {
+    GVI: [],
+    CVI: [],
+    DVI: [],
+    MGI: [],
+    CP: [],
+    FMD: [],
+    SCOUR: [],
+    BSI: [],
+    CGB: [],
+    RISER: [],
+    CAISSON: [],
+    SEABED: [],
+    PIPELINE: [],
+    RA: []
+  };
   for (const resultRecord of results) {
-    const bucket = bucketsByCode.get(resultRecord.inspectionTypeCode) ?? [];
-    bucket.push(resultRecord.resultId);
-    bucketsByCode.set(resultRecord.inspectionTypeCode, bucket);
+    resultIdsByCode[resultRecord.inspectionTypeCode].push(resultRecord.resultId);
   }
-  const resultIdsFor = (code: string) => bucketsByCode.get(code) ?? [];
 
-  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi] = await Promise.all([
-    listResultGviByResultIds(resultIdsFor("GVI"), database),
-    listResultCviByResultIds(resultIdsFor("CVI"), database),
-    listResultDviByResultIds(resultIdsFor("DVI"), database),
-    listResultMgiSummaryByResultIds(resultIdsFor("MGI"), database),
-    listResultCpByResultIds(resultIdsFor("CP"), database),
-    listResultFmdByResultIds(resultIdsFor("FMD"), database),
-    listResultScourByResultIds(resultIdsFor("SCOUR"), database),
-    listResultBsiByResultIds(resultIdsFor("BSI"), database),
+  // round 1: detail rows; round 2: finding lists for CAISSON/SEABED/PIPELINE
+  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser, ci, seabed, pipeline, ciCpFindings, seabedFindings, pipelineFindings] = await Promise.all([
+    listResultGviByResultIds(resultIdsByCode.GVI, database),
+    listResultCviByResultIds(resultIdsByCode.CVI, database),
+    listResultDviByResultIds(resultIdsByCode.DVI, database),
+    listResultMgiSummaryByResultIds(resultIdsByCode.MGI, database),
+    listResultCpByResultIds(resultIdsByCode.CP, database),
+    listResultFmdByResultIds(resultIdsByCode.FMD, database),
+    listResultScourByResultIds(resultIdsByCode.SCOUR, database),
+    listResultBsiByResultIds(resultIdsByCode.BSI, database),
+    listResultCgbByResultIds(resultIdsByCode.CGB, database),
+    listResultRiserByResultIds(resultIdsByCode.RISER, database),
+    listResultCiByResultIds(resultIdsByCode.CAISSON, database),
+    listResultSeabedByResultIds(resultIdsByCode.SEABED, database),
+    listResultPipelineByResultIds(resultIdsByCode.PIPELINE, database),
+    listResultCiCpFindingsByResultIds(resultIdsByCode.CAISSON, database),
+    listResultSeabedFindingsByResultIds(resultIdsByCode.SEABED, database),
+    listResultPipelineFindingsByResultIds(resultIdsByCode.PIPELINE, database),
   ]);
 
   const detailFor = (
@@ -590,14 +920,13 @@ export const listProjectSummary = async (
         const detail = gvi.get(resultRecord.resultId);
         return detail ? { condition: detail.condition } : null;
       }
+
       case "CVI": {
         const detail = cvi.get(resultRecord.resultId);
-        return detail ? { 
-          datumReference: detail.datumReference,
-          memberType: detail.memberType,
-          cpPotentialMv: detail.cpPotentialMv,
-         } : null;
+        // memberType/cpPotentialMv now live per-position; summary keeps the datum only
+        return detail ? { datumReference: detail.datumReference } : null;
       }
+
       case "DVI": {
         const detail = dvi.get(resultRecord.resultId);
         return detail ? { 
@@ -641,6 +970,161 @@ export const listProjectSummary = async (
         const detail = bsi.get(resultRecord.resultId);
         return detail ? { clampType: detail.clampType } : null;
       }
+
+
+case "CGB": {
+  const detail = cgb.get(resultRecord.resultId);
+
+  return detail
+    ? {
+        movement: detail.movement,
+        remark: detail.remark,
+        debris: detail.debris,
+        debrisType: detail.debrisType,
+      }
+    : null;
+}
+
+case "RISER": {
+  const detail = riser.get(resultRecord.resultId);
+
+  return detail
+    ? {
+        touchdownDistanceFromRiserBend:
+          detail.touchdownDistanceFromRiserBend === null
+            ? null
+            : Number(detail.touchdownDistanceFromRiserBend),
+        riserBendDistanceToMudbraceMember:
+          detail.riserBendDistanceToMudbraceMember === null
+            ? null
+            : Number(detail.riserBendDistanceToMudbraceMember),
+        riserBendHeightToSeabed:
+          detail.riserBendHeightToSeabed === null
+            ? null
+            : Number(detail.riserBendHeightToSeabed),
+        coatingStatus: detail.coatingStatus,
+        coatingCondition: detail.coatingCondition,
+        kneeBrace: detail.kneeBrace,
+        debris: detail.debris,
+        debrisType: detail.debrisType,
+        anomaly: detail.anomaly,
+        recommendation: detail.recommendation,
+        restrictedAccess: detail.restrictedAccess,
+      }
+    : null;
+}
+
+case "CAISSON": {
+  const detail = ci.get(resultRecord.resultId);
+  const cpFindings = ciCpFindings.get(resultRecord.resultId) ?? [];
+
+  return detail
+    ? {
+        visualDamage: detail.visualDamage,
+        visualDamageRecommendation: detail.visualDamageRecommendation,
+        debrisPresent: detail.debrisPresent,
+        debrisRecommendation: detail.debrisRecommendation,
+        gratingPresent: detail.gratingPresent,
+        gratingBlockage: detail.gratingBlockage,
+        gratingAnomalyRecommendation:
+          detail.gratingAnomalyRecommendation,
+        cpFindings: cpFindings.map(({ cpMv, remarks }) => ({
+          cpMv,
+          remarks,
+        })),
+      }
+    : null;
+}
+
+
+case "SEABED": {
+  const detail = seabed.get(resultRecord.resultId);
+  const findings = seabedFindings.get(resultRecord.resultId) ?? [];
+
+  return detail
+    ? {
+        seabedFindings: findings.map(
+          ({ rangeMeters, fixes, debris, debrisType }) => ({
+            rangeMeters:
+              rangeMeters === null ? null : Number(rangeMeters),
+            fixes,
+            debris,
+            debrisType,
+          }),
+        ),
+      }
+    : null;
+}
+
+
+case "PIPELINE": {
+  const detail = pipeline.get(resultRecord.resultId);
+  const findings = pipelineFindings.get(resultRecord.resultId) ?? [];
+
+  return detail
+    ? {
+        location: detail.location,
+        depthEl:
+          detail.depthEl === null ? null : Number(detail.depthEl),
+        orientation: detail.orientation,
+        pipelineFindings: findings.map(
+          ({
+            category,
+            damageDimensions,
+            damageType,
+            debrisType,
+            debrisDescription,
+            riserBendCondition,
+            stabilizationType,
+            stabilizationCondition,
+            burialStart,
+            burialEnd,
+            freespansStart,
+            freespansEnd,
+            freespansLength,
+            freespansHeight,
+            leakType,
+            leakDescription,
+            crossingType,
+            crossingContact,
+            crossingGapDistance,
+            crossingDamageMovement,
+            featuresType,
+            featuresCondition,
+            remarks,
+          }) => ({
+            category,
+            damageDimensions,
+            damageType,
+            debrisType,
+            debrisDescription,
+            riserBendCondition,
+            stabilizationType,
+            stabilizationCondition,
+            burialStart,
+            burialEnd,
+            freespansStart,
+            freespansEnd,
+            freespansLength,
+            freespansHeight,
+            leakType,
+            leakDescription,
+            crossingType,
+            crossingContact,
+            crossingGapDistance,
+            crossingDamageMovement,
+            featuresType,
+            featuresCondition,
+            remarks,
+          }),
+        ),
+      }
+    : null;
+}
+
+    // unknown/RA codes carry no typed summary
+    default:
+      return null;
     }
   };
 
@@ -840,6 +1324,7 @@ export const getScourDetailByResultId = async (
 };
 
 
+
 /* =========================================================
    GVI readback (Phase 6)
    ========================================================= */
@@ -849,16 +1334,55 @@ export const getGviDetailByResultId = async (
   database?: DbOrTx,
 ): Promise<GviDetail | null> => {
   const resultGvi = await getResultGviByResultId(resultId, database);
+
   if (!resultGvi) {
     return null;
   }
 
+  // Load CP findings and the optional embedded MGI parent together.
+  const [cpFindings, resultGviMgi] = await Promise.all([
+    listResultGviFindingsByResultGviId(resultGvi.resultId, database),
+    getResultGviMgiByResultId(resultGvi.resultId, database),
+  ]);
+
+  // Load MGI findings only when an MGI parent exists.
+  const mgiFindings = resultGviMgi
+    ? await listResultGviMgiFindingsByResultGviMgiId(
+        resultGviMgi.resultId,
+        database,
+      )
+    : [];
+
   return {
-    ...resultGvi,
+    resultId: resultGvi.resultId,
+    depthEl: resultGvi.depthEl,
+    condition: resultGvi.condition,
     createdAt: toIsoString(resultGvi.createdAt),
     updatedAt: toIsoString(resultGvi.updatedAt),
+
+    cpFindings: cpFindings.map((finding) => ({
+      ...finding,
+      createdAt: toIsoString(finding.createdAt),
+      updatedAt: toIsoString(finding.updatedAt),
+    })),
+
+    mgi: resultGviMgi
+      ? {
+          detail: {
+            resultId: resultGviMgi.resultId,
+            createdAt: toIsoString(resultGviMgi.createdAt),
+            updatedAt: toIsoString(resultGviMgi.updatedAt),
+          },
+          findings: mgiFindings.map((finding) => ({
+            ...finding,
+            createdAt: toIsoString(finding.createdAt),
+            updatedAt: toIsoString(finding.updatedAt),
+          })),
+        }
+      : null,
   };
 };
+
 
 /* =========================================================
    BSI readback — main row plus the four missing-part lists
@@ -893,7 +1417,7 @@ export const getBsiDetailByResultId = async (
 };
 
 /* =========================================================
-   CVI readback (Phase 6)
+   CVI readback
    ========================================================= */
 
 export const getCviDetailByResultId = async (
@@ -901,18 +1425,42 @@ export const getCviDetailByResultId = async (
   database?: DbOrTx,
 ): Promise<CviDetail | null> => {
   const resultCvi = await getResultCviByResultId(resultId, database);
+
   if (!resultCvi) {
     return null;
   }
 
-  const positions = await getResultCviPositions(
-    resultId,
-    database,
-  );
+  const [positions, cpFindings] = await Promise.all([
+    getResultCviPositions(resultId, database),
+    listResultCviFindingsByResultId(resultId, database),
+  ]);
+
+  const members = (["chord", "brace"] as const).map((memberType) => ({
+    memberType,
+    positions: positions
+      .filter((position) => position.memberType === memberType)
+      .map(({ clockPosition, utMm, findings, sortOrder }) => ({
+        clockPosition,
+        utMm,
+        findings,
+        sortOrder,
+      })),
+  }));
 
   return {
     ...resultCvi,
-    positions,
+    members,
+    cpFindings: cpFindings.map(
+      ({ findingId, resultId, value, remark, sortOrder, createdAt, updatedAt }) => ({
+        findingId,
+        resultId,
+        value,
+        remark,
+        sortOrder,
+        createdAt: toIsoString(createdAt),
+        updatedAt: toIsoString(updatedAt),
+      }),
+    ),
     createdAt: toIsoString(resultCvi.createdAt),
     updatedAt: toIsoString(resultCvi.updatedAt),
   };
@@ -943,3 +1491,162 @@ export const getDviDetailByResultId = async (
     updatedAt: toIsoString(resultDvi.updatedAt),
   };
 };
+
+
+/* =========================================================
+   CGB readback
+   ========================================================= */
+
+export const getCgbDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<CgbDetail | null> => {
+  const resultCgb = await getResultCgbByResultId(resultId, database);
+
+  if (!resultCgb) {
+    return null;
+  }
+
+  return {
+    ...resultCgb,
+    createdAt: toIsoString(resultCgb.createdAt),
+    updatedAt: toIsoString(resultCgb.updatedAt),
+  };
+};
+
+
+
+/* =========================================================
+   RISER readback
+   ========================================================= */
+
+export const getRiserDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<RiserDetail | null> => {
+  const resultRiser = await getResultRiserByResultId(resultId, database);
+
+  if (!resultRiser) {
+    return null;
+  }
+
+  return {
+    ...resultRiser,
+    createdAt: toIsoString(resultRiser.createdAt),
+    updatedAt: toIsoString(resultRiser.updatedAt),
+  };
+};
+
+
+/* =========================================================
+   CAISSON readback
+   ========================================================= */
+
+export const getCiDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<CiDetail | null> => {
+  const resultCi = await getResultCiByResultId(resultId, database);
+
+  if (!resultCi) {
+    return null;
+  }
+
+  const cpFindings = await listResultCiCpFindingsByResultId(
+    resultId,
+    database,
+  );
+
+  return {
+    ...resultCi,
+    cpFindings: cpFindings.map((finding) => ({
+      findingId: finding.findingId,
+      resultId: finding.resultId,
+      cpMv: finding.cpMv,
+      remarks: finding.remarks,
+      createdAt: toIsoString(finding.createdAt),
+      updatedAt: toIsoString(finding.updatedAt),
+    })),
+    createdAt: toIsoString(resultCi.createdAt),
+    updatedAt: toIsoString(resultCi.updatedAt),
+  };
+};
+
+
+/* =========================================================
+   SEABED readback
+   ========================================================= */
+
+export const getSeabedDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<SeabedDetail | null> => {
+  const resultSeabed = await getResultSeabedByResultId(
+    resultId,
+    database,
+  );
+
+  if (!resultSeabed) {
+    return null;
+  }
+
+  const findings = await listResultSeabedFindingsByResultId(
+    resultId,
+    database,
+  );
+
+  return {
+    resultId: resultSeabed.resultId,
+    findings: findings.map((finding) => ({
+      findingId: finding.findingId,
+      resultId: finding.resultId,
+      rangeMeters: finding.rangeMeters,
+      fixes: finding.fixes,
+      debris: finding.debris,
+      debrisType: finding.debrisType,
+      createdAt: toIsoString(finding.createdAt),
+      updatedAt: toIsoString(finding.updatedAt),
+    })),
+    createdAt: toIsoString(resultSeabed.createdAt),
+    updatedAt: toIsoString(resultSeabed.updatedAt),
+  };
+};
+
+
+/* =========================================================
+   PIPELINE readback
+   ========================================================= */
+
+export const getPipelineDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<PiDetail | null> => {
+  const resultPipeline = await getResultPipelineByResultId(
+    resultId,
+    database,
+  );
+
+  if (!resultPipeline) {
+    return null;
+  }
+
+  const findings = await listResultPipelineFindingsByResultId(
+    resultId,
+    database,
+  );
+
+  return {
+    resultId: resultPipeline.resultId,
+    location: resultPipeline.location,
+    depthEl: resultPipeline.depthEl,
+    orientation: resultPipeline.orientation,
+    findings: findings.map((finding) => ({
+      ...finding,
+      createdAt: toIsoString(finding.createdAt),
+      updatedAt: toIsoString(finding.updatedAt),
+    })),
+    createdAt: toIsoString(resultPipeline.createdAt),
+    updatedAt: toIsoString(resultPipeline.updatedAt),
+  };
+};
+

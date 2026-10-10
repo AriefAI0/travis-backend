@@ -1,9 +1,9 @@
-import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, timestamp, uuid, date, primaryKey, index, unique, uniqueIndex, check, jsonb,} from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, text, numeric, integer, serial, bigint, boolean, doublePrecision, timestamp, uuid, date, primaryKey, index, unique, uniqueIndex, check, jsonb,} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /* =================== ENUMERATIONS =================== */
 
-export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RA"]);
+export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "CGB", "RISER", "SEABED", "PIPELINE", "RA"]);
 
 export const mgiCriteriaPreset = pgEnum("mgi_criteria_preset", [
   "project_default",
@@ -21,11 +21,100 @@ export const gviCondition = pgEnum("gvi_condition", ["ok", "not_ok"]);
 
 export const cviMemberType = pgEnum("cvi_member_type", ["chord", "brace"]);
 
+export const dviMemberType = pgEnum("dvi_member_type", ["chord", "brace"]);
+
 export const bsiGapCondition = pgEnum("bsi_gap_condition", ["gap", "no_gap"]);
 
 export const bsiAlignmentCondition = pgEnum("bsi_alignment_condition", ["aligned", "misaligned"]);
 
 export const bsiMisalignedPosition = pgEnum("bsi_misaligned_position", ["top", "mid", "bottom"]);
+
+export const cgbYesNo = pgEnum("cgb_yes_no", ["yes", "no"]);
+
+export const riserCoatingCondition = pgEnum("riser_coating_condition", [
+  "good",
+  "peel-off",
+]);
+
+export const riserCoatingStatus = pgEnum("riser_coating_status", [
+  "present",
+  "not-present",
+]);
+
+
+export const ciBlockageLevel = pgEnum("ci_blockage_level", [
+  "0_25",
+  "25_50",
+  "50_75",
+  "75_100",
+]);
+
+export const piOrientation = pgEnum("pi_orientation", [
+  "12_oclock",
+  "1_oclock",
+  "2_oclock",
+  "3_oclock",
+  "4_oclock",
+  "5_oclock",
+  "6_oclock",
+  "7_oclock",
+  "8_oclock",
+  "9_oclock",
+  "10_oclock",
+  "11_oclock",
+]);
+
+export const piFindingCategory = pgEnum("pi_finding_category", [
+  "damage",
+  "debris",
+  "riser_bend",
+  "stabilization",
+  "burial",
+  "freespans",
+  "leak_observation",
+  "Crossings",
+  "features",
+]);
+
+export const piDamageType = pgEnum("pi_damage_type", [
+  "bare_metal",
+  "crack",
+  "groove",
+  "bitumen_exposed",
+  "reinforcement_bar_exposed",
+]);
+
+export const piDebrisType = pgEnum("pi_debris_type", [
+  "hard",
+  "soft",
+]);
+
+export const piRiserBendCondition = pgEnum("pi_riser_bend_condition", [
+  "seabed_support",
+  "stabilization",
+  "in_suspension",
+]);
+
+export const piStabilizationCondition = pgEnum(
+  "pi_stabilization_condition",
+  ["supporting", "not_supporting"],
+);
+
+export const piCrossingType = pgEnum("pi_crossing_type", [
+  "over",
+  "under",
+]);
+
+export const piCrossingContact = pgEnum("pi_crossing_contact", [
+  "touching",
+  "not_touching",
+]);
+
+export const piFeaturesCondition = pgEnum("pi_features_condition", [
+  "good",
+  "bad",
+  "damage",
+]);
 
 /* =========================================================
    TIMESTAMPS
@@ -544,6 +633,7 @@ export const resultScour = pgTable(
   }
 );
 
+
 /* GVI — General Visual Inspection */
 export const resultGvi = pgTable(
   "result_gvi",
@@ -551,10 +641,9 @@ export const resultGvi = pgTable(
     resultId: integer("result_id")
       .primaryKey()
       .references(() => result.resultId, { onDelete: "cascade" }),
-    kpRange: text("kp_range"),
+
     depthEl: doublePrecision("depth_el"),
-    gviCP: integer("gvi_cp"),
-    gviUT: integer("gvi_ut"),
+
     condition: gviCondition("condition").notNull(),
 
     ...createdAt,
@@ -562,31 +651,104 @@ export const resultGvi = pgTable(
   }
 );
 
-/* CVI — Close Visual Inspection */
-export const resultCvi = pgTable(
-  "result_cvi",
+/* GVI — CP Findings */
+export const resultGviFinding = pgTable(
+  "result_gvi_finding",
+  {
+    findingId: integer("finding_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+
+    resultGviId: integer("result_gvi_id")
+      .notNull()
+      .references(() => resultGvi.resultId, { onDelete: "cascade" }),
+
+    value: doublePrecision("value"),
+    remark: text("remark"),
+    sortOrder: integer("sort_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultGviFindingGvi: index("idx_result_gvi_finding_gvi").on(
+      table.resultGviId
+    ),
+  })
+);
+
+
+
+/* GVI — Marine Growth Inspection */
+export const resultGviMgi = pgTable(
+  "result_gvi_mgi",
   {
     resultId: integer("result_id")
       .primaryKey()
-      .references(() => result.resultId, { onDelete: "cascade" }),
-    datumReference: text("datum_reference"),
-    memberType: cviMemberType("member_type").notNull(),
-    cpPotentialMv: integer("cp_potential_mv"),
+      .references(() => resultGvi.resultId, { onDelete: "cascade" }),
 
     ...createdAt,
     ...updatedAt,
   }
 );
 
+
+
+/* GVI — Marine Growth Findings */
+export const resultGviMgiFinding = pgTable(
+  "result_gvi_mgi_finding",
+  {
+    findingId: integer("finding_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+
+    resultGviMgiId: integer("result_gvi_mgi_id")
+      .notNull()
+      .references(() => resultGviMgi.resultId, { onDelete: "cascade" }),
+
+    depth: doublePrecision("depth"),
+    softCoveragePercent: integer("soft_coverage_percent"),
+    hardCoveragePercent: integer("hard_coverage_percent"),
+    remarks: text("remarks"),
+    sortOrder: integer("sort_order").notNull().default(0),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultGviMgiFindingMgi: index(
+      "idx_result_gvi_mgi_finding_mgi"
+    ).on(table.resultGviMgiId),
+  })
+);
+
+
+
+
+/* CVI — Close Visual Inspection */
+export const resultCvi = pgTable("result_cvi", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  datumReference: text("datum_reference"),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
 export const resultCviPosition = pgTable(
   "result_cvi_position",
   {
-    positionId: integer("position_id").primaryKey().generatedByDefaultAsIdentity(),
+    positionId: integer("position_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
 
     resultId: integer("result_id")
       .notNull()
       .references(() => resultCvi.resultId, { onDelete: "cascade" }),
 
+    memberType: cviMemberType("member_type").notNull(),
     clockPosition: text("clock_position").notNull(),
     utMm: doublePrecision("ut_mm"),
     findings: text("findings"),
@@ -596,9 +758,37 @@ export const resultCviPosition = pgTable(
     ...updatedAt,
   },
   (table) => ({
-    idxResultCviPositionResultId: index("idx_result_cvi_position_result_id").on(table.resultId),
+    idxResultCviPositionResultId: index(
+      "idx_result_cvi_position_result_id"
+    ).on(table.resultId),
   })
 );
+
+export const resultCviFinding = pgTable(
+  "result_cvi_finding",
+  {
+    findingId: integer("finding_id")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+
+    resultId: integer("result_id")
+      .notNull()
+      .references(() => resultCvi.resultId, { onDelete: "cascade" }),
+
+    value: doublePrecision("value"),
+    remark: text("remark"),
+    sortOrder: integer("sort_order").notNull(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxResultCviFindingResultId: index(
+      "idx_result_cvi_finding_result_id"
+    ).on(table.resultId),
+  })
+);
+
 
 /* DVI — Detailed Visual Inspection */
 export const resultDvi = pgTable(
@@ -756,6 +946,194 @@ export const resultBsiHingeMissingWasher = pgTable(
     ).on(table.resultId),
   }),
 );
+
+
+/* CGB — Conductor Guide Bucket */
+export const resultCgb = pgTable("result_cgb", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  movement: cgbYesNo("movement"),
+  remark: text("remark"),
+  debris: cgbYesNo("debris"),
+  debrisType: text("debris_type"),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+/* RISER — Riser Inspection */
+export const resultRiser = pgTable("result_riser", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  touchdownDistanceFromRiserBend: numeric(
+    "touchdown_distance_from_riser_bend",
+  ),
+
+  riserBendDistanceToMudbraceMember: numeric(
+    "riser_bend_distance_to_mudbrace_member",
+  ),
+
+  riserBendHeightToSeabed: numeric(
+    "riser_bend_height_to_seabed",
+  ),
+
+  coatingStatus: riserCoatingStatus("coating_status"),
+  coatingCondition: riserCoatingCondition("coating_condition"),
+
+  kneeBrace: cgbYesNo("knee_brace"),
+
+  debris: cgbYesNo("debris"),
+  debrisType: text("debris_type").notNull(),
+
+  anomaly: cgbYesNo("anomaly"),
+  recommendation: text("recommendation").notNull(),
+
+  restrictedAccess: cgbYesNo("restricted_access"),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+
+/* CI — Caisson Inspection */
+export const resultCi = pgTable("result_ci", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  visualDamage: boolean("visual_damage"),
+  visualDamageRecommendation: text("visual_damage_recommendation").notNull(),
+
+  debrisPresent: boolean("debris_present"),
+  debrisRecommendation: text("debris_recommendation").notNull(),
+
+  gratingPresent: boolean("grating_present"),
+  gratingBlockage: ciBlockageLevel("grating_blockage"),
+  gratingAnomalyRecommendation: text("grating_anomaly_recommendation").notNull(),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+/* CI — Caisson CP Findings */
+export const resultCiCpFinding = pgTable("result_ci_cp_finding", {
+  findingId: serial("finding_id").primaryKey(),
+
+  resultId: integer("result_id")
+    .notNull()
+    .references(() => resultCi.resultId, { onDelete: "cascade" }),
+
+  cpMv: numeric("cp_mv"),
+  remarks: text("remarks").notNull(),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+/* SEABED — Seabed Debris Survey */
+export const resultSeabed = pgTable("result_seabed", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+/* SEABED — Individual Findings */
+export const resultSeabedFinding = pgTable("result_seabed_finding", {
+  findingId: serial("finding_id").primaryKey(),
+
+  resultId: integer("result_id")
+    .notNull()
+    .references(() => resultSeabed.resultId, { onDelete: "cascade" }),
+
+  rangeMeters: numeric("range_meters"),
+  fixes: text("fixes").notNull(),
+
+  debris: cgbYesNo("debris"),
+  debrisType: text("debris_type").notNull(),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+
+/* =========================================================
+   PIPELINE — Pipeline Inspection
+   ========================================================= */
+
+export const resultPipeline = pgTable("result_pipeline", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  location: text("location").notNull(),
+  depthEl: numeric("depth_el"),
+  orientation: piOrientation("orientation"),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+/* =========================================================
+   PIPELINE — Individual Findings
+   ========================================================= */
+
+export const resultPipelineFinding = pgTable("result_pipeline_finding", {
+  findingId: serial("finding_id").primaryKey(),
+
+  resultId: integer("result_id")
+    .notNull()
+    .references(() => resultPipeline.resultId, { onDelete: "cascade" }),
+
+  category: piFindingCategory("category").notNull(),
+
+  damageDimensions: text("damage_dimensions").notNull(),
+  damageType: piDamageType("damage_type"),
+
+  debrisType: piDebrisType("debris_type"),
+  debrisDescription: text("debris_description").notNull(),
+
+  riserBendCondition: piRiserBendCondition("riser_bend_condition"),
+
+  stabilizationType: text("stabilization_type").notNull(),
+  stabilizationCondition: piStabilizationCondition("stabilization_condition"),
+
+  burialStart: text("burial_start").notNull(),
+  burialEnd: text("burial_end").notNull(),
+
+  freespansStart: text("freespans_start").notNull(),
+  freespansEnd: text("freespans_end").notNull(),
+  freespansLength: text("freespans_length").notNull(),
+  freespansHeight: text("freespans_height").notNull(),
+
+  leakType: text("leak_type").notNull(),
+  leakDescription: text("leak_description").notNull(),
+
+  crossingType: piCrossingType("crossing_type"),
+  crossingContact: piCrossingContact("crossing_contact"),
+  crossingGapDistance: text("crossing_gap_distance").notNull(),
+  crossingDamageMovement: text("crossing_damage_movement").notNull(),
+
+  featuresType: text("features_type").notNull(),
+  featuresCondition: piFeaturesCondition("features_condition"),
+
+  remarks: text("remarks").notNull(),
+
+  ...createdAt,
+  ...updatedAt,
+});
 
 /* =========================================================
    TIMELINE THUMBNAIL (filmstrip for the session master)

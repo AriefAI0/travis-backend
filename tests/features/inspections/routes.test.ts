@@ -23,7 +23,14 @@ const post = async (path: string, body: unknown) =>
     body: JSON.stringify(body),
   });
 
-const GVI_PAYLOAD = { kind: "gvi", version: 1, gviCP: 120, gviUT: null, condition: "ok" };
+// schema-update shape: CP readings are findings, no kpRange/gviUT anymore
+const GVI_PAYLOAD = {
+  kind: "gvi",
+  version: 1,
+  depthEl: 12.5,
+  gviCP: [{ value: 120, remark: "" }],
+  condition: "ok",
+};
 
 // project > task group > task code > main component > branch > component code
 // plus session and a capturing master, all with fixed ids

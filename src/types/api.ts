@@ -128,7 +128,8 @@ export type ProjectRecord = {
 /* =========================================================
    result (app: src/shared/result.ts)
 ========================================================= */
-export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON";
+// mirrors the pgEnum inspection_type exactly (incl. RA)
+export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON" | "CGB" | "RISER" | "SEABED" | "PIPELINE" | "RA";
 
 export type MgiDetail = {
   resultId: number;
@@ -188,29 +189,76 @@ export type ScourDetail = {
   updatedAt: string;
 };
 
-export type GviDetail = {
-  resultId: number;
-  kpRange: string | null;
-  depthEl: number | null;
-  gviCP: number | null;
-  gviUT: number | null;
-  condition: "ok" | "not_ok";
+
+export type GviCPFindingDetail = {
+  findingId: number;
+  resultGviId: number;
+  value: number | null;
+  remark: string | null;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 };
+
+export type GviMgiFindingDetail = {
+  findingId: number;
+  resultGviMgiId: number;
+  depth: number | null;
+  softCoveragePercent: number | null;
+  hardCoveragePercent: number | null;
+  remarks: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GviMgiDetail = {
+  resultId: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GviDetail = {
+  resultId: number;
+  depthEl: number | null;
+  condition: "ok" | "not_ok";
+  createdAt: string;
+  updatedAt: string;
+  cpFindings: GviCPFindingDetail[];
+  mgi: {
+    detail: GviMgiDetail;
+    findings: GviMgiFindingDetail[];
+  } | null;
+};
+
 
 export type CviPositionDetail = {
   clockPosition: string;
   utMm: number | null;
   findings: string | null;
+  sortOrder: number;
+};
+
+export type CviMemberDetail = {
+  memberType: "chord" | "brace";
+  positions: CviPositionDetail[];
+};
+
+export type CviFindingDetail = {
+  findingId: number;
+  resultId: number;
+  value: number | null;
+  remark: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CviDetail = {
   resultId: number;
   datumReference: string | null;
-  memberType: "chord" | "brace";
-  positions: CviPositionDetail[];
-  cpPotentialMv: number | null;
+  members: CviMemberDetail[];
+  cpFindings: CviFindingDetail[];
   createdAt: string;
   updatedAt: string;
 };
@@ -263,6 +311,179 @@ export type BsiDetail = {
   createdAt: string;
   updatedAt: string;
 };
+
+
+
+export type CgbDetail = {
+  resultId: number;
+  movement: "yes" | "no" | null;
+  remark: string | null;
+  debris: "yes" | "no" | null;
+  debrisType: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+
+export type RiserDetail = {
+  resultId: number;
+
+  touchdownDistanceFromRiserBend: string | null;
+  riserBendDistanceToMudbraceMember: string | null;
+  riserBendHeightToSeabed: string | null;
+
+  coatingStatus: "present" | "not-present" | null;
+  coatingCondition: "good" | "peel-off" | null;
+
+  kneeBrace: "yes" | "no" | null;
+
+  debris: "yes" | "no" | null;
+  debrisType: string;
+
+  anomaly: "yes" | "no" | null;
+  recommendation: string;
+
+  restrictedAccess: "yes" | "no" | null;
+
+  createdAt: string;
+  updatedAt: string;
+};
+
+
+export type CiCpFindingDetail = {
+  findingId: number;
+  resultId: number;
+  cpMv: string | null;
+  remarks: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CiDetail = {
+  resultId: number;
+
+  visualDamage: boolean | null;
+  visualDamageRecommendation: string;
+
+  debrisPresent: boolean | null;
+  debrisRecommendation: string;
+
+  gratingPresent: boolean | null;
+  gratingBlockage: "0_25" | "25_50" | "50_75" | "75_100" | null;
+  gratingAnomalyRecommendation: string;
+
+  cpFindings: CiCpFindingDetail[];
+
+  createdAt: string;
+  updatedAt: string;
+};
+
+
+export type SeabedFindingDetail = {
+  findingId: number;
+  resultId: number;
+  rangeMeters: string | null;
+  fixes: string;
+  debris: "yes" | "no" | null;
+  debrisType: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SeabedDetail = {
+  resultId: number;
+  findings: SeabedFindingDetail[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+
+export type PiFindingDetail = {
+  findingId: number;
+  resultId: number;
+
+  category:
+    | "damage"
+    | "debris"
+    | "riser_bend"
+    | "stabilization"
+    | "burial"
+    | "freespans"
+    | "leak_observation"
+    | "Crossings"
+    | "features";
+
+  damageDimensions: string;
+  damageType:
+    | "bare_metal"
+    | "crack"
+    | "groove"
+    | "bitumen_exposed"
+    | "reinforcement_bar_exposed"
+    | null;
+
+  debrisType: "hard" | "soft" | null;
+  debrisDescription: string;
+
+  riserBendCondition:
+    | "seabed_support"
+    | "stabilization"
+    | "in_suspension"
+    | null;
+
+  stabilizationType: string;
+  stabilizationCondition: "supporting" | "not_supporting" | null;
+
+  burialStart: string;
+  burialEnd: string;
+
+  freespansStart: string;
+  freespansEnd: string;
+  freespansLength: string;
+  freespansHeight: string;
+
+  leakType: string;
+  leakDescription: string;
+
+  crossingType: "over" | "under" | null;
+  crossingContact: "touching" | "not_touching" | null;
+  crossingGapDistance: string;
+  crossingDamageMovement: string;
+
+  featuresType: string;
+  featuresCondition: "good" | "bad" | "damage" | null;
+
+  remarks: string;
+
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PiDetail = {
+  resultId: number;
+  location: string;
+  depthEl: string | null;
+  orientation:
+    | "12_oclock"
+    | "1_oclock"
+    | "2_oclock"
+    | "3_oclock"
+    | "4_oclock"
+    | "5_oclock"
+    | "6_oclock"
+    | "7_oclock"
+    | "8_oclock"
+    | "9_oclock"
+    | "10_oclock"
+    | "11_oclock"
+    | null;
+
+  findings: PiFindingDetail[];
+
+  createdAt: string;
+  updatedAt: string;
+};
+
 
 export type ItemResultSidebarClip = {
   clipId: number;
@@ -370,6 +591,33 @@ export type ProjectResultSummaryRow = {
   resultValue: string;
 };
 
+// one finding row of a PIPELINE summary
+export type PipelineSummaryFinding = {
+  category: string;
+  damageDimensions: string;
+  damageType: string | null;
+  debrisType: string | null;
+  debrisDescription: string;
+  riserBendCondition: string | null;
+  stabilizationType: string;
+  stabilizationCondition: string | null;
+  burialStart: string;
+  burialEnd: string;
+  freespansStart: string;
+  freespansEnd: string;
+  freespansLength: string;
+  freespansHeight: string;
+  leakType: string;
+  leakDescription: string;
+  crossingType: string | null;
+  crossingContact: string | null;
+  crossingGapDistance: string;
+  crossingDamageMovement: string;
+  featuresType: string;
+  featuresCondition: string | null;
+  remarks: string;
+};
+
 export type ResultSummaryDetail = {
   condition?: "ok" | "not_ok";
   memberType?: "chord" | "brace";
@@ -388,6 +636,42 @@ export type ResultSummaryDetail = {
   noMgObserved?: number;
   findingCount?: number;
   clampType?: string | null;
+  // CGB — clearance/debris bucket summary
+  movement?: "yes" | "no" | null;
+  remark?: string | null;
+  debris?: "yes" | "no" | null;
+  debrisType?: string | null;
+  // RISER summary
+  touchdownDistanceFromRiserBend?: number | null;
+  riserBendDistanceToMudbraceMember?: number | null;
+  riserBendHeightToSeabed?: number | null;
+  coatingStatus?: string | null;
+  coatingCondition?: string | null;
+  kneeBrace?: "yes" | "no" | null;
+  anomaly?: "yes" | "no" | null;
+  recommendation?: string | null;
+  restrictedAccess?: "yes" | "no" | null;
+  // CAISSON summary
+  visualDamage?: boolean | null;
+  visualDamageRecommendation?: string;
+  debrisPresent?: boolean | null;
+  debrisRecommendation?: string;
+  gratingPresent?: boolean | null;
+  gratingBlockage?: string | null;
+  gratingAnomalyRecommendation?: string;
+  cpFindings?: { cpMv: string | null; remarks: string }[];
+  // SEABED summary
+  seabedFindings?: {
+    rangeMeters: number | null;
+    fixes: string;
+    debris: "yes" | "no" | null;
+    debrisType: string;
+  }[];
+  // PIPELINE summary
+  location?: string;
+  depthEl?: number | null;
+  orientation?: string | null;
+  pipelineFindings?: PipelineSummaryFinding[];
 };
 
 export type ResultEvidence = {
@@ -468,6 +752,11 @@ export type ReportGatherResult = {
     | CviDetail
     | DviDetail
     | ResultMgiWithFindings
+    | CgbDetail
+    | RiserDetail
+    | CiDetail
+    | SeabedDetail
+    | PiDetail
     | null;
 };
 
@@ -494,7 +783,7 @@ export type ReportGatherData = {
 const id = z.number().int().positive();
 const optionalText = z.string().min(1).nullable().optional();
 const itemStatus = z.enum(["not_set", "pending", "complete"]);
-export const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON"]);
+export const inspectionType = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CGB", "RISER", "CAISSON", "SEABED", "PIPELINE"]);
 
 // projects — Create/UpdateProjectInput share one shape (title required)
 export const projectInputSchema = z.object({
@@ -681,7 +970,7 @@ export const inspectionFormCustomFieldSchema = z.object({
 export const saveInspectionFormSchema = z.object({
   customFields: z.array(inspectionFormCustomFieldSchema),
 });
-export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI"]);
+export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CGB", "RISER", "CAISSON", "SEABED", "PIPELINE"]);
 
 /* Planned inspections — preassigned types on a target, before any session.
    One type per target; the table's unique constraint owns the rule. */
@@ -832,31 +1121,57 @@ export const scourPayloadSchema = z.object({
   heightLeg2: z.number().nullable(),
 });
 
+
 export const gviPayloadSchema = z.object({
   kind: z.literal("gvi"),
   version: z.literal(1),
-  kpRange: z.string().nullish(),
-  depthEl: z.number().nullish(),
-  gviCP: z.number().nullish(),
-  gviUT: z.number().nullish(),
+  depthEl: z.number().nullable(),
+  gviCP: z.array(
+    z.object({
+      value: z.number().nullable(),
+      remark: z.string(),
+    }),
+  ).optional(),
+  mgi: z.array(
+    z.object({
+      depth: z.number().nullable(),
+      softCoveragePercent: z.number().min(0).max(100),
+      hardCoveragePercent: z.number().min(0).max(100),
+      remarks: z.string(),
+    }),
+  ).optional(),
   condition: z.enum(["ok", "not_ok"]),
 });
+
+
 
 export const cviPayloadSchema = z.object({
   kind: z.literal("cvi"),
   version: z.literal(1),
+
   datumReference: z.string().min(1),
-  memberType: z.enum(["chord", "brace"]),
-  positions: z.array(
+
+  members: z.array(
     z.object({
-      // the app's CLOCK_POSITIONS const
-      clockPosition: z.enum(["12", "3", "6", "9"]),
-      utMm: z.number().nullable(),
-      findings: z.string(),
+      memberType: z.enum(["chord", "brace"]),
+      positions: z.array(
+        z.object({
+          clockPosition: z.enum(["12", "3", "6", "9"]),
+          utMm: z.number().nullable(),
+          findings: z.string(),
+        }),
+      ),
     }),
   ),
-  cpPotentialMv: z.number().nullable(),
+
+  cpFindings: z.array(
+    z.object({
+      value: z.number().nullable(),
+      remark: z.string(),
+    }),
+  ),
 });
+
 
 export const dviPayloadSchema = z.object({
   kind: z.literal("dvi"),
@@ -904,6 +1219,176 @@ export const bsiPayloadSchema = z.object({
   outboardAnomalyRecommendation: z.string(),
 });
 
+
+export const cgbPayloadSchema = z.object({
+  kind: z.literal("cgb"),
+  version: z.literal(1),
+
+  movement: z.enum(["yes", "no"]).nullable(),
+  remark: z.string().nullable(),
+
+  debris: z.enum(["yes", "no"]).nullable(),
+  debrisType: z.string().nullable(),
+});
+
+
+
+export const riserPayloadSchema = z.object({
+  kind: z.literal("riser"),
+  version: z.literal(1),
+
+  touchdownDistanceFromRiserBend: z.number().nullable(),
+
+  riserBendDistanceToMudbraceMember: z.number().nullable(),
+  riserBendHeightToSeabed: z.number().nullable(),
+
+  coatingStatus: z.enum(["present", "not-present"]).nullable(),
+  coatingCondition: z.enum(["good", "peel-off"]).nullable(),
+
+  kneeBrace: z.enum(["yes", "no"]).nullable(),
+
+  debris: z.enum(["yes", "no"]).nullable(),
+  debrisType: z.string(),
+
+  anomaly: z.enum(["yes", "no"]).nullable(),
+  recommendation: z.string(),
+
+  restrictedAccess: z.enum(["yes", "no"]).nullable(),
+});
+
+
+export const ciPayloadSchema = z.object({
+  kind: z.literal("ci"),
+  version: z.literal(1),
+
+  cpFindings: z.array(
+    z.object({
+      cpMv: z.number().nullable(),
+      remarks: z.string(),
+    }),
+  ),
+  visualDamage: z.boolean().nullable(),
+  visualDamageRecommendation: z.string(),
+
+  debrisPresent: z.boolean().nullable(),
+  debrisRecommendation: z.string(),
+
+  gratingPresent: z.boolean().nullable(),
+  gratingBlockage: z
+    .enum(["0_25", "25_50", "50_75", "75_100"])
+    .nullable(),
+
+  gratingAnomalyRecommendation: z.string(),
+});
+
+export const seabedPayloadSchema = z.object({
+  kind: z.literal("seabed"),
+  version: z.literal(1),
+
+  findings: z.array(
+    z.object({
+      rangeMeters: z.number().nullable(),
+      fixes: z.string(),
+      debris: z.enum(["yes", "no"]).nullable(),
+      debrisType: z.string(),
+    }),
+  ),
+});
+
+
+export const pipelinePayloadSchema = z.object({
+  kind: z.literal("pipeline"),
+  version: z.literal(1),
+
+  location: z.string(),
+  depthEl: z.number().nullable(),
+
+  orientation: z.enum([
+    "12_oclock",
+    "1_oclock",
+    "2_oclock",
+    "3_oclock",
+    "4_oclock",
+    "5_oclock",
+    "6_oclock",
+    "7_oclock",
+    "8_oclock",
+    "9_oclock",
+    "10_oclock",
+    "11_oclock",
+  ]).nullable(),
+
+  findings: z.array(
+    z.object({
+      category: z.enum([
+        "damage",
+        "debris",
+        "riser_bend",
+        "stabilization",
+        "burial",
+        "freespans",
+        "leak_observation",
+        "Crossings",
+        "features",
+      ]),
+
+      damageDimensions: z.string(),
+      damageType: z.enum([
+        "bare_metal",
+        "crack",
+        "groove",
+        "bitumen_exposed",
+        "reinforcement_bar_exposed",
+      ]).nullable(),
+
+      debrisType: z.enum(["hard", "soft"]).nullable(),
+      debrisDescription: z.string(),
+
+      riserBendCondition: z.enum([
+        "seabed_support",
+        "stabilization",
+        "in_suspension",
+      ]).nullable(),
+
+      stabilizationType: z.string(),
+      stabilizationCondition: z.enum([
+        "supporting",
+        "not_supporting",
+      ]).nullable(),
+
+      burialStart: z.string(),
+      burialEnd: z.string(),
+
+      freespansStart: z.string(),
+      freespansEnd: z.string(),
+      freespansLength: z.string(),
+      freespansHeight: z.string(),
+
+      leakType: z.string(),
+      leakDescription: z.string(),
+
+      crossingType: z.enum(["over", "under"]).nullable(),
+      crossingContact: z.enum([
+        "touching",
+        "not_touching",
+      ]).nullable(),
+      crossingGapDistance: z.string(),
+      crossingDamageMovement: z.string(),
+
+      featuresType: z.string(),
+      featuresCondition: z.enum([
+        "good",
+        "bad",
+        "damage",
+      ]).nullable(),
+
+      remarks: z.string(),
+    }),
+  ),
+});
+
+
+
 // one payload field, one union — never one API per inspection type
 export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   mgiPayloadSchema,
@@ -912,7 +1397,13 @@ export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   scourPayloadSchema,
   gviPayloadSchema,
   cviPayloadSchema,
+  dviPayloadSchema,
   bsiPayloadSchema,
+  cgbPayloadSchema,
+  riserPayloadSchema,
+  ciPayloadSchema,
+  seabedPayloadSchema,
+  pipelinePayloadSchema
 ]);
 
 export type InspectionPayload = z.infer<typeof inspectionPayloadSchema>;
@@ -924,3 +1415,8 @@ export type GviPayloadInput = z.infer<typeof gviPayloadSchema>;
 export type CviPayloadInput = z.infer<typeof cviPayloadSchema>;
 export type DviPayloadInput = z.infer<typeof dviPayloadSchema>;
 export type BsiPayloadInput = z.infer<typeof bsiPayloadSchema>;
+export type CgbPayloadInput = z.infer<typeof cgbPayloadSchema>;
+export type RiserPayloadInput = z.infer<typeof riserPayloadSchema>;
+export type CiPayloadInput = z.infer<typeof ciPayloadSchema>;
+export type SeabedPayloadInput = z.infer<typeof seabedPayloadSchema>;
+export type PiPayloadInput = z.infer<typeof pipelinePayloadSchema>;

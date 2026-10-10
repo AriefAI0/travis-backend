@@ -113,12 +113,16 @@ const rowsForResult = async (row: SummaryRow, database?: DbOrTx): Promise<Report
     case "GVI": {
       const detail = await getGviDetailByResultId(row.resultId, database);
       if (!detail) return [];
+      // kp_range/gvi_ut left empty: the schema-update model dropped those fields
       return [
         {
-          kp_range: text(detail.kpRange),
+          kp_range: "",
           depth_el: text(detail.depthEl),
-          gvi_cp: text(detail.gviCP),
-          gvi_ut: text(detail.gviUT),
+          gvi_cp: detail.cpFindings
+            .map((finding) => text(finding.value))
+            .filter(Boolean)
+            .join(", "),
+          gvi_ut: "",
           condition: label(CONDITION_LABEL, detail.condition),
           remarks,
           recorded,
@@ -173,12 +177,36 @@ const rowsForResult = async (row: SummaryRow, database?: DbOrTx): Promise<Report
         },
       ];
     }
-    case "CVI":
+    case "CVI": {
+      const detail = await getCviDetailByResultId(row.resultId, database);
+      if (!detail) return [];
+      const head = { datum_reference: text(detail.datumReference) };
+      // schema-update model: member_type lives per position, CP readings are findings
+      const positionRows = detail.members.flatMap((member) =>
+        member.positions.map((position) => ({
+          ...head,
+          member_type: member.memberType.toUpperCase(),
+          cp_potential_mv: "",
+          clock_position: position.clockPosition,
+          ut_mm: text(position.utMm),
+          findings: text(position.findings),
+        })),
+      );
+      const cpRows = detail.cpFindings.map((finding) => ({
+        ...head,
+        member_type: "",
+        cp_potential_mv: text(finding.value),
+        clock_position: "",
+        ut_mm: "",
+        findings: text(finding.remark),
+      }));
+      // a result with neither positions nor CP findings still gets its header row
+      return positionRows.length + cpRows.length
+        ? [...positionRows, ...cpRows]
+        : [{ ...head, member_type: "", cp_potential_mv: "", clock_position: "", ut_mm: "", findings: "" }];
+    }
     case "DVI": {
-      const detail =
-        row.inspectionTypeCode === "CVI"
-          ? await getCviDetailByResultId(row.resultId, database)
-          : await getDviDetailByResultId(row.resultId, database);
+      const detail = await getDviDetailByResultId(row.resultId, database);
       if (!detail) return [];
       const head = {
         datum_reference: text(detail.datumReference),

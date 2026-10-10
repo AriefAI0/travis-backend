@@ -43,6 +43,13 @@
       "when": 1791492086217,
       "tag": "0005_whole_saracen",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791632311902,
+      "tag": "0006_happy_wraith",
+      "breakpoints": true
     }
   ]
 }

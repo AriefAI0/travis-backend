@@ -23,11 +23,15 @@ export type TargetResultsBatchQuery = {
 
 type ResultRow = Awaited<ReturnType<typeof listResultRecordsByDescriptionId>>[number];
 
+// an RA mark has no session, so the session sidebar has no bucket for it
+const withSession = (rows: ResultRow[]) =>
+  rows.filter((row): row is ResultRow & { sessionId: number } => row.sessionId !== null);
+
 const toIsoString = (value: Date) => value.toISOString();
 
 // one evidence pass for a whole result set; the maps keep the loop query-free
 const loadEvidenceLookups = async (results: ResultRow[], database?: DbOrTx) => {
-  const sessionIds = [...new Set(results.map((row) => row.sessionId))];
+  const sessionIds = [...new Set(withSession(results).map((row) => row.sessionId))];
   const resultIds = results.map((row) => row.resultId);
 
   const [sessionRecords, imagesByResultId, clipsByResultId] = await Promise.all([
@@ -56,7 +60,7 @@ const buildSessions = async (results: ResultRow[], lookups: EvidenceLookups) => 
   const { sessionById, imagesByResultId, clipsByResultId, playableClipIds } = lookups;
 
   const resultsBySessionId = new Map<number, ResultRow[]>();
-  for (const row of results) {
+  for (const row of withSession(results)) {
     const bucket = resultsBySessionId.get(row.sessionId) ?? [];
     bucket.push(row);
     resultsBySessionId.set(row.sessionId, bucket);

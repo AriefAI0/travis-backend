@@ -49,7 +49,7 @@ const requireImage = async (imageId: number, database?: DbOrTx) => {
 const resolveImageStem = async (
   resultRow: {
     projectId: number;
-    sessionId: number;
+    sessionId: number | null;
     descriptionId: number | null;
     partCodeId: number | null;
     resultId: number;
@@ -58,6 +58,11 @@ const resolveImageStem = async (
   },
   database?: DbOrTx,
 ) => {
+  // an RA mark has no session, so it has no evidence folder
+  if (resultRow.sessionId === null) {
+    throw new AppError(409, "wrong_state", `result ${resultRow.resultId} has no session`);
+  }
+
   const project = await findProjectById(resultRow.projectId, database);
   if (!project) {
     throw new AppError(404, "not_found", `project ${resultRow.projectId} not found`);

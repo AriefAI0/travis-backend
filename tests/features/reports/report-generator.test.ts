@@ -78,9 +78,15 @@ const seed = async () => {
 
   // the type table reads these columns, not a formatted summary string
   await testDb.insert(schema.resultGvi).values([
-    { resultId: 5001, kpRange: "KP-1", condition: "not_ok" },
-    { resultId: 5002, kpRange: "KP-2", gviCP: -900, condition: "ok" },
+    { resultId: 5001, condition: "not_ok" },
+    { resultId: 5002, depthEl: 1.25, condition: "ok" },
   ]);
+  await testDb.insert(schema.resultGviFinding).values({
+    resultGviId: 5002,
+    value: -900,
+    remark: "cp reading",
+    sortOrder: 0,
+  });
 };
 
 // one target carrying three inspection types at once
@@ -111,14 +117,19 @@ const seedMixedTypes = async () => {
   await testDb.insert(schema.resultCvi).values({
     resultId: 5003,
     datumReference: "D-1",
-    memberType: "chord",
-    cpPotentialMv: -850,
   });
   await testDb.insert(schema.resultCviPosition).values({
     resultId: 5003,
+    memberType: "chord",
     clockPosition: "12:00",
     utMm: 9.5,
     findings: "pitting",
+    sortOrder: 0,
+  });
+  await testDb.insert(schema.resultCviFinding).values({
+    resultId: 5003,
+    value: -850,
+    remark: "cp",
     sortOrder: 0,
   });
   await testDb.insert(schema.resultMgi).values({
@@ -152,7 +163,9 @@ describe("generateReport", () => {
     expect(xml).toContain("100");
     expect(xml).toContain("Leg A");
     expect(xml).toContain("GVI Results");
-    expect(xml).toContain("KP-2");
+    // schema-update shape: gvi_cp renders from the findings join, no KP range
+    expect(xml).toContain("-900");
+    expect(xml).toContain("1.25");
     expect(xml).toContain("Good Condition");
     expect(xml).toContain("looks fine");
 
@@ -194,7 +207,7 @@ describe("generateReport", () => {
     expect(xml).not.toContain("SCOUR Results");
 
     // the columns each type actually reads
-    expect(xml).toContain("KP-2");
+    expect(xml).toContain("-900");
     expect(xml).toContain("Good Condition");
     expect(xml).toContain("CHORD");
     expect(xml).toContain("-850");

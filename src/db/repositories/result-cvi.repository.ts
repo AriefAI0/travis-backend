@@ -5,8 +5,6 @@ import { resultCvi } from "../schema";
 export type CreateResultCviInput = {
   resultId: number;
   datumReference: string | null;
-  memberType: "chord" | "brace";
-  cpPotentialMv: number | null;
 };
 
 export const createResultCvi = async (
@@ -19,8 +17,11 @@ export const getResultCviByResultId = async (
   resultId: number,
   database: DbOrTx = db,
 ) =>
-  (await database.select().from(resultCvi).where(eq(resultCvi.resultId, resultId)).limit(1))[0] ??
-  null;
+  (await database
+    .select()
+    .from(resultCvi)
+    .where(eq(resultCvi.resultId, resultId))
+    .limit(1))[0] ?? null;
 
 /** Batched CVI detail across many results (event-recorder summary). */
 export const listResultCviByResultIds = async (
@@ -43,6 +44,10 @@ export const deleteResultCvi = async (
   resultId: number,
   database: DbOrTx = db,
 ): Promise<boolean> => {
-  const rows = await database.delete(resultCvi).where(eq(resultCvi.resultId, resultId)).returning();
+  const rows = await database
+    .delete(resultCvi)
+    .where(eq(resultCvi.resultId, resultId))
+    .returning();
+
   return rows.length > 0;
 };

@@ -81,19 +81,29 @@ const seed = async () => {
   });
 
   await testDb.insert(schema.resultGvi).values([
-    { resultId: 5001, kpRange: "KP-1", condition: "not_ok" },
-    { resultId: 5002, kpRange: "KP-2", depthEl: 1.25, gviCP: -900, gviUT: 12, condition: "ok" },
+    { resultId: 5001, condition: "not_ok" },
+    { resultId: 5002, depthEl: 1.25, condition: "ok" },
   ]);
+  await testDb.insert(schema.resultGviFinding).values({
+    resultGviId: 5002,
+    value: -900,
+    remark: "cp reading",
+    sortOrder: 0,
+  });
   await testDb.insert(schema.resultCvi).values({
     resultId: 5003,
     datumReference: "D-1",
-    memberType: "chord",
-    cpPotentialMv: -850,
   });
   await testDb.insert(schema.resultCviPosition).values([
-    { resultId: 5003, clockPosition: "12:00", utMm: 9.5, findings: "pitting", sortOrder: 0 },
-    { resultId: 5003, clockPosition: "6:00", utMm: 8.1, findings: null, sortOrder: 1 },
+    { resultId: 5003, memberType: "chord", clockPosition: "12:00", utMm: 9.5, findings: "pitting", sortOrder: 0 },
+    { resultId: 5003, memberType: "brace", clockPosition: "6:00", utMm: 8.1, findings: null, sortOrder: 1 },
   ]);
+  await testDb.insert(schema.resultCviFinding).values({
+    resultId: 5003,
+    value: -850,
+    remark: "cp",
+    sortOrder: 0,
+  });
 
   await testDb.insert(schema.resultImage).values({
     imageId: 9001,
@@ -117,7 +127,8 @@ describe("gatherReportData", () => {
     expect(data.items).toHaveLength(2);
 
     // description target first, even though its result ids are the higher ones
-    const [description, partCode] = data.items;
+    const description = data.items[0]!;
+    const partCode = data.items[1]!;
     expect(description.description).toBe("Leg A");
     expect(description.task_group).toBe("100");
     expect(description.task_code).toBe("101");
@@ -138,45 +149,51 @@ describe("gatherReportData", () => {
   it("carries the typed GVI columns and sets only the matching flag", async () => {
     await seed();
 
-    const [description] = (await gatherReportData(1, testDb)).items;
-    const gvi = description.sections[0];
+    const description = (await gatherReportData(1, testDb)).items[0]!;
+    const gvi = description.sections[0]!;
 
     expect(gvi.isGVI).toBe(true);
     expect(gvi.isCVI).toBe(false);
     expect(gvi.isBSI).toBe(false);
     expect(gvi.rows).toHaveLength(1);
-    expect(gvi.rows[0].kp_range).toBe("KP-2");
-    expect(gvi.rows[0].depth_el).toBe("1.25");
-    expect(gvi.rows[0].gvi_cp).toBe("-900");
-    expect(gvi.rows[0].gvi_ut).toBe("12");
-    expect(gvi.rows[0].condition).toBe("Good Condition");
-    expect(gvi.rows[0].remarks).toBe("looks fine");
-    expect(gvi.rows[0].recorded).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // schema-update shape: kp_range/gvi_ut have no column anymore
+    expect(gvi.rows[0]!.kp_range).toBe("");
+    expect(gvi.rows[0]!.depth_el).toBe("1.25");
+    expect(gvi.rows[0]!.gvi_cp).toBe("-900");
+    expect(gvi.rows[0]!.gvi_ut).toBe("");
+    expect(gvi.rows[0]!.condition).toBe("Good Condition");
+    expect(gvi.rows[0]!.remarks).toBe("looks fine");
+    expect(gvi.rows[0]!.recorded).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it("repeats the CVI header down one row per clock position", async () => {
     await seed();
 
-    const [description] = (await gatherReportData(1, testDb)).items;
-    const cvi = description.sections[1];
+    const description = (await gatherReportData(1, testDb)).items[0]!;
+    const cvi = description.sections[1]!;
 
     expect(cvi.isCVI).toBe(true);
-    expect(cvi.rows).toHaveLength(2);
-    expect(cvi.rows[0].datum_reference).toBe("D-1");
-    expect(cvi.rows[0].member_type).toBe("CHORD");
-    expect(cvi.rows[0].cp_potential_mv).toBe("-850");
-    expect(cvi.rows[0].clock_position).toBe("12:00");
-    expect(cvi.rows[0].ut_mm).toBe("9.5");
-    expect(cvi.rows[0].findings).toBe("pitting");
-    expect(cvi.rows[1].clock_position).toBe("6:00");
-    expect(cvi.rows[1].findings).toBe("");
+    // 2 position rows + 1 CP finding row
+    expect(cvi.rows).toHaveLength(3);
+    expect(cvi.rows[0]!.datum_reference).toBe("D-1");
+    expect(cvi.rows[0]!.member_type).toBe("CHORD");
+    expect(cvi.rows[0]!.cp_potential_mv).toBe("");
+    expect(cvi.rows[0]!.clock_position).toBe("12:00");
+    expect(cvi.rows[0]!.ut_mm).toBe("9.5");
+    expect(cvi.rows[0]!.findings).toBe("pitting");
+    expect(cvi.rows[1]!.clock_position).toBe("6:00");
+    expect(cvi.rows[1]!.member_type).toBe("BRACE");
+    expect(cvi.rows[1]!.findings).toBe("");
+    expect(cvi.rows[2]!.member_type).toBe("");
+    expect(cvi.rows[2]!.cp_potential_mv).toBe("-850");
+    expect(cvi.rows[2]!.findings).toBe("cp");
   });
 
   it("emits an empty section for a type with no detail table", async () => {
     await seed();
 
-    const [description] = (await gatherReportData(1, testDb)).items;
-    const unmapped = description.sections[2];
+    const description = (await gatherReportData(1, testDb)).items[0]!;
+    const unmapped = description.sections[2]!;
 
     expect(unmapped.inspection_type).toBe("RA");
     expect(unmapped.rows).toEqual([]);
@@ -188,19 +205,19 @@ describe("gatherReportData", () => {
   it("resolves the section image and blanks it when absent", async () => {
     await seed();
 
-    const [description] = (await gatherReportData(1, testDb)).items;
+    const description = (await gatherReportData(1, testDb)).items[0]!;
 
-    expect(description.sections[0].image).toBe("1-alpha/session-1/evidence-img/9001.png");
-    expect(description.sections[1].image).toBe(NO_IMAGE);
+    expect(description.sections[0]!.image).toBe("1-alpha/session-1/evidence-img/9001.png");
+    expect(description.sections[1]!.image).toBe(NO_IMAGE);
   });
 
   it("prefers the annotated twin when the column says it exists", async () => {
     await seed();
     await testDb.update(schema.resultImage).set({ hasAnnotated: true });
 
-    const [description] = (await gatherReportData(1, testDb)).items;
+    const description = (await gatherReportData(1, testDb)).items[0]!;
 
-    expect(description.sections[0].image).toBe(
+    expect(description.sections[0]!.image).toBe(
       "1-alpha/session-1/evidence-img/9001-annotated.png",
     );
   });
@@ -235,10 +252,10 @@ describe("gatherReportData", () => {
 
     // tree order first, then the orphan
     expect(data.items).toHaveLength(3);
-    expect(data.items[2].description).toBe("");
-    expect(data.items[2].task_group).toBe("");
-    expect(data.items[2].sections[0].isGVI).toBe(true);
-    expect(data.items[2].sections[0].rows[0].condition).toBe("Good Condition");
+    expect(data.items[2]!.description).toBe("");
+    expect(data.items[2]!.task_group).toBe("");
+    expect(data.items[2]!.sections[0]!.isGVI).toBe(true);
+    expect(data.items[2]!.sections[0]!.rows[0]!.condition).toBe("Good Condition");
   });
 
   it("throws for an unknown project", async () => {
