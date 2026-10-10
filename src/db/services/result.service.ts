@@ -2,7 +2,7 @@ import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail,
   InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, SeabedFindingDetail,
   CpPayloadInput, CviPayloadInput, DviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput,
   CgbPayloadInput, RiserPayloadInput, CiPayloadInput, SeabedPayloadInput, PiPayloadInput } from "../../types/api";
-import { inspectionPayloadSchema } from "../../types/api";
+import { inspectionPayloadSchema, type InspectionPayload } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
 import { AppError } from "../../lib/error";
@@ -157,11 +157,13 @@ import {
 import {
   createResultCviPosition,
   getResultCviPositions,
+  listResultCviPositionsByResultIds,
 } from "../repositories/result-cvi-position.repository";
 
 import {
   createResultCviFinding,
   listResultCviFindingsByResultId,
+  listResultCviFindingsByResultIds,
 } from "../repositories/result-cvi-finding.repository";
 
 import {
@@ -230,6 +232,24 @@ import {
  * result_scour, result_gvi, result_cvi). Parses the payload union, rejects a
  * kind that disagrees with the result's inspection type, then writes through.
  */
+// payload kind > result type code. "ci" is the one kind that does not
+// upper-case onto its own code — a caisson inspection carries an "ci" payload.
+const KIND_TO_TYPE_CODE: Record<InspectionPayload["kind"], InspectionTypeCode> = {
+  gvi: "GVI",
+  cvi: "CVI",
+  dvi: "DVI",
+  mgi: "MGI",
+  cp: "CP",
+  fmd: "FMD",
+  scour: "SCOUR",
+  bsi: "BSI",
+  cgb: "CGB",
+  riser: "RISER",
+  ci: "CAISSON",
+  seabed: "SEABED",
+  pipeline: "PIPELINE",
+};
+
 export const writeTypedDetail = async (
   inspectionTypeCode: InspectionTypeCode,
   payload: unknown,
@@ -248,7 +268,7 @@ export const writeTypedDetail = async (
   }
 
   const data = parsed.data;
-  if (data.kind.toUpperCase() !== inspectionTypeCode) {
+  if (KIND_TO_TYPE_CODE[data.kind] !== inspectionTypeCode) {
     throw new AppError(
       400,
       "payload_type_mismatch",
@@ -892,8 +912,8 @@ export const listProjectSummary = async (
     resultIdsByCode[resultRecord.inspectionTypeCode].push(resultRecord.resultId);
   }
 
-  // round 1: detail rows; round 2: finding lists for CAISSON/SEABED/PIPELINE
-  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser, ci, seabed, pipeline, ciCpFindings, seabedFindings, pipelineFindings] = await Promise.all([
+  // round 1: detail rows; round 2: child lists for CVI/CAISSON/SEABED/PIPELINE
+  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser, ci, seabed, pipeline, ciCpFindings, seabedFindings, pipelineFindings, cviPositions, cviFindings] = await Promise.all([
     listResultGviByResultIds(resultIdsByCode.GVI, database),
     listResultCviByResultIds(resultIdsByCode.CVI, database),
     listResultDviByResultIds(resultIdsByCode.DVI, database),
@@ -910,6 +930,8 @@ export const listProjectSummary = async (
     listResultCiCpFindingsByResultIds(resultIdsByCode.CAISSON, database),
     listResultSeabedFindingsByResultIds(resultIdsByCode.SEABED, database),
     listResultPipelineFindingsByResultIds(resultIdsByCode.PIPELINE, database),
+    listResultCviPositionsByResultIds(resultIdsByCode.CVI, database),
+    listResultCviFindingsByResultIds(resultIdsByCode.CVI, database),
   ]);
 
   const detailFor = (
@@ -923,8 +945,17 @@ export const listProjectSummary = async (
 
       case "CVI": {
         const detail = cvi.get(resultRecord.resultId);
-        // memberType/cpPotentialMv now live per-position; summary keeps the datum only
-        return detail ? { datumReference: detail.datumReference } : null;
+        if (!detail) return null;
+        // member type lives per position, CP per finding in the new model
+        return {
+          datumReference: detail.datumReference,
+          memberTypes: (cviPositions.get(resultRecord.resultId) ?? []).map(
+            (position) => position.memberType,
+          ),
+          cpValues: (cviFindings.get(resultRecord.resultId) ?? []).map(
+            (finding) => finding.value,
+          ),
+        };
       }
 
       case "DVI": {

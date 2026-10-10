@@ -2,14 +2,19 @@ import { Hono } from "hono";
 import type { DbOrTx } from "../../db/client";
 import {
   getBsiDetailByResultId,
+  getCgbDetailByResultId,
+  getCiDetailByResultId,
   getCpDetailByResultId,
   getCviDetailByResultId,
   getDviDetailByResultId,
   getFmdDetailByResultId,
   getGviDetailByResultId,
+  getPipelineDetailByResultId,
   getResultEvidence,
   getResultMgiDetailByResultId,
+  getRiserDetailByResultId,
   getScourDetailByResultId,
+  getSeabedDetailByResultId,
   listProjectSummary,
 } from "../../db/services/result.service";
 import { listResultImageSummariesByResultIds } from "../../db/services/result-media.service";
@@ -74,6 +79,17 @@ export const resultRoutes = (database?: DbOrTx) => {
     ok(c, await getDviDetailByResultId(parseId(c, "id"), database)));
   routes.get("/api/v1/results/:id/bsi", async (c) =>
     ok(c, await getBsiDetailByResultId(parseId(c, "id"), database)));
+  // CAISSON is served under its payload kind "ci", like the stop route
+  routes.get("/api/v1/results/:id/cgb", async (c) =>
+    ok(c, await getCgbDetailByResultId(parseId(c, "id"), database)));
+  routes.get("/api/v1/results/:id/riser", async (c) =>
+    ok(c, await getRiserDetailByResultId(parseId(c, "id"), database)));
+  routes.get("/api/v1/results/:id/ci", async (c) =>
+    ok(c, await getCiDetailByResultId(parseId(c, "id"), database)));
+  routes.get("/api/v1/results/:id/seabed", async (c) =>
+    ok(c, await getSeabedDetailByResultId(parseId(c, "id"), database)));
+  routes.get("/api/v1/results/:id/pipeline", async (c) =>
+    ok(c, await getPipelineDetailByResultId(parseId(c, "id"), database)));
 
   // batch read: resultId -> image summaries
   routes.post("/api/v1/images/by-result-ids", async (c) => {

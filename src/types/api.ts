@@ -623,6 +623,9 @@ export type ResultSummaryDetail = {
   memberType?: "chord" | "brace";
   datumReference?: string | null;
   cpPotentialMv?: number | null;
+  // CVI — schema-update model: member type sits on each position, CP on findings
+  memberTypes?: ("chord" | "brace")[];
+  cpValues?: (number | null)[];
   exposedPile?: "exposed" | "not_exposed";
   voltageMv?: number | null;
   anodeType?: string | null;
@@ -971,6 +974,9 @@ export const saveInspectionFormSchema = z.object({
   customFields: z.array(inspectionFormCustomFieldSchema),
 });
 export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CGB", "RISER", "CAISSON", "SEABED", "PIPELINE"]);
+
+// the accepted codes, for error text and pickers; one source with the schema above
+export const INSPECTION_TYPE_CODES = inspectionTypeParamSchema.options;
 
 /* Planned inspections — preassigned types on a target, before any session.
    One type per target; the table's unique constraint owns the rule. */

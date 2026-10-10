@@ -36,7 +36,13 @@ export const findInspectionFormById = async (
 export const createInspectionFormFieldRecords = async (
   data: (typeof inspectionFormField.$inferInsert)[],
   database: DbOrTx = db,
-) => database.insert(inspectionFormField).values(data).returning();
+) => {
+  // a type with no built-in fields seeds an empty list; drizzle refuses values([])
+  if (data.length === 0) {
+    return [];
+  }
+  return database.insert(inspectionFormField).values(data).returning();
+};
 
 export const listInspectionFormFieldRecordsByFormId = async (
   inspectionFormId: number,

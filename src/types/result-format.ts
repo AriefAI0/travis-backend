@@ -20,12 +20,13 @@ export const formatResultValue = (
     case "GVI":
       return detail.condition === "ok" ? "Good Condition" : "Visual Damage";
     case "CVI": {
-      const memberType = detail.memberType ?? "chord";
-      const cpText = detail.cpPotentialMv != null
-        ? `${detail.cpPotentialMv} mV`
-        : "N/A";
+      // schema-update model: member type per position, CP per finding
+      const types = detail.memberTypes?.length
+        ? [...new Set(detail.memberTypes)].map((type) => type.toUpperCase()).join(", ")
+        : "CHORD";
+      const cp = detail.cpValues?.find((value) => value != null) ?? null;
 
-      return `${memberType.toUpperCase()} | CP ${cpText}`;
+      return `${types} | CP ${cp == null ? "N/A" : `${cp} mV`}`;
     }
     case "DVI": {
       const memberType = detail.memberType ?? "chord";
@@ -47,6 +48,24 @@ export const formatResultValue = (
       return detail.noMgObserved ? "No MG" : `${detail.findingCount ?? 0} findings`;
     case "BSI":
       return detail.clampType ?? "—";
+    case "CGB":
+      return detail.movement === "yes" ? "Movement" : detail.debris === "yes" ? "Debris" : "Clear";
+    case "RISER":
+      return detail.coatingStatus === "present"
+        ? "Coating present"
+        : detail.anomaly === "yes"
+          ? "Anomaly"
+          : "No anomaly";
+    case "CAISSON":
+      return detail.gratingBlockage
+        ? `Grating ${detail.gratingBlockage.replace("_", "-")}%`
+        : detail.visualDamage
+          ? "Visual damage"
+          : "No damage";
+    case "SEABED":
+      return `${detail.seabedFindings?.length ?? 0} findings`;
+    case "PIPELINE":
+      return detail.location || `${detail.pipelineFindings?.length ?? 0} findings`;
     default:
       return "—";
   }

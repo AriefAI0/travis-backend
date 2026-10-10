@@ -7,7 +7,7 @@ import {
 import { AppError } from "../../lib/error";
 import { parseBody, parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
-import { inspectionTypeParamSchema, saveInspectionFormSchema } from "../../types/api";
+import { INSPECTION_TYPE_CODES, inspectionTypeParamSchema, saveInspectionFormSchema } from "../../types/api";
 
 // project inspection forms: get-or-seed current version, save new versions
 export const inspectionFormRoutes = (database?: DbOrTx) => {
@@ -17,7 +17,11 @@ export const inspectionFormRoutes = (database?: DbOrTx) => {
   const parseInspectionType = (raw: string) => {
     const parsed = inspectionTypeParamSchema.safeParse(raw);
     if (!parsed.success) {
-      throw new AppError(400, "validation_error", `inspectionType: expected one of GVI, CVI, MGI, CP, FMD, SCOUR`);
+      throw new AppError(
+        400,
+        "validation_error",
+        `inspectionType: expected one of ${INSPECTION_TYPE_CODES.join(", ")}`,
+      );
     }
     return parsed.data;
   };

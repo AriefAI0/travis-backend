@@ -8,27 +8,58 @@ describe("formatResultValue", () => {
     expect(formatResultValue("GVI", { condition: "not_ok" })).toBe("Visual Damage");
   });
 
-  it("renders CVI summary", () => {
+  it("renders CVI summary from members and findings", () => {
+    // schema-update model: member type per position, CP per finding
     expect(
       formatResultValue("CVI", {
-        memberType: "chord",
-        cpPotentialMv: -850,
+        memberTypes: ["chord"],
+        cpValues: [-850],
       }),
     ).toBe("CHORD | CP -850 mV");
 
     expect(
       formatResultValue("CVI", {
-        memberType: "brace",
-        cpPotentialMv: -1200,
+        memberTypes: ["brace"],
+        cpValues: [-1200],
       }),
     ).toBe("BRACE | CP -1200 mV");
 
     expect(
       formatResultValue("CVI", {
-        memberType: "chord",
-        cpPotentialMv: null,
+        memberTypes: ["chord"],
+        cpValues: [null],
       }),
     ).toBe("CHORD | CP N/A");
+
+    // more than one member type on the result
+    expect(
+      formatResultValue("CVI", {
+        memberTypes: ["chord", "brace", "chord"],
+        cpValues: [null, -900],
+      }),
+    ).toBe("CHORD, BRACE | CP -900 mV");
+
+    // no positions recorded yet falls back to the default member
+    expect(formatResultValue("CVI", { datumReference: "D-1" })).toBe("CHORD | CP N/A");
+  });
+
+  it("renders the phase-2 type summaries", () => {
+    expect(formatResultValue("CGB", { movement: "yes" })).toBe("Movement");
+    expect(formatResultValue("CGB", { movement: "no", debris: "yes" })).toBe("Debris");
+    expect(formatResultValue("CGB", { movement: "no", debris: "no" })).toBe("Clear");
+
+    expect(formatResultValue("RISER", { coatingStatus: "present" })).toBe("Coating present");
+    expect(formatResultValue("RISER", { coatingStatus: "not-present", anomaly: "yes" })).toBe("Anomaly");
+    expect(formatResultValue("RISER", { coatingStatus: null, anomaly: "no" })).toBe("No anomaly");
+
+    expect(formatResultValue("CAISSON", { gratingBlockage: "25_50" })).toBe("Grating 25-50%");
+    expect(formatResultValue("CAISSON", { visualDamage: true })).toBe("Visual damage");
+    expect(formatResultValue("CAISSON", { visualDamage: false })).toBe("No damage");
+
+    expect(formatResultValue("SEABED", { seabedFindings: [] })).toBe("0 findings");
+
+    expect(formatResultValue("PIPELINE", { location: "KP-1" })).toBe("KP-1");
+    expect(formatResultValue("PIPELINE", { location: "" })).toBe("0 findings");
   });
 
   it("renders CP voltage in mV", () => {
