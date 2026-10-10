@@ -28,6 +28,11 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json bun.lock ./
 COPY src ./src
 
+# NODE_ENV stays unset on purpose. Set to production, Bun stops bundling the
+# report editor page at runtime and points the page at asset paths its own
+# pre-build does not emit on this version — the page then loads nothing.
+# Revisit with a working pre-build: the page ships unminified until then.
+
 # DATA_DIR default lands here — mount it to survive redeploys
 VOLUME /app/data
 EXPOSE 8788
