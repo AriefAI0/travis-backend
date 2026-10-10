@@ -129,7 +129,7 @@ export type ProjectRecord = {
    result (app: src/shared/result.ts)
 ========================================================= */
 
-export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON" | "CGB" | "RISER";
+export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON" | "CGB" | "RISER" | "CAISSON";
 
 export type MgiDetail = {
   resultId: number;
@@ -350,6 +350,34 @@ export type RiserDetail = {
 };
 
 
+export type CiCpFindingDetail = {
+  findingId: number;
+  resultId: number;
+  cpMv: string | null;
+  remarks: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CiDetail = {
+  resultId: number;
+
+  visualDamage: boolean | null;
+  visualDamageRecommendation: string;
+
+  debrisPresent: boolean | null;
+  debrisRecommendation: string;
+
+  gratingPresent: boolean | null;
+  gratingBlockage: "0_25" | "25_50" | "50_75" | "75_100" | null;
+  gratingAnomalyRecommendation: string;
+
+  cpFindings: CiCpFindingDetail[];
+
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ItemResultSidebarClip = {
   clipId: number;
   resultId: number;
@@ -556,6 +584,7 @@ export type ReportGatherResult = {
     | ResultMgiWithFindings
     | CgbDetail
     | RiserDetail
+    | CiDetail
     | null;
 };
 
@@ -582,7 +611,7 @@ export type ReportGatherData = {
 const id = z.number().int().positive();
 const optionalText = z.string().min(1).nullable().optional();
 const itemStatus = z.enum(["not_set", "pending", "complete"]);
-export const inspectionType = z.enum(["GVI", "CVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON"]);
+export const inspectionType = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CGB", "RISER", "CAISSON"]);
 
 // projects — Create/UpdateProjectInput share one shape (title required)
 export const projectInputSchema = z.object({
@@ -1056,6 +1085,31 @@ export const riserPayloadSchema = z.object({
 });
 
 
+export const ciPayloadSchema = z.object({
+  kind: z.literal("ci"),
+  version: z.literal(1),
+
+  cpFindings: z.array(
+    z.object({
+      cpMv: z.number().nullable(),
+      remarks: z.string(),
+    }),
+  ),
+
+  visualDamage: z.boolean().nullable(),
+  visualDamageRecommendation: z.string(),
+
+  debrisPresent: z.boolean().nullable(),
+  debrisRecommendation: z.string(),
+
+  gratingPresent: z.boolean().nullable(),
+  gratingBlockage: z
+    .enum(["0_25", "25_50", "50_75", "75_100"])
+    .nullable(),
+
+  gratingAnomalyRecommendation: z.string(),
+});
+
 // one payload field, one union — never one API per inspection type
 export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   mgiPayloadSchema,
@@ -1064,9 +1118,11 @@ export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   scourPayloadSchema,
   gviPayloadSchema,
   cviPayloadSchema,
+  dviPayloadSchema,
   bsiPayloadSchema,
   cgbPayloadSchema,
-  riserPayloadSchema
+  riserPayloadSchema,
+  ciPayloadSchema
 ]);
 
 export type InspectionPayload = z.infer<typeof inspectionPayloadSchema>;
@@ -1080,3 +1136,4 @@ export type DviPayloadInput = z.infer<typeof dviPayloadSchema>;
 export type BsiPayloadInput = z.infer<typeof bsiPayloadSchema>;
 export type CgbPayloadInput = z.infer<typeof cgbPayloadSchema>;
 export type RiserPayloadInput = z.infer<typeof riserPayloadSchema>;
+export type CiPayloadInput = z.infer<typeof ciPayloadSchema>;

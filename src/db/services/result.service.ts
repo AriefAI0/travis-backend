@@ -1,4 +1,7 @@
-import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, CgbDetail, InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput } from "../../types/api";
+import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, CgbDetail, RiserDetail, CiDetail, 
+  InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, 
+  CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput, 
+  CgbPayloadInput, RiserPayloadInput, CiPayloadInput } from "../../types/api";
 import { inspectionPayloadSchema } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
@@ -192,13 +195,24 @@ import {
   listResultRiserByResultIds,
 } from "../repositories/result-riser.repository";
 
+
+import {
+  createResultCi,
+  getResultCiByResultId,
+  listResultCiByResultIds,
+  createResultCiCpFinding,
+  listResultCiCpFindingsByResultId,
+  listResultCiCpFindingsByResultIds,
+} from "../repositories/result-ci.repository";
+
+
 /**
  * Dispatcher for typed detail tables (result_mgi, result_cp, result_fmd,
  * result_scour, result_gvi, result_cvi). Parses the payload union, rejects a
  * kind that disagrees with the result's inspection type, then writes through.
  */
 export const writeTypedDetail = async (
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER",
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER" | "CAISSON",
   payload: unknown,
   resultId: number,
   database?: DbOrTx,
@@ -244,6 +258,8 @@ export const writeTypedDetail = async (
       return writeCgbDetail(data, resultId, database);
     case "riser":
       return writeRiserDetail(data, resultId, database);
+    case "ci":
+      return writeCiDetail(data, resultId, database);  
   }
 };
 
@@ -631,6 +647,49 @@ const writeRiserDetail = async (
 };
 
 
+
+/**
+ * CAISSON detail writer
+ */
+const writeCiDetail = async (
+  payload: CiPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const run = async (tx: DbOrTx): Promise<void> => {
+    // 1. Create the parent CAISSON record.
+    await createResultCi(
+      {
+        resultId,
+        visualDamage: payload.visualDamage,
+        visualDamageRecommendation: payload.visualDamageRecommendation,
+        debrisPresent: payload.debrisPresent,
+        debrisRecommendation: payload.debrisRecommendation,
+        gratingPresent: payload.gratingPresent,
+        gratingBlockage: payload.gratingBlockage,
+        gratingAnomalyRecommendation:
+          payload.gratingAnomalyRecommendation,
+      },
+      tx,
+    );
+
+    // 2. Save each CP finding.
+    for (const finding of payload.cpFindings) {
+      await createResultCiCpFinding(
+        {
+          resultId,
+          cpMv: finding.cpMv?.toString() ?? null,
+          remarks: finding.remarks,
+        },
+        tx,
+      );
+    }
+  };
+
+  return database ? run(database) : db.transaction(run);
+};
+
+
 // Ordinal assignment mirrors createSession. startInspection passes its own
 // transaction, so that path gets a single attempt and the uniq
 // (session_id, display_number) index is the backstop.
@@ -642,7 +701,7 @@ export const listResults = async (database?: DbOrTx) =>
 export type CreateResultInput = {
   sessionId: number;
   projectId: number;
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER";
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER" | "CAISSON";
   descriptionId?: number;
   partCodeId?: number;
   layer: number;
@@ -737,12 +796,13 @@ export const listProjectSummary = async (
     BSI: [],
     CGB: [],
     RISER: [],
+    CAISSON: [],
   };
   for (const resultRecord of results) {
     resultIdsByCode[resultRecord.inspectionTypeCode].push(resultRecord.resultId);
   }
 
-  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser] = await Promise.all([
+  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser, ci] = await Promise.all([
     listResultGviByResultIds(resultIdsByCode.GVI, database),
     listResultCviByResultIds(resultIdsByCode.CVI, database),
     listResultDviByResultIds(resultIdsByCode.DVI, database),
@@ -753,6 +813,7 @@ export const listProjectSummary = async (
     listResultBsiByResultIds(resultIdsByCode.BSI, database),
     listResultCgbByResultIds(resultIdsByCode.CGB, database),
     listResultRiserByResultIds(resultIdsByCode.RISER, database),
+    listResultCiByResultIds(resultIdsByCode.CAISSON, database),
   ]);
 
   const detailFor = (
@@ -820,6 +881,7 @@ export const listProjectSummary = async (
         return detail ? { clampType: detail.clampType } : null;
       }
 
+
 case "CGB": {
   const detail = cgb.get(resultRecord.resultId);
 
@@ -855,10 +917,28 @@ case "RISER": {
       }
     : null;
 }
-    }
-  };
 
+case "CAISSON": {
+  const detail = ci.get(resultRecord.resultId);
+  const cpFindings = ciCpFindings.get(resultRecord.resultId) ?? [];
 
+  return detail
+    ? {
+        visualDamage: detail.visualDamage,
+        visualDamageRecommendation: detail.visualDamageRecommendation,
+        debrisPresent: detail.debrisPresent,
+        debrisRecommendation: detail.debrisRecommendation,
+        gratingPresent: detail.gratingPresent,
+        gratingBlockage: detail.gratingBlockage,
+        gratingAnomalyRecommendation:
+          detail.gratingAnomalyRecommendation,
+        cpFindings: cpFindings.map(({ cpMv, remarks }) => ({
+          cpMv,
+          remarks,
+        })),
+      }
+    : null;
+}
 
 
   return results.map((resultRecord) => ({
@@ -1270,3 +1350,37 @@ export const getRiserDetailByResultId = async (
   };
 };
 
+
+/* =========================================================
+   CAISSON readback
+   ========================================================= */
+
+export const getCiDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<CiDetail | null> => {
+  const resultCi = await getResultCiByResultId(resultId, database);
+
+  if (!resultCi) {
+    return null;
+  }
+
+  const cpFindings = await listResultCiCpFindingsByResultId(
+    resultId,
+    database,
+  );
+
+  return {
+    ...resultCi,
+    cpFindings: cpFindings.map((finding) => ({
+      findingId: finding.findingId,
+      resultId: finding.resultId,
+      cpMv: finding.cpMv,
+      remarks: finding.remarks,
+      createdAt: toIsoString(finding.createdAt),
+      updatedAt: toIsoString(finding.updatedAt),
+    })),
+    createdAt: toIsoString(resultCi.createdAt),
+    updatedAt: toIsoString(resultCi.updatedAt),
+  };
+};

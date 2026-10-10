@@ -1,9 +1,9 @@
-import { pgTable, pgEnum, text, integer, bigint, boolean, doublePrecision, timestamp, uuid, date, primaryKey, index, unique, uniqueIndex, check, jsonb,} from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, text, numeric, integer, serial, bigint, boolean, doublePrecision, timestamp, uuid, date, primaryKey, index, unique, uniqueIndex, check, jsonb,} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /* =================== ENUMERATIONS =================== */
 
-export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RA"]);
+export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RISER", "RA"]);
 
 export const mgiCriteriaPreset = pgEnum("mgi_criteria_preset", [
   "project_default",
@@ -41,6 +41,13 @@ export const riserCoatingStatus = pgEnum("riser_coating_status", [
   "not-present",
 ]);
 
+
+export const ciBlockageLevel = pgEnum("ci_blockage_level", [
+  "0_25",
+  "25_50",
+  "50_75",
+  "75_100",
+]);
 
 /* =========================================================
    TIMESTAMPS
@@ -889,6 +896,79 @@ export const resultCgb = pgTable("result_cgb", {
   ...updatedAt,
 });
 
+
+/* RISER — Riser Inspection */
+export const resultRiser = pgTable("result_riser", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  touchdownDistanceFromRiserBend: numeric(
+    "touchdown_distance_from_riser_bend",
+  ),
+
+  riserBendDistanceToMudbraceMember: numeric(
+    "riser_bend_distance_to_mudbrace_member",
+  ),
+
+  riserBendHeightToSeabed: numeric(
+    "riser_bend_height_to_seabed",
+  ),
+
+  coatingStatus: riserCoatingStatus("coating_status"),
+  coatingCondition: riserCoatingCondition("coating_condition"),
+
+  kneeBrace: cgbYesNo("knee_brace"),
+
+  debris: cgbYesNo("debris"),
+  debrisType: text("debris_type").notNull(),
+
+  anomaly: cgbYesNo("anomaly"),
+  recommendation: text("recommendation").notNull(),
+
+  restrictedAccess: cgbYesNo("restricted_access"),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+
+/* CI — Caisson Inspection */
+export const resultCi = pgTable("result_ci", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  visualDamage: boolean("visual_damage"),
+  visualDamageRecommendation: text("visual_damage_recommendation").notNull(),
+
+  debrisPresent: boolean("debris_present"),
+  debrisRecommendation: text("debris_recommendation").notNull(),
+
+  gratingPresent: boolean("grating_present"),
+  gratingBlockage: ciBlockageLevel("grating_blockage"),
+  gratingAnomalyRecommendation: text("grating_anomaly_recommendation").notNull(),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+/* CI — Caisson CP Findings */
+export const resultCiCpFinding = pgTable("result_ci_cp_finding", {
+  findingId: serial("finding_id").primaryKey(),
+
+  resultId: integer("result_id")
+    .notNull()
+    .references(() => resultCi.resultId, { onDelete: "cascade" }),
+
+  cpMv: numeric("cp_mv"),
+  remarks: text("remarks").notNull(),
+
+  ...createdAt,
+  ...updatedAt,
+});
 
 /* =========================================================
    TIMELINE THUMBNAIL (filmstrip for the session master)
