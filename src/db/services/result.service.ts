@@ -130,6 +130,7 @@ import {
 import {
   createResultGviFinding,
   listResultGviFindingsByResultGviId,
+  listResultGviFindingsByResultGviIds,
 } from "../repositories/result-gvi-finding.repository";
 
 import {
@@ -205,6 +206,9 @@ import {
   createResultCiCpFinding,
   listResultCiCpFindingsByResultId,
   listResultCiCpFindingsByResultIds,
+  createResultCiGviAssociatedPipe,
+  listResultCiGviAssociatedPipesByResultId,
+  listResultCiGviAssociatedPipesByResultIds,
 } from "../repositories/result-ci.repository";
 
 
@@ -432,7 +436,9 @@ const writeGviDetail = async (
     const resultGvi = await createResultGvi(
       {
         resultId,
+        kpRange: payload.kpRange ?? null,
         depthEl: payload.depthEl ?? null,
+        gviUt: payload.gviUT ?? null,
         condition: payload.condition,
       },
       tx,
@@ -712,6 +718,7 @@ const writeCiDetail = async (
         gratingBlockage: payload.gratingBlockage,
         gratingAnomalyRecommendation:
           payload.gratingAnomalyRecommendation,
+        associatedPipesRecommendation: payload.associatedPipesRecommendation,
       },
       tx,
     );
@@ -724,6 +731,14 @@ const writeCiDetail = async (
           cpMv: finding.cpMv?.toString() ?? null,
           remarks: finding.remarks,
         },
+        tx,
+      );
+    }
+
+    // 3. Save the associated-pipe positions; insertion order is the form order.
+    for (const pipe of payload.gviAssociatedPipes) {
+      await createResultCiGviAssociatedPipe(
+        { resultId, position: pipe.position },
         tx,
       );
     }
@@ -913,7 +928,7 @@ export const listProjectSummary = async (
   }
 
   // round 1: detail rows; round 2: child lists for CVI/CAISSON/SEABED/PIPELINE
-  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser, ci, seabed, pipeline, ciCpFindings, seabedFindings, pipelineFindings, cviPositions, cviFindings] = await Promise.all([
+  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser, ci, seabed, pipeline, ciCpFindings, seabedFindings, pipelineFindings, cviPositions, cviFindings, gviFindings, ciPipes] = await Promise.all([
     listResultGviByResultIds(resultIdsByCode.GVI, database),
     listResultCviByResultIds(resultIdsByCode.CVI, database),
     listResultDviByResultIds(resultIdsByCode.DVI, database),
@@ -932,6 +947,8 @@ export const listProjectSummary = async (
     listResultPipelineFindingsByResultIds(resultIdsByCode.PIPELINE, database),
     listResultCviPositionsByResultIds(resultIdsByCode.CVI, database),
     listResultCviFindingsByResultIds(resultIdsByCode.CVI, database),
+    listResultGviFindingsByResultGviIds(resultIdsByCode.GVI, database),
+    listResultCiGviAssociatedPipesByResultIds(resultIdsByCode.CAISSON, database),
   ]);
 
   const detailFor = (
@@ -940,7 +957,15 @@ export const listProjectSummary = async (
     switch (resultRecord.inspectionTypeCode) {
       case "GVI": {
         const detail = gvi.get(resultRecord.resultId);
-        return detail ? { condition: detail.condition } : null;
+        if (!detail) return null;
+        // the GVI tool shows KP, depth, CP and UT alongside the condition
+        return {
+          kpRange: detail.kpRange,
+          depthEl: detail.depthEl,
+          gviCp: (gviFindings.get(resultRecord.resultId) ?? [])[0]?.value ?? null,
+          gviUt: detail.gviUt,
+          condition: detail.condition,
+        };
       }
 
       case "CVI": {
@@ -1059,6 +1084,11 @@ case "CAISSON": {
         gratingBlockage: detail.gratingBlockage,
         gratingAnomalyRecommendation:
           detail.gratingAnomalyRecommendation,
+        associatedPipesRecommendation:
+          detail.associatedPipesRecommendation,
+        associatedPipes: (ciPipes.get(resultRecord.resultId) ?? []).map(
+          (pipe) => ({ position: pipe.position }),
+        ),
         cpFindings: cpFindings.map(({ cpMv, remarks }) => ({
           cpMv,
           remarks,
@@ -1386,7 +1416,9 @@ export const getGviDetailByResultId = async (
 
   return {
     resultId: resultGvi.resultId,
+    kpRange: resultGvi.kpRange,
     depthEl: resultGvi.depthEl,
+    gviUt: resultGvi.gviUt,
     condition: resultGvi.condition,
     createdAt: toIsoString(resultGvi.createdAt),
     updatedAt: toIsoString(resultGvi.updatedAt),
@@ -1583,10 +1615,10 @@ export const getCiDetailByResultId = async (
     return null;
   }
 
-  const cpFindings = await listResultCiCpFindingsByResultId(
-    resultId,
-    database,
-  );
+  const [cpFindings, associatedPipes] = await Promise.all([
+    listResultCiCpFindingsByResultId(resultId, database),
+    listResultCiGviAssociatedPipesByResultId(resultId, database),
+  ]);
 
   return {
     ...resultCi,
@@ -1597,6 +1629,10 @@ export const getCiDetailByResultId = async (
       remarks: finding.remarks,
       createdAt: toIsoString(finding.createdAt),
       updatedAt: toIsoString(finding.updatedAt),
+    })),
+    gviAssociatedPipes: associatedPipes.map((pipe) => ({
+      pipeId: pipe.pipeId,
+      position: pipe.position,
     })),
     createdAt: toIsoString(resultCi.createdAt),
     updatedAt: toIsoString(resultCi.updatedAt),

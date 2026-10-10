@@ -23,11 +23,13 @@ const post = async (path: string, body: unknown) =>
     body: JSON.stringify(body),
   });
 
-// schema-update shape: CP readings are findings, no kpRange/gviUT anymore
+// the GVI tool's own shape: KP/depth/UT scalars, CP readings as findings
 const GVI_PAYLOAD = {
   kind: "gvi",
   version: 1,
+  kpRange: "KP-1",
   depthEl: 12.5,
+  gviUT: 8,
   gviCP: [{ value: 120, remark: "" }],
   condition: "ok",
 };

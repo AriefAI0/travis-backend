@@ -3,9 +3,20 @@ import { describe, expect, it } from "bun:test";
 import { formatResultValue } from "../../src/types/result-format";
 
 describe("formatResultValue", () => {
-  it("renders GVI/CVI condition", () => {
-    expect(formatResultValue("GVI", { condition: "ok" })).toBe("Good Condition");
-    expect(formatResultValue("GVI", { condition: "not_ok" })).toBe("Visual Damage");
+  it("renders GVI summary from the tool's own fields", () => {
+    expect(formatResultValue("GVI", { condition: "ok" })).toBe("CP: N/A, UT: N/A, Good Condition");
+    expect(formatResultValue("GVI", { condition: "not_ok" })).toBe(
+      "CP: N/A, UT: N/A, Visual Damage",
+    );
+    expect(
+      formatResultValue("GVI", {
+        kpRange: "KP-2",
+        depthEl: 1.25,
+        gviCp: -900,
+        gviUt: 12,
+        condition: "ok",
+      }),
+    ).toBe("KP: KP-2, Depth EL: 1.25, CP: -900 mV, UT: 12 mm, Good Condition");
   });
 
   it("renders CVI summary from members and findings", () => {

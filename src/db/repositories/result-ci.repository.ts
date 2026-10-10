@@ -1,7 +1,7 @@
 
 import { eq, inArray } from "drizzle-orm";
 import { db, type DbOrTx } from "../client";
-import { resultCi, resultCiCpFinding } from "../schema";
+import { resultCi, resultCiCpFinding, resultCiGviAssociatedPipe } from "../schema";
 
 /* =========================================================
    Types
@@ -16,6 +16,7 @@ export type CreateResultCiInput = {
   gratingPresent: boolean | null;
   gratingBlockage: "0_25" | "25_50" | "50_75" | "75_100" | null;
   gratingAnomalyRecommendation: string;
+  associatedPipesRecommendation: string;
 };
 
 export type CreateResultCiCpFindingInput = {
@@ -133,6 +134,73 @@ export const deleteResultCiCpFindingsByResultId = async (
   const rows = await database
     .delete(resultCiCpFinding)
     .where(eq(resultCiCpFinding.resultId, resultId))
+    .returning();
+
+  return rows.length;
+};
+
+/* =========================================================
+   CAISSON GVI-associated pipes
+   ========================================================= */
+
+export const createResultCiGviAssociatedPipe = async (
+  data: typeof resultCiGviAssociatedPipe.$inferInsert,
+  database: DbOrTx = db,
+) =>
+  (
+    await database
+      .insert(resultCiGviAssociatedPipe)
+      .values(data)
+      .returning()
+  )[0] ?? null;
+
+export const listResultCiGviAssociatedPipesByResultId = async (
+  resultId: number,
+  database: DbOrTx = db,
+) =>
+  database
+    .select()
+    .from(resultCiGviAssociatedPipe)
+    .where(eq(resultCiGviAssociatedPipe.resultId, resultId))
+    .orderBy(resultCiGviAssociatedPipe.pipeId);
+
+export const listResultCiGviAssociatedPipesByResultIds = async (
+  resultIds: number[],
+  database: DbOrTx = db,
+): Promise<
+  Map<number, (typeof resultCiGviAssociatedPipe.$inferSelect)[]>
+> => {
+  if (resultIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await database
+    .select()
+    .from(resultCiGviAssociatedPipe)
+    .where(inArray(resultCiGviAssociatedPipe.resultId, resultIds))
+    .orderBy(resultCiGviAssociatedPipe.pipeId);
+
+  const grouped = new Map<
+    number,
+    (typeof resultCiGviAssociatedPipe.$inferSelect)[]
+  >();
+
+  for (const row of rows) {
+    const existing = grouped.get(row.resultId) ?? [];
+    existing.push(row);
+    grouped.set(row.resultId, existing);
+  }
+
+  return grouped;
+};
+
+export const deleteResultCiGviAssociatedPipesByResultId = async (
+  resultId: number,
+  database: DbOrTx = db,
+): Promise<number> => {
+  const rows = await database
+    .delete(resultCiGviAssociatedPipe)
+    .where(eq(resultCiGviAssociatedPipe.resultId, resultId))
     .returning();
 
   return rows.length;

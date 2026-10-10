@@ -63,6 +63,7 @@ const deleteOrder = [
   schema.resultGvi,
   schema.resultCgb,
   schema.resultRiser,
+  schema.resultCiGviAssociatedPipe,
   schema.resultCiCpFinding,
   schema.resultCi,
   schema.resultSeabedFinding,

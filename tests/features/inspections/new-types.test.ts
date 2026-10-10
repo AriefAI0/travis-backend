@@ -143,6 +143,8 @@ const SCENARIOS = [
       gratingPresent: true,
       gratingBlockage: "25_50",
       gratingAnomalyRecommendation: "",
+      gviAssociatedPipes: [{ position: "P-1" }],
+      associatedPipesRecommendation: "inspect both",
     },
     // gratingBlockage is a band enum
     invalid: {
@@ -156,6 +158,8 @@ const SCENARIOS = [
       gratingPresent: null,
       gratingBlockage: "half",
       gratingAnomalyRecommendation: "",
+      gviAssociatedPipes: [],
+      associatedPipesRecommendation: "",
     },
   },
   {

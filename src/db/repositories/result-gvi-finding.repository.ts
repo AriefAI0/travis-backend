@@ -1,5 +1,5 @@
 
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db, type DbOrTx } from "../client";
 import { resultGviFinding } from "../schema";
 
@@ -28,6 +28,31 @@ export const listResultGviFindingsByResultGviId = async (
     .from(resultGviFinding)
     .where(eq(resultGviFinding.resultGviId, resultGviId))
     .orderBy(resultGviFinding.sortOrder);
+
+/** Batched GVI CP findings, keyed by the GVI result id (event-recorder summary). */
+export const listResultGviFindingsByResultGviIds = async (
+  resultGviIds: number[],
+  database: DbOrTx = db,
+): Promise<Map<number, (typeof resultGviFinding.$inferSelect)[]>> => {
+  if (resultGviIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await database
+    .select()
+    .from(resultGviFinding)
+    .where(inArray(resultGviFinding.resultGviId, resultGviIds))
+    .orderBy(resultGviFinding.sortOrder);
+
+  const grouped = new Map<number, (typeof resultGviFinding.$inferSelect)[]>();
+  for (const row of rows) {
+    const existing = grouped.get(row.resultGviId) ?? [];
+    existing.push(row);
+    grouped.set(row.resultGviId, existing);
+  }
+
+  return grouped;
+};
 
 export const getResultGviFindingById = async (
   findingId: number,

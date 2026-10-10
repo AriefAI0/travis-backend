@@ -642,7 +642,10 @@ export const resultGvi = pgTable(
       .primaryKey()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
+    // the GVI tool form collects all three; kept off the findings table
+    kpRange: text("kp_range"),
     depthEl: doublePrecision("depth_el"),
+    gviUt: doublePrecision("gvi_ut"),
 
     condition: gviCondition("condition").notNull(),
 
@@ -1016,6 +1019,23 @@ export const resultCi = pgTable("result_ci", {
   gratingPresent: boolean("grating_present"),
   gratingBlockage: ciBlockageLevel("grating_blockage"),
   gratingAnomalyRecommendation: text("grating_anomaly_recommendation").notNull(),
+
+  // the CAISSON tool has a recommendation beside its associated-pipe list
+  associatedPipesRecommendation: text("associated_pipes_recommendation").notNull().default(""),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+/* CAISSON — GVI-associated pipe positions */
+export const resultCiGviAssociatedPipe = pgTable("result_ci_gvi_associated_pipe", {
+  pipeId: serial("pipe_id").primaryKey(),
+
+  resultId: integer("result_id")
+    .notNull()
+    .references(() => resultCi.resultId, { onDelete: "cascade" }),
+
+  position: text("position").notNull(),
 
   ...createdAt,
   ...updatedAt,

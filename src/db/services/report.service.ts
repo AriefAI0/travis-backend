@@ -113,16 +113,15 @@ const rowsForResult = async (row: SummaryRow, database?: DbOrTx): Promise<Report
     case "GVI": {
       const detail = await getGviDetailByResultId(row.resultId, database);
       if (!detail) return [];
-      // kp_range/gvi_ut left empty: the schema-update model dropped those fields
       return [
         {
-          kp_range: "",
+          kp_range: text(detail.kpRange),
           depth_el: text(detail.depthEl),
           gvi_cp: detail.cpFindings
             .map((finding) => text(finding.value))
             .filter(Boolean)
             .join(", "),
-          gvi_ut: "",
+          gvi_ut: text(detail.gviUt),
           condition: label(CONDITION_LABEL, detail.condition),
           remarks,
           recorded,

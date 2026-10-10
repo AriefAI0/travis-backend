@@ -220,7 +220,9 @@ export type GviMgiDetail = {
 
 export type GviDetail = {
   resultId: number;
+  kpRange: string | null;
   depthEl: number | null;
+  gviUt: number | null;
   condition: "ok" | "not_ok";
   createdAt: string;
   updatedAt: string;
@@ -371,6 +373,9 @@ export type CiDetail = {
   gratingPresent: boolean | null;
   gratingBlockage: "0_25" | "25_50" | "50_75" | "75_100" | null;
   gratingAnomalyRecommendation: string;
+
+  associatedPipesRecommendation: string;
+  gviAssociatedPipes: { pipeId: number; position: string }[];
 
   cpFindings: CiCpFindingDetail[];
 
@@ -626,6 +631,11 @@ export type ResultSummaryDetail = {
   // CVI — schema-update model: member type sits on each position, CP on findings
   memberTypes?: ("chord" | "brace")[];
   cpValues?: (number | null)[];
+  // GVI — the tool shows KP, depth, CP and UT beside the condition
+  // (depthEl is shared with PIPELINE, declared once below)
+  kpRange?: string | null;
+  gviCp?: number | null;
+  gviUt?: number | null;
   exposedPile?: "exposed" | "not_exposed";
   voltageMv?: number | null;
   anodeType?: string | null;
@@ -662,6 +672,8 @@ export type ResultSummaryDetail = {
   gratingPresent?: boolean | null;
   gratingBlockage?: string | null;
   gratingAnomalyRecommendation?: string;
+  associatedPipesRecommendation?: string;
+  associatedPipes?: { position: string }[];
   cpFindings?: { cpMv: string | null; remarks: string }[];
   // SEABED summary
   seabedFindings?: {
@@ -1131,7 +1143,9 @@ export const scourPayloadSchema = z.object({
 export const gviPayloadSchema = z.object({
   kind: z.literal("gvi"),
   version: z.literal(1),
+  kpRange: z.string().nullable(),
   depthEl: z.number().nullable(),
+  gviUT: z.number().nullable(),
   gviCP: z.array(
     z.object({
       value: z.number().nullable(),
@@ -1285,6 +1299,10 @@ export const ciPayloadSchema = z.object({
     .nullable(),
 
   gratingAnomalyRecommendation: z.string(),
+
+  // the tool's associated-pipe list and its recommendation
+  gviAssociatedPipes: z.array(z.object({ position: z.string().min(1) })),
+  associatedPipesRecommendation: z.string(),
 });
 
 export const seabedPayloadSchema = z.object({
