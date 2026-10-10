@@ -1444,3 +1444,24 @@ export type RiserPayloadInput = z.infer<typeof riserPayloadSchema>;
 export type CiPayloadInput = z.infer<typeof ciPayloadSchema>;
 export type SeabedPayloadInput = z.infer<typeof seabedPayloadSchema>;
 export type PiPayloadInput = z.infer<typeof pipelinePayloadSchema>;
+
+/* ==========================================================
+   report documents — one generated docx per row, edited in the browser
+========================================================= */
+
+export type ReportStatus = "generating" | "ready" | "error";
+
+// what the app's report list renders; the bytes stay in MinIO
+export type ReportListItem = {
+  reportId: string;
+  name: string;
+  status: ReportStatus;
+  // set only while status is "error"
+  errorDetail: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// POST /api/v1/projects/:projectId/reports and PATCH /api/v1/reports/:reportId
+// take one shape: the user-facing document name
+export const reportNameSchema = z.object({ name: z.string().min(1).max(200) });

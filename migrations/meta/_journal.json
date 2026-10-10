@@ -64,6 +64,13 @@
       "when": 1791659672179,
       "tag": "0008_soft_wasp",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791665084309,
+      "tag": "0009_massive_thundra",
+      "breakpoints": true
     }
   ]
 }

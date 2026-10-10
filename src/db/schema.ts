@@ -1312,3 +1312,45 @@ export const recordingIngestSegment = pgTable(
     recordingIngestSegmentPk: primaryKey({ columns: [table.ingestId, table.sequence] }),
   })
 );
+
+/* =========================================================
+   REPORT (one generated docx per row)
+   The row names a document the browser opens and edits. The bytes live in
+   BUCKET_MEDIA; the row carries the key so a later key scheme keeps old rows
+   readable. status flips generating > ready, or > error with the reason.
+========================================================= */
+export const reportStatus = pgEnum("report_status", ["generating", "ready", "error"]);
+
+export const report = pgTable(
+  "report",
+  {
+    // uuid, not a serial: this id travels in a browser URL
+    reportId: uuid("report_id").primaryKey().defaultRandom(),
+
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => project.projectId, { onDelete: "cascade" }),
+
+    // org scoping is a hard requirement; the seeded default org fills this
+    // until auth lands
+    organizationId: integer("organization_id")
+      .notNull()
+      .references(() => organization.organizationId),
+
+    name: text("name").notNull(),
+    minioKey: text("minio_key").notNull(),
+    status: reportStatus("status").notNull().default("generating"),
+    errorDetail: text("error_detail"),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    // every read is one project's list, newest first
+    idxReportProjectCreated: index("idx_report_project_created").on(
+      table.organizationId,
+      table.projectId,
+      table.createdAt,
+    ),
+  })
+);
