@@ -66,6 +66,55 @@ const stopInspection = (resultId: number, payload: unknown) =>
    refuse, and the read-only path that serves the detail back */
 const SCENARIOS = [
   {
+    // the shape buildGviPayload emits: CP is a findings list, KP and UT scalars
+    type: "GVI",
+    readPath: "gvi",
+    valid: {
+      kind: "gvi",
+      version: 1,
+      kpRange: "KP-1",
+      depthEl: 12.5,
+      gviUT: 8,
+      gviCP: [{ value: 120, remark: "" }],
+      condition: "ok",
+    },
+    // condition is ok|not_ok
+    invalid: {
+      kind: "gvi",
+      version: 1,
+      kpRange: null,
+      depthEl: null,
+      gviUT: null,
+      gviCP: [],
+      condition: "maybe",
+    },
+  },
+  {
+    // the shape buildCviPayload emits: positions group under their member
+    type: "CVI",
+    readPath: "cvi",
+    valid: {
+      kind: "cvi",
+      version: 1,
+      datumReference: "D-1",
+      members: [
+        {
+          memberType: "chord",
+          positions: [{ clockPosition: "12", utMm: 9.5, findings: "pitting" }],
+        },
+      ],
+      cpFindings: [{ value: -850, remark: "" }],
+    },
+    // datumReference is min(1)
+    invalid: {
+      kind: "cvi",
+      version: 1,
+      datumReference: "",
+      members: [],
+      cpFindings: [],
+    },
+  },
+  {
     type: "DVI",
     readPath: "dvi",
     valid: {
