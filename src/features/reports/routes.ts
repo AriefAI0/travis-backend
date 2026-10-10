@@ -8,6 +8,7 @@ import {
   loadReportDocx,
   removeReport,
   renameReport,
+  reportListItem,
   saveReportDocx,
 } from "../../db/services/report.service";
 import { AppError } from "../../lib/error";
@@ -78,18 +79,14 @@ export const reportRoutes = (database?: DbOrTx) => {
     const { name } = await parseBody(c, reportNameSchema);
     const report = await queueReportGeneration(projectId, name, database);
 
-    return ok(
-      c,
-      { reportId: report.reportId, name: report.name, status: report.status },
-      202,
-    );
+    return ok(c, reportListItem(report), 202);
   });
 
   routes.get("/api/v1/projects/:projectId/reports", async (c) => {
     const projectId = parseId(c, "projectId");
     await requireProject(projectId);
 
-    return ok(c, { reports: await listProjectReports(projectId, database) });
+    return ok(c, await listProjectReports(projectId, database));
   });
 
   // the editor page reads this for the document name and state

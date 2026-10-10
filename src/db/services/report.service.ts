@@ -45,7 +45,9 @@ export const defaultOrgId = async (database?: DbOrTx): Promise<number> => {
   return cachedOrgId;
 };
 
-const toListItem = (row: ReportRow): ReportListItem => ({
+// The app-facing row shape. `createReport` hands back a row, not a list item,
+// so the route maps it here rather than reading the row twice.
+export const reportListItem = (row: ReportRow): ReportListItem => ({
   reportId: row.reportId,
   name: row.name,
   status: row.status as ReportStatus,
@@ -92,7 +94,7 @@ export const listProjectReports = async (
   const organizationId = await defaultOrgId(database);
   const rows = await listReportRecords(organizationId, projectId, database);
 
-  return rows.map(toListItem);
+  return rows.map(reportListItem);
 };
 
 // The row, org-checked. Callers that only need existence use it as the guard.
@@ -110,7 +112,7 @@ export const getReport = async (reportId: string, database?: DbOrTx): Promise<Re
 export const getReportStatus = async (
   reportId: string,
   database?: DbOrTx,
-): Promise<ReportListItem> => toListItem(await getReport(reportId, database));
+): Promise<ReportListItem> => reportListItem(await getReport(reportId, database));
 
 // The stored document. The row decides the key, so a moved object still loads.
 // flow: row guard > object read > 404 on a miss
@@ -156,7 +158,7 @@ export const renameReport = async (
     throw new AppError(404, "report_not_found", `No report with id ${reportId}`);
   }
 
-  return toListItem(row);
+  return reportListItem(row);
 };
 
 // flow: drop the row first > best-effort object removal. A row without its

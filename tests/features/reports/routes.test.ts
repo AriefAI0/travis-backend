@@ -108,7 +108,7 @@ describe("report list", () => {
     const res = await app.request("/api/v1/projects/1/reports");
     expect(res.status).toBe(200);
 
-    const { reports } = await readData<{ reports: { reportId: string; name: string }[] }>(res);
+    const reports = await readData<{ reportId: string; name: string }[]>(res);
 
     expect(reports).toHaveLength(2);
     expect(reports[0]?.reportId).toBe(second.reportId);
