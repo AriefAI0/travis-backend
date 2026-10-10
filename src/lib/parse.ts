@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AppError } from "./error";
 
 const idSchema = z.coerce.number().int().positive();
+const uuidSchema = z.string().uuid();
 
 // first zod issue as "path: message"
 const describe = (error: z.ZodError): string => {
@@ -30,6 +31,16 @@ export function parseId(c: Context, name: string): number {
   const parsed = idSchema.safeParse(c.req.param(name));
   if (!parsed.success) {
     throw new AppError(400, "validation_error", `${name}: expected positive integer`);
+  }
+  return parsed.data;
+}
+
+// path uuid param -> uuid string. The column is uuid typed, so an unchecked
+// value reaches Postgres as a syntax error rather than a 404.
+export function parseUuid(c: Context, name: string): string {
+  const parsed = uuidSchema.safeParse(c.req.param(name));
+  if (!parsed.success) {
+    throw new AppError(400, "validation_error", `${name}: expected uuid`);
   }
   return parsed.data;
 }

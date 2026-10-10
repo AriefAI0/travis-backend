@@ -5,7 +5,7 @@ import {
   testDb,
   truncateTestDatabase,
 } from "../helpers/db";
-import { gatherReportData, NO_IMAGE } from "../../src/db/services/report.service";
+import { gatherReportData, NO_IMAGE } from "../../src/db/services/report-data.service";
 import * as schema from "../../src/db/schema";
 
 beforeAll(ensureTestDatabase);

@@ -88,6 +88,7 @@ const deleteOrder = [
   schema.taskGroup,
   schema.timelineThumbnail,
   schema.session,
+  schema.report,
   schema.project,
 ] as const;
 

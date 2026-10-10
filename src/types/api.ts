@@ -1464,4 +1464,4 @@ export type ReportListItem = {
 
 // POST /api/v1/projects/:projectId/reports and PATCH /api/v1/reports/:reportId
 // take one shape: the user-facing document name
-export const reportNameSchema = z.object({ name: z.string().min(1).max(200) });
+export const reportNameSchema = z.object({ name: z.string().trim().min(1).max(200) });
