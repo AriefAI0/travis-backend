@@ -1260,6 +1260,9 @@ export const recordingIngest = pgTable(
     keyPrefix: text("key_prefix").notNull(),
     openedAt: timestamp("opened_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     lastSegmentAt: timestamp("last_segment_at", { withTimezone: true, mode: "date" }),
+    // lease renewal from a live capture: a paused master or clip stores no
+    // segments, so the sweep reads this instead of calling it abandoned
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }),
     closedAt: timestamp("closed_at", { withTimezone: true, mode: "date" }),
     contiguousSequence: integer("contiguous_sequence").notNull().default(-1),
     finalSequence: integer("final_sequence"),

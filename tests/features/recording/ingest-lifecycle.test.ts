@@ -12,6 +12,7 @@ import * as schema from "../../../src/db/schema";
 import {
   admitIngest,
   closeIngest,
+  heartbeatIngest,
   INGEST_IDLE_CLOSE_MS,
   parseSegmentContentLength,
   parseSegmentHeaders,
@@ -89,10 +90,15 @@ const storeSegment = (ingestId: number, ticket: string, sequence: number, durati
 };
 
 // pin the activity stamps so the 15 s rule is exact, not wall-clock
-const pinIngestClock = async (ingestId: number, openedAt: Date, lastSegmentAt: Date | null) => {
+const pinIngestClock = async (
+  ingestId: number,
+  openedAt: Date,
+  lastSegmentAt: Date | null,
+  lastSeenAt: Date | null = null,
+) => {
   await testDb
     .update(schema.recordingIngest)
-    .set({ openedAt, lastSegmentAt })
+    .set({ openedAt, lastSegmentAt, lastSeenAt })
     .where(eq(schema.recordingIngest.ingestId, ingestId));
 };
 
@@ -277,5 +283,82 @@ describe("direct ingest lifecycle", () => {
 
   test("the sweep interval stays well inside the idle window", () => {
     expect(INGEST_SWEEP_INTERVAL_MS).toBeLessThan(INGEST_IDLE_CLOSE_MS / 2);
+  });
+
+  // A paused master or clip stores no segments: without the lease it would look
+  // exactly like a crashed capture, and resuming it would answer 410.
+  test("a heartbeat holds a segment-less ingest open past the idle window", async () => {
+    const admission = await admitMaster();
+    await pinIngestClock(admission.ingestId, CLOCK_START, null);
+    const renewed = new Date(CLOCK_START.getTime() + 60_000);
+    await heartbeatIngest({ ingestId: admission.ingestId, ticket: admission.ticket }, testDb);
+    await pinIngestClock(admission.ingestId, CLOCK_START, null, renewed);
+
+    expect(
+      await sweepInactiveIngests(new Date(renewed.getTime() + INGEST_IDLE_CLOSE_MS - 1), testDb),
+    ).toEqual([]);
+    expect(
+      await sweepInactiveIngests(new Date(renewed.getTime() + INGEST_IDLE_CLOSE_MS), testDb),
+    ).toEqual([admission.ingestId]);
+  });
+
+  test("a lease that stops renewing lets the sweep close the ingest", async () => {
+    const admission = await admitMaster();
+    await pinIngestClock(admission.ingestId, CLOCK_START, null);
+    const lastSeenAt = new Date(CLOCK_START.getTime() + 60_000);
+    await heartbeatIngest({ ingestId: admission.ingestId, ticket: admission.ticket }, testDb);
+    await pinIngestClock(admission.ingestId, CLOCK_START, null, lastSeenAt);
+
+    // 15 s after opening is stale by openedAt, but the lease is still fresh
+    expect(await sweepInactiveIngests(new Date(CLOCK_START.getTime() + 15_000), testDb)).toEqual([]);
+    expect(
+      await sweepInactiveIngests(new Date(lastSeenAt.getTime() + INGEST_IDLE_CLOSE_MS), testDb),
+    ).toEqual([admission.ingestId]);
+  });
+
+  test("the newest of segment, lease and open time wins", async () => {
+    const admission = await admitMaster();
+    await pinIngestClock(
+      admission.ingestId,
+      CLOCK_START,
+      new Date(CLOCK_START.getTime() + 10_000),
+      new Date(CLOCK_START.getTime() + 20_000),
+    );
+
+    // the lease is the newest stamp, so the segment cannot age it out
+    expect(
+      await sweepInactiveIngests(new Date(CLOCK_START.getTime() + 30_000), testDb),
+    ).toEqual([]);
+    expect(
+      await sweepInactiveIngests(new Date(CLOCK_START.getTime() + 35_000), testDb),
+    ).toEqual([admission.ingestId]);
+  });
+
+  test("a heartbeat without the matching ticket is refused", async () => {
+    const admission = await admitMaster();
+    const other = await admitMaster();
+
+    await expect(
+      heartbeatIngest({ ingestId: admission.ingestId, ticket: other.ticket }, testDb),
+    ).rejects.toThrow(/does not match this ingest/i);
+
+    const [ingest] = await testDb
+      .select()
+      .from(schema.recordingIngest)
+      .where(eq(schema.recordingIngest.ingestId, admission.ingestId));
+    expect(ingest!.lastSeenAt).toBeNull();
+  });
+
+  test("a heartbeat to a closed ingest answers 410 like a segment does", async () => {
+    const admission = await admitMaster();
+    await storeSegment(admission.ingestId, admission.ticket, 0);
+    await closeIngest(
+      { ingestId: admission.ingestId, ticket: admission.ticket, dispatch: noThumbnails },
+      testDb,
+    );
+
+    await expect(
+      heartbeatIngest({ ingestId: admission.ingestId, ticket: admission.ticket }, testDb),
+    ).rejects.toThrow(/closed at sequence 0/i);
   });
 });

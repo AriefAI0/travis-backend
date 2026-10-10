@@ -57,6 +57,13 @@
       "when": 1791636642132,
       "tag": "0007_fantastic_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791659672179,
+      "tag": "0008_soft_wasp",
+      "breakpoints": true
     }
   ]
 }

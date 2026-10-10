@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
+import { eq } from "drizzle-orm";
 
 import {
   closeTestDatabase,
@@ -281,6 +282,60 @@ describe("direct ingest routes", () => {
       segmentCount: 2,
       domain: { kind: "master", sessionId: expect.any(Number) },
     });
+  });
+
+  const postHeartbeat = (ingestId: number, ticket: string | null) => {
+    const headers: Record<string, string> = {};
+    if (ticket !== null) headers.authorization = `Bearer ${ticket}`;
+    return app.request(`/api/v2/ingests/${ingestId}/heartbeat`, { method: "POST", headers });
+  };
+
+  test("a heartbeat renews the lease on an open ingest", async () => {
+    const admission = await admit();
+    const ingestId = admission.body.ingestId as number;
+    const ticket = admission.body.ticket as string;
+
+    const res = await read(await postHeartbeat(ingestId, ticket));
+    expect(res.status).toBe(200);
+    expect(res.body.ingestId).toBe(ingestId);
+    expect(typeof res.body.lastSeenAt).toBe("string");
+
+    // the lease is what the sweep reads, so it must be on the row
+    const [row] = await testDb
+      .select()
+      .from(schema.recordingIngest)
+      .where(eq(schema.recordingIngest.ingestId, ingestId));
+    expect(row!.lastSeenAt).not.toBeNull();
+  });
+
+  test("a heartbeat with a missing or wrong ticket fails", async () => {
+    const admission = await admit();
+    const other = await admit();
+    const ingestId = admission.body.ingestId as number;
+
+    expect((await postHeartbeat(ingestId, null)).status).toBe(401);
+    expect((await postHeartbeat(ingestId, other.body.ticket as string)).status).toBe(401);
+    expect(
+      (await app.request("/api/v2/ingests/999999/heartbeat", {
+        method: "POST",
+        headers: { authorization: "Bearer x" },
+      })).status,
+    ).toBe(404);
+  });
+
+  test("a heartbeat to a closed ingest answers 410 with the frozen range", async () => {
+    const admission = await admit();
+    const ingestId = admission.body.ingestId as number;
+    const ticket = admission.body.ticket as string;
+    await postSegment(ingestId, ticket, segmentBody("a"), 0, 2000);
+    await app.request(`/api/v2/ingests/${ingestId}/close`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ticket}` },
+    });
+
+    const late = await read(await postHeartbeat(ingestId, ticket));
+    expect(late.status).toBe(410);
+    expect(late.body.code).toBe("ingest_closed");
   });
 
   test("the ticket never lands in a response body of a recording route", async () => {

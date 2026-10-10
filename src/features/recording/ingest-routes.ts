@@ -15,6 +15,7 @@ import {
   closeIngest,
   defaultThumbnailDispatch,
   getIngestStatus,
+  heartbeatIngest,
   minioSegmentStorage,
   parseBearerToken,
   parseSegmentContentLength,
@@ -129,6 +130,14 @@ export const ingestRoutes = (
     const ticket = parseBearerToken(c.req.header("authorization") ?? null);
     const result = await closeIngest({ ingestId, ticket, dispatch }, database);
     return ok(c, result);
+  });
+
+  // Lease renewal. A paused master or clip stores no segments, so this is the
+  // only thing that keeps its ingest out of the idle sweep.
+  routes.post("/api/v2/ingests/:ingestId/heartbeat", async (c) => {
+    const ingestId = parseId(c, "ingestId");
+    const ticket = parseBearerToken(c.req.header("authorization") ?? null);
+    return ok(c, await heartbeatIngest({ ingestId, ticket }, database));
   });
 
   routes.get("/api/v2/ingests/:ingestId", async (c) => {

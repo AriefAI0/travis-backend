@@ -17,8 +17,9 @@ export const sweepInactiveIngests = async (
 ): Promise<number[]> => {
   const cutoff = new Date(now.getTime() - INGEST_IDLE_CLOSE_MS);
 
-  // openedAt covers an ingest that never stored a segment
-  const idleSince = sql`COALESCE(${recordingIngest.lastSegmentAt}, ${recordingIngest.openedAt})`;
+  // openedAt covers an ingest that never stored a segment; the heartbeat keeps
+  // a live-but-paused capture out of this list. GREATEST skips NULLs.
+  const idleSince = sql`GREATEST(${recordingIngest.openedAt}, ${recordingIngest.lastSegmentAt}, ${recordingIngest.lastSeenAt})`;
   const candidates = await database
     .select({ ingestId: recordingIngest.ingestId })
     .from(recordingIngest)

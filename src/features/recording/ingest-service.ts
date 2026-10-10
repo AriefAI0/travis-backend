@@ -291,9 +291,17 @@ export type IngestCloseResult = {
   replayed: boolean;
 };
 
-// the ingest is idle when its last activity sits at or before the cutoff
+// the ingest is idle when its last activity sits at or before the cutoff.
+// A heartbeat counts as activity: a paused capture stores no segments but is
+// still alive, and only a capture that stopped talking loses its lease.
 export const ingestIdleSince = (ingest: typeof recordingIngest.$inferSelect): Date =>
-  ingest.lastSegmentAt ?? ingest.openedAt;
+  new Date(
+    Math.max(
+      ingest.openedAt.getTime(),
+      ingest.lastSegmentAt?.getTime() ?? 0,
+      ingest.lastSeenAt?.getTime() ?? 0,
+    ),
+  );
 
 // stamp the domain row with the facts the recording ended with
 const stampDomainClose = async (
@@ -425,6 +433,50 @@ export const closeIdleIngest = async (
     dispatch.master(closed.thumbnailSessionId);
   }
   return closed.result;
+};
+
+/* =========================================================
+   LEASE
+   The capture renews its own liveness. The sweep reads the lease, so a paused
+   master or clip holds its ingest open while it stores no segments, and a
+   capture that stops talking (crash, dead pipeline, lost machine) loses it.
+========================================================= */
+
+export type IngestHeartbeatResult = {
+  ingestId: number;
+  lastSeenAt: Date;
+};
+
+export const heartbeatIngest = async (
+  input: { ingestId: number; ticket: string },
+  database?: DbOrTx,
+): Promise<IngestHeartbeatResult> => {
+  const run = async (tx: DbOrTx): Promise<IngestHeartbeatResult> => {
+    // the close path holds this same row lock, so its idle re-check and this
+    // renewal can never interleave
+    const ingest = await lockIngest(input.ingestId, tx);
+    if (!ingest) throw notFound("Ingest");
+    if (!ticketMatches(input.ticket, ingest.ticketHash)) {
+      throw new AppError(401, "unauthorized", "Authorization: ticket does not match this ingest");
+    }
+    // A closed ingest refuses the lease the same way it refuses a segment.
+    if (ingest.closedAt !== null) {
+      throw new AppError(
+        410,
+        "ingest_closed",
+        `Ingest ${input.ingestId} closed at sequence ${ingest.finalSequence ?? -1}`,
+      );
+    }
+
+    const lastSeenAt = new Date();
+    await tx
+      .update(recordingIngest)
+      .set({ lastSeenAt, updatedAt: lastSeenAt })
+      .where(eq(recordingIngest.ingestId, input.ingestId));
+    return { ingestId: input.ingestId, lastSeenAt };
+  };
+
+  return database ? run(database) : db.transaction(run);
 };
 
 /* =========================================================
