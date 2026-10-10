@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 /* =================== ENUMERATIONS =================== */
 
-export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RISER", "SEABED", "RA"]);
+export const inspectionType = pgEnum("inspection_type", ["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CAISSON", "RISER", "SEABED", "PIPELINE", "RA"]);
 
 export const mgiCriteriaPreset = pgEnum("mgi_criteria_preset", [
   "project_default",
@@ -47,6 +47,73 @@ export const ciBlockageLevel = pgEnum("ci_blockage_level", [
   "25_50",
   "50_75",
   "75_100",
+]);
+
+export const piOrientation = pgEnum("pi_orientation", [
+  "12_oclock",
+  "1_oclock",
+  "2_oclock",
+  "3_oclock",
+  "4_oclock",
+  "5_oclock",
+  "6_oclock",
+  "7_oclock",
+  "8_oclock",
+  "9_oclock",
+  "10_oclock",
+  "11_oclock",
+]);
+
+export const piFindingCategory = pgEnum("pi_finding_category", [
+  "damage",
+  "debris",
+  "riser_bend",
+  "stabilization",
+  "burial",
+  "freespans",
+  "leak_observation",
+  "Crossings",
+  "features",
+]);
+
+export const piDamageType = pgEnum("pi_damage_type", [
+  "bare_metal",
+  "crack",
+  "groove",
+  "bitumen_exposed",
+  "reinforcement_bar_exposed",
+]);
+
+export const piDebrisType = pgEnum("pi_debris_type", [
+  "hard",
+  "soft",
+]);
+
+export const piRiserBendCondition = pgEnum("pi_riser_bend_condition", [
+  "seabed_support",
+  "stabilization",
+  "in_suspension",
+]);
+
+export const piStabilizationCondition = pgEnum(
+  "pi_stabilization_condition",
+  ["supporting", "not_supporting"],
+);
+
+export const piCrossingType = pgEnum("pi_crossing_type", [
+  "over",
+  "under",
+]);
+
+export const piCrossingContact = pgEnum("pi_crossing_contact", [
+  "touching",
+  "not_touching",
+]);
+
+export const piFeaturesCondition = pgEnum("pi_features_condition", [
+  "good",
+  "bad",
+  "damage",
 ]);
 
 /* =========================================================
@@ -995,6 +1062,74 @@ export const resultSeabedFinding = pgTable("result_seabed_finding", {
 
   debris: cgbYesNo("debris"),
   debrisType: text("debris_type").notNull(),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+
+
+/* =========================================================
+   PIPELINE — Pipeline Inspection
+   ========================================================= */
+
+export const resultPipeline = pgTable("result_pipeline", {
+  resultId: integer("result_id")
+    .primaryKey()
+    .references(() => result.resultId, { onDelete: "cascade" }),
+
+  location: text("location").notNull(),
+  depthEl: numeric("depth_el"),
+  orientation: piOrientation("orientation"),
+
+  ...createdAt,
+  ...updatedAt,
+});
+
+/* =========================================================
+   PIPELINE — Individual Findings
+   ========================================================= */
+
+export const resultPipelineFinding = pgTable("result_pipeline_finding", {
+  findingId: serial("finding_id").primaryKey(),
+
+  resultId: integer("result_id")
+    .notNull()
+    .references(() => resultPipeline.resultId, { onDelete: "cascade" }),
+
+  category: piFindingCategory("category").notNull(),
+
+  damageDimensions: text("damage_dimensions").notNull(),
+  damageType: piDamageType("damage_type"),
+
+  debrisType: piDebrisType("debris_type"),
+  debrisDescription: text("debris_description").notNull(),
+
+  riserBendCondition: piRiserBendCondition("riser_bend_condition"),
+
+  stabilizationType: text("stabilization_type").notNull(),
+  stabilizationCondition: piStabilizationCondition("stabilization_condition"),
+
+  burialStart: text("burial_start").notNull(),
+  burialEnd: text("burial_end").notNull(),
+
+  freespansStart: text("freespans_start").notNull(),
+  freespansEnd: text("freespans_end").notNull(),
+  freespansLength: text("freespans_length").notNull(),
+  freespansHeight: text("freespans_height").notNull(),
+
+  leakType: text("leak_type").notNull(),
+  leakDescription: text("leak_description").notNull(),
+
+  crossingType: piCrossingType("crossing_type"),
+  crossingContact: piCrossingContact("crossing_contact"),
+  crossingGapDistance: text("crossing_gap_distance").notNull(),
+  crossingDamageMovement: text("crossing_damage_movement").notNull(),
+
+  featuresType: text("features_type").notNull(),
+  featuresCondition: piFeaturesCondition("features_condition"),
+
+  remarks: text("remarks").notNull(),
 
   ...createdAt,
   ...updatedAt,

@@ -129,7 +129,7 @@ export type ProjectRecord = {
    result (app: src/shared/result.ts)
 ========================================================= */
 
-export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON" | "CGB" | "RISER" | "CAISSON" | "SEABED";
+export type InspectionTypeCode = "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CAISSON" | "CGB" | "RISER" | "CAISSON" | "SEABED" | "PIPELINE";
 
 export type MgiDetail = {
   resultId: number;
@@ -398,6 +398,93 @@ export type SeabedDetail = {
 };
 
 
+export type PiFindingDetail = {
+  findingId: number;
+  resultId: number;
+
+  category:
+    | "damage"
+    | "debris"
+    | "riser_bend"
+    | "stabilization"
+    | "burial"
+    | "freespans"
+    | "leak_observation"
+    | "Crossings"
+    | "features";
+
+  damageDimensions: string;
+  damageType:
+    | "bare_metal"
+    | "crack"
+    | "groove"
+    | "bitumen_exposed"
+    | "reinforcement_bar_exposed"
+    | null;
+
+  debrisType: "hard" | "soft" | null;
+  debrisDescription: string;
+
+  riserBendCondition:
+    | "seabed_support"
+    | "stabilization"
+    | "in_suspension"
+    | null;
+
+  stabilizationType: string;
+  stabilizationCondition: "supporting" | "not_supporting" | null;
+
+  burialStart: string;
+  burialEnd: string;
+
+  freespansStart: string;
+  freespansEnd: string;
+  freespansLength: string;
+  freespansHeight: string;
+
+  leakType: string;
+  leakDescription: string;
+
+  crossingType: "over" | "under" | null;
+  crossingContact: "touching" | "not_touching" | null;
+  crossingGapDistance: string;
+  crossingDamageMovement: string;
+
+  featuresType: string;
+  featuresCondition: "good" | "bad" | "damage" | null;
+
+  remarks: string;
+
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PiDetail = {
+  resultId: number;
+  location: string;
+  depthEl: string | null;
+  orientation:
+    | "12_oclock"
+    | "1_oclock"
+    | "2_oclock"
+    | "3_oclock"
+    | "4_oclock"
+    | "5_oclock"
+    | "6_oclock"
+    | "7_oclock"
+    | "8_oclock"
+    | "9_oclock"
+    | "10_oclock"
+    | "11_oclock"
+    | null;
+
+  findings: PiFindingDetail[];
+
+  createdAt: string;
+  updatedAt: string;
+};
+
+
 export type ItemResultSidebarClip = {
   clipId: number;
   resultId: number;
@@ -606,6 +693,7 @@ export type ReportGatherResult = {
     | RiserDetail
     | CiDetail
     | SeabedDetail
+    | PiDetail
     | null;
 };
 
@@ -632,7 +720,7 @@ export type ReportGatherData = {
 const id = z.number().int().positive();
 const optionalText = z.string().min(1).nullable().optional();
 const itemStatus = z.enum(["not_set", "pending", "complete"]);
-export const inspectionType = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CGB", "RISER", "CAISSON"]);
+export const inspectionType = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CGB", "RISER", "CAISSON", "SEABED", "PIPELINE"]);
 
 // projects — Create/UpdateProjectInput share one shape (title required)
 export const projectInputSchema = z.object({
@@ -819,7 +907,7 @@ export const inspectionFormCustomFieldSchema = z.object({
 export const saveInspectionFormSchema = z.object({
   customFields: z.array(inspectionFormCustomFieldSchema),
 });
-export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CGB", "RISER", "CAISSON", "SEABED"]);
+export const inspectionTypeParamSchema = z.enum(["GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR", "BSI", "CGB", "RISER", "CAISSON", "SEABED", "PIPELINE"]);
 
 /* Planned inspections — preassigned types on a target, before any session.
    One type per target; the table's unique constraint owns the rule. */
@@ -1144,6 +1232,100 @@ export const seabedPayloadSchema = z.object({
   ),
 });
 
+
+export const pipelinePayloadSchema = z.object({
+  kind: z.literal("pipeline"),
+  version: z.literal(1),
+
+  location: z.string(),
+  depthEl: z.number().nullable(),
+
+  orientation: z.enum([
+    "12_oclock",
+    "1_oclock",
+    "2_oclock",
+    "3_oclock",
+    "4_oclock",
+    "5_oclock",
+    "6_oclock",
+    "7_oclock",
+    "8_oclock",
+    "9_oclock",
+    "10_oclock",
+    "11_oclock",
+  ]).nullable(),
+
+  findings: z.array(
+    z.object({
+      category: z.enum([
+        "damage",
+        "debris",
+        "riser_bend",
+        "stabilization",
+        "burial",
+        "freespans",
+        "leak_observation",
+        "Crossings",
+        "features",
+      ]),
+
+      damageDimensions: z.string(),
+      damageType: z.enum([
+        "bare_metal",
+        "crack",
+        "groove",
+        "bitumen_exposed",
+        "reinforcement_bar_exposed",
+      ]).nullable(),
+
+      debrisType: z.enum(["hard", "soft"]).nullable(),
+      debrisDescription: z.string(),
+
+      riserBendCondition: z.enum([
+        "seabed_support",
+        "stabilization",
+        "in_suspension",
+      ]).nullable(),
+
+      stabilizationType: z.string(),
+      stabilizationCondition: z.enum([
+        "supporting",
+        "not_supporting",
+      ]).nullable(),
+
+      burialStart: z.string(),
+      burialEnd: z.string(),
+
+      freespansStart: z.string(),
+      freespansEnd: z.string(),
+      freespansLength: z.string(),
+      freespansHeight: z.string(),
+
+      leakType: z.string(),
+      leakDescription: z.string(),
+
+      crossingType: z.enum(["over", "under"]).nullable(),
+      crossingContact: z.enum([
+        "touching",
+        "not_touching",
+      ]).nullable(),
+      crossingGapDistance: z.string(),
+      crossingDamageMovement: z.string(),
+
+      featuresType: z.string(),
+      featuresCondition: z.enum([
+        "good",
+        "bad",
+        "damage",
+      ]).nullable(),
+
+      remarks: z.string(),
+    }),
+  ),
+});
+
+
+
 // one payload field, one union — never one API per inspection type
 export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   mgiPayloadSchema,
@@ -1157,7 +1339,8 @@ export const inspectionPayloadSchema = z.discriminatedUnion("kind", [
   cgbPayloadSchema,
   riserPayloadSchema,
   ciPayloadSchema,
-  seabedPayloadSchema
+  seabedPayloadSchema,
+  pipelinePayloadSchema
 ]);
 
 export type InspectionPayload = z.infer<typeof inspectionPayloadSchema>;
@@ -1173,3 +1356,4 @@ export type CgbPayloadInput = z.infer<typeof cgbPayloadSchema>;
 export type RiserPayloadInput = z.infer<typeof riserPayloadSchema>;
 export type CiPayloadInput = z.infer<typeof ciPayloadSchema>;
 export type SeabedPayloadInput = z.infer<typeof seabedPayloadSchema>;
+export type PiPayloadInput = z.infer<typeof pipelinePayloadSchema>;

@@ -1,5 +1,5 @@
-import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, CgbDetail, RiserDetail, CiDetail, SeabedDetail, 
-  InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, SeabedFindingDetail
+import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, CgbDetail, RiserDetail, CiDetail, SeabedDetail, PiDetail, PiFindingDetail,
+  InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, SeabedFindingDetail,
   CpPayloadInput, CviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput, 
   CgbPayloadInput, RiserPayloadInput, CiPayloadInput, SeabedPayloadInput } from "../../types/api";
 import { inspectionPayloadSchema } from "../../types/api";
@@ -215,6 +215,15 @@ import {
   listResultSeabedFindingsByResultIds,
 } from "../repositories/result-seabed.repository";
 
+import {
+  createResultPipeline,
+  getResultPipelineByResultId,
+  listResultPipelineByResultIds,
+  createResultPipelineFinding,
+  listResultPipelineFindingsByResultId,
+  listResultPipelineFindingsByResultIds,
+} from "../repositories/result-pipeline.repository";
+
 
 /**
  * Dispatcher for typed detail tables (result_mgi, result_cp, result_fmd,
@@ -222,7 +231,7 @@ import {
  * kind that disagrees with the result's inspection type, then writes through.
  */
 export const writeTypedDetail = async (
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER" | "CAISSON" | "SEABED",
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER" | "CAISSON" | "SEABED" | "PIPELINE",
   payload: unknown,
   resultId: number,
   database?: DbOrTx,
@@ -271,7 +280,9 @@ export const writeTypedDetail = async (
     case "ci":
       return writeCiDetail(data, resultId, database);  
     case "seabed":
-      return writeSeabedDetail(data, resultId, database);  
+      return writeSeabedDetail(data, resultId, database);
+    case "pipeline":
+      return writePipelineDetail(data, resultId, database);  
   }
 };
 
@@ -732,6 +743,40 @@ const writeSeabedDetail = async (
 };
 
 
+const writePipelineDetail = async (
+  payload: PiPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const run = async (tx: DbOrTx): Promise<void> => {
+    await createResultPipeline(
+      {
+        resultId,
+        location: payload.location,
+        depthEl: payload.depthEl?.toString() ?? null,
+        orientation: payload.orientation,
+      },
+      tx,
+    );
+
+    for (const finding of payload.findings) {
+      await createResultPipelineFinding(
+        {
+          resultId,
+          ...finding,
+        },
+        tx,
+      );
+    }
+  };
+
+  if (database) {
+    await run(database);
+  } else {
+    await db.transaction(run);
+  }
+};
+
 // Ordinal assignment mirrors createSession. startInspection passes its own
 // transaction, so that path gets a single attempt and the uniq
 // (session_id, display_number) index is the backstop.
@@ -743,7 +788,7 @@ export const listResults = async (database?: DbOrTx) =>
 export type CreateResultInput = {
   sessionId: number;
   projectId: number;
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER" | "CAISSON" | "SEABED";
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER" | "CAISSON" | "SEABED" | "PIPELINE";
   descriptionId?: number;
   partCodeId?: number;
   layer: number;
@@ -840,12 +885,13 @@ export const listProjectSummary = async (
     RISER: [],
     CAISSON: [],
     SEABED: [],
+    PIPELINE: []
   };
   for (const resultRecord of results) {
     resultIdsByCode[resultRecord.inspectionTypeCode].push(resultRecord.resultId);
   }
 
-  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser, ci, seabed] = await Promise.all([
+  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser, ci, seabed, pipeline] = await Promise.all([
     listResultGviByResultIds(resultIdsByCode.GVI, database),
     listResultCviByResultIds(resultIdsByCode.CVI, database),
     listResultDviByResultIds(resultIdsByCode.DVI, database),
@@ -858,6 +904,7 @@ export const listProjectSummary = async (
     listResultRiserByResultIds(resultIdsByCode.RISER, database),
     listResultCiByResultIds(resultIdsByCode.CAISSON, database),
     listResultSeabedByResultIds(resultIdsByCode.SEABED, database),
+    listResultPipelineByResultIds(resultIdsByCode.PIPELINE, database),
   ]);
 
   const detailFor = (
@@ -998,6 +1045,72 @@ case "SEABED": {
             fixes,
             debris,
             debrisType,
+          }),
+        ),
+      }
+    : null;
+}
+
+
+case "PIPELINE": {
+  const detail = pipeline.get(resultRecord.resultId);
+  const findings = pipelineFindings.get(resultRecord.resultId) ?? [];
+
+  return detail
+    ? {
+        location: detail.location,
+        depthEl:
+          detail.depthEl === null ? null : Number(detail.depthEl),
+        orientation: detail.orientation,
+        findings: findings.map(
+          ({
+            category,
+            damageDimensions,
+            damageType,
+            debrisType,
+            debrisDescription,
+            riserBendCondition,
+            stabilizationType,
+            stabilizationCondition,
+            burialStart,
+            burialEnd,
+            freespansStart,
+            freespansEnd,
+            freespansLength,
+            freespansHeight,
+            leakType,
+            leakDescription,
+            crossingType,
+            crossingContact,
+            crossingGapDistance,
+            crossingDamageMovement,
+            featuresType,
+            featuresCondition,
+            remarks,
+          }) => ({
+            category,
+            damageDimensions,
+            damageType,
+            debrisType,
+            debrisDescription,
+            riserBendCondition,
+            stabilizationType,
+            stabilizationCondition,
+            burialStart,
+            burialEnd,
+            freespansStart,
+            freespansEnd,
+            freespansLength,
+            freespansHeight,
+            leakType,
+            leakDescription,
+            crossingType,
+            crossingContact,
+            crossingGapDistance,
+            crossingDamageMovement,
+            featuresType,
+            featuresCondition,
+            remarks,
           }),
         ),
       }
@@ -1485,6 +1598,44 @@ export const getSeabedDetailByResultId = async (
     })),
     createdAt: toIsoString(resultSeabed.createdAt),
     updatedAt: toIsoString(resultSeabed.updatedAt),
+  };
+};
+
+
+/* =========================================================
+   PIPELINE readback
+   ========================================================= */
+
+export const getPipelineDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<PiDetail | null> => {
+  const resultPipeline = await getResultPipelineByResultId(
+    resultId,
+    database,
+  );
+
+  if (!resultPipeline) {
+    return null;
+  }
+
+  const findings = await listResultPipelineFindingsByResultId(
+    resultId,
+    database,
+  );
+
+  return {
+    resultId: resultPipeline.resultId,
+    location: resultPipeline.location,
+    depthEl: resultPipeline.depthEl,
+    orientation: resultPipeline.orientation,
+    findings: findings.map((finding) => ({
+      ...finding,
+      createdAt: toIsoString(finding.createdAt),
+      updatedAt: toIsoString(finding.updatedAt),
+    })),
+    createdAt: toIsoString(resultPipeline.createdAt),
+    updatedAt: toIsoString(resultPipeline.updatedAt),
   };
 };
 
