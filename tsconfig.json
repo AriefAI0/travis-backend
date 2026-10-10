@@ -26,5 +26,11 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+
+  // The report editor page runs in the browser, so its `document` and `location`
+  // need lib.dom — and lib.dom would shadow Bun's own fetch types for the whole
+  // project. Bun types it at bundle time instead.
+  // ponytail: a second tsconfig with lib.dom in it, when the page grows.
+  "exclude": ["node_modules", "src/features/reports/editor-client.tsx"]
 }

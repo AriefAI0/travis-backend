@@ -6,6 +6,7 @@ import { ensureDefaultOrganization } from "./db/ensure-org";
 import { failInterruptedReports } from "./db/services/report.service";
 import { startIngestSweep } from "./features/recording/ingest-sweep";
 import { startThumbnailSweep } from "./features/recording/jobs/thumbnails";
+import editorPage from "./features/reports/editor.html";
 
 // flow: buckets + org > sweeps > serve.
 // Boot even when MinIO is down — /health/ready is what reports it.
@@ -19,5 +20,11 @@ startThumbnailSweep();
 // dialog polls that row. One pass at boot is enough.
 await failInterruptedReports().catch((err) => log.error("report sweep failed", { err: String(err) }));
 
-Bun.serve({ port: env.PORT, fetch: app.fetch });
+// The report editor is an HTML bundle: Bun transpiles and bundles its TSX and
+// CSS on request, so the page needs no build step. Hono keeps every other path.
+Bun.serve({
+  port: env.PORT,
+  routes: { "/editor/reports/:reportId": editorPage },
+  fetch: app.fetch,
+});
 log.info("travis-backend listening", { port: env.PORT, minio: env.MINIO_ENDPOINT });
