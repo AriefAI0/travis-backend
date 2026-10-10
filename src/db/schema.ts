@@ -31,6 +31,17 @@ export const bsiMisalignedPosition = pgEnum("bsi_misaligned_position", ["top", "
 
 export const cgbYesNo = pgEnum("cgb_yes_no", ["yes", "no"]);
 
+export const riserCoatingCondition = pgEnum("riser_coating_condition", [
+  "good",
+  "peel-off",
+]);
+
+export const riserCoatingStatus = pgEnum("riser_coating_status", [
+  "present",
+  "not-present",
+]);
+
+
 /* =========================================================
    TIMESTAMPS
 ========================================================= */

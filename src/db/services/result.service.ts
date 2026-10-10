@@ -185,13 +185,20 @@ import {
   listResultCgbByResultIds,
 } from "../repositories/result-cgb.repository";
 
+
+import {
+  createResultRiser,
+  getResultRiserByResultId,
+  listResultRiserByResultIds,
+} from "../repositories/result-riser.repository";
+
 /**
  * Dispatcher for typed detail tables (result_mgi, result_cp, result_fmd,
  * result_scour, result_gvi, result_cvi). Parses the payload union, rejects a
  * kind that disagrees with the result's inspection type, then writes through.
  */
 export const writeTypedDetail = async (
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB",
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER",
   payload: unknown,
   resultId: number,
   database?: DbOrTx,
@@ -235,6 +242,8 @@ export const writeTypedDetail = async (
       return writeBsiDetail(data, resultId, database);
     case "cgb":
       return writeCgbDetail(data, resultId, database);
+    case "riser":
+      return writeRiserDetail(data, resultId, database);
   }
 };
 
@@ -586,6 +595,42 @@ const writeCgbDetail = async (
 };
 
 
+
+/**
+ * RISER detail writer
+ */
+const writeRiserDetail = async (
+  payload: RiserPayloadInput,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const run = async (tx: DbOrTx): Promise<void> => {
+    await createResultRiser(
+      {
+        resultId,
+        touchdownDistanceFromRiserBend:
+          payload.touchdownDistanceFromRiserBend?.toString() ?? null,
+        riserBendDistanceToMudbraceMember:
+          payload.riserBendDistanceToMudbraceMember?.toString() ?? null,
+        riserBendHeightToSeabed:
+          payload.riserBendHeightToSeabed?.toString() ?? null,
+        coatingStatus: payload.coatingStatus,
+        coatingCondition: payload.coatingCondition,
+        kneeBrace: payload.kneeBrace,
+        debris: payload.debris,
+        debrisType: payload.debrisType,
+        anomaly: payload.anomaly,
+        recommendation: payload.recommendation,
+        restrictedAccess: payload.restrictedAccess,
+      },
+      tx,
+    );
+  };
+
+  return database ? run(database) : db.transaction(run);
+};
+
+
 // Ordinal assignment mirrors createSession. startInspection passes its own
 // transaction, so that path gets a single attempt and the uniq
 // (session_id, display_number) index is the backstop.
@@ -597,7 +642,7 @@ export const listResults = async (database?: DbOrTx) =>
 export type CreateResultInput = {
   sessionId: number;
   projectId: number;
-  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB";
+  inspectionTypeCode: "GVI" | "CVI" | "DVI" | "MGI" | "CP" | "FMD" | "SCOUR" | "BSI" | "CGB" | "RISER";
   descriptionId?: number;
   partCodeId?: number;
   layer: number;
@@ -691,12 +736,13 @@ export const listProjectSummary = async (
     SCOUR: [],
     BSI: [],
     CGB: [],
+    RISER: [],
   };
   for (const resultRecord of results) {
     resultIdsByCode[resultRecord.inspectionTypeCode].push(resultRecord.resultId);
   }
 
-  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb] = await Promise.all([
+  const [gvi, cvi, dvi, mgi, cp, fmd, scour, bsi, cgb, riser] = await Promise.all([
     listResultGviByResultIds(resultIdsByCode.GVI, database),
     listResultCviByResultIds(resultIdsByCode.CVI, database),
     listResultDviByResultIds(resultIdsByCode.DVI, database),
@@ -706,6 +752,7 @@ export const listProjectSummary = async (
     listResultScourByResultIds(resultIdsByCode.SCOUR, database),
     listResultBsiByResultIds(resultIdsByCode.BSI, database),
     listResultCgbByResultIds(resultIdsByCode.CGB, database),
+    listResultRiserByResultIds(resultIdsByCode.RISER, database),
   ]);
 
   const detailFor = (
@@ -772,7 +819,8 @@ export const listProjectSummary = async (
         const detail = bsi.get(resultRecord.resultId);
         return detail ? { clampType: detail.clampType } : null;
       }
-      case "CGB": {
+
+case "CGB": {
   const detail = cgb.get(resultRecord.resultId);
 
   return detail
@@ -781,6 +829,29 @@ export const listProjectSummary = async (
         remark: detail.remark,
         debris: detail.debris,
         debrisType: detail.debrisType,
+      }
+    : null;
+}
+
+case "RISER": {
+  const detail = riser.get(resultRecord.resultId);
+
+  return detail
+    ? {
+        touchdownDistanceFromRiserBend:
+          detail.touchdownDistanceFromRiserBend,
+        riserBendDistanceToMudbraceMember:
+          detail.riserBendDistanceToMudbraceMember,
+        riserBendHeightToSeabed:
+          detail.riserBendHeightToSeabed,
+        coatingStatus: detail.coatingStatus,
+        coatingCondition: detail.coatingCondition,
+        kneeBrace: detail.kneeBrace,
+        debris: detail.debris,
+        debrisType: detail.debrisType,
+        anomaly: detail.anomaly,
+        recommendation: detail.recommendation,
+        restrictedAccess: detail.restrictedAccess,
       }
     : null;
 }
@@ -1173,6 +1244,29 @@ export const getCgbDetailByResultId = async (
     ...resultCgb,
     createdAt: toIsoString(resultCgb.createdAt),
     updatedAt: toIsoString(resultCgb.updatedAt),
+  };
+};
+
+
+
+/* =========================================================
+   RISER readback
+   ========================================================= */
+
+export const getRiserDetailByResultId = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<RiserDetail | null> => {
+  const resultRiser = await getResultRiserByResultId(resultId, database);
+
+  if (!resultRiser) {
+    return null;
+  }
+
+  return {
+    ...resultRiser,
+    createdAt: toIsoString(resultRiser.createdAt),
+    updatedAt: toIsoString(resultRiser.updatedAt),
   };
 };
 
