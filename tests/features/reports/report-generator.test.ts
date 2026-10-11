@@ -262,6 +262,30 @@ describe("generateReport", () => {
     expect(xml).not.toContain("</w:tbl><w:tbl>");
   });
 
+  it("opens with a title page: the counts, the contents, then a page break", async () => {
+    await seed();
+
+    const xml = documentXmlIn(await generateReport(1, "all", testDb));
+
+    // the counts state the report's own size: two targets, two results
+    expect(xml).toContain("Targets inspected: 2");
+    expect(xml).toContain("Results recorded: 2");
+
+    // the title page runs before the first result, and one break ends it
+    const firstResult = xml.indexOf("GVI Results");
+    expect(xml.indexOf("Report Contents")).toBeGreaterThan(-1);
+    expect(xml.indexOf("Report Contents")).toBeLessThan(firstResult);
+    expect(xml.indexOf("Targets inspected: 2")).toBeLessThan(firstResult);
+    expect(xml.match(/<w:br w:type="page"\/>/g)).toHaveLength(1);
+
+    // the contents list names each target by its description
+    expect(xml).toContain("Leg A");
+
+    // the sign-off block closes the report, after the last result
+    expect(xml.indexOf("Prepared by:")).toBeGreaterThan(firstResult);
+    expect(xml.indexOf("Approved by:")).toBeGreaterThan(firstResult);
+  });
+
   it("renders a project that has no results and embeds no image", async () => {
     await testDb
       .insert(schema.project)
@@ -270,9 +294,15 @@ describe("generateReport", () => {
     const buf = await generateReport(2, "all", testDb);
 
     expect(buf.subarray(0, 2).toString()).toBe("PK");
-    expect(documentXmlIn(buf)).toContain("Empty");
+    const xml = documentXmlIn(buf);
+    expect(xml).toContain("Empty");
     // the letterhead ships its own image; no evidence picture is generated
     expect(evidencePartsIn(buf)).toHaveLength(0);
+    // the counts still state the report is empty, and the contents table and
+    // its heading drop together: a table with no rows reads as a damaged file
+    expect(xml).toContain("Targets inspected: 0");
+    expect(xml).toContain("Results recorded: 0");
+    expect(xml).not.toContain("Report Contents");
   });
 
   it("renders one table per inspection type with that type's columns", async () => {

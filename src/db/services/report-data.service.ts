@@ -68,12 +68,28 @@ export type ReportItem = {
   sections: ReportSection[];
 };
 
+// One line of the title page's contents list: the target, and the inspection
+// types recorded against it.
+export type ReportIndexRow = { index_label: string; index_types: string };
+
 // The full variable set handed to docxtemplater.
 export type ReportTemplateData = {
   project_title: string;
   project_id: number;
   document_id: string;
   generated_at: string;
+  // The title-page counts, taken after the scope filter, so a scope-limited
+  // report states its own size.
+  total_targets: number;
+  total_results: number;
+  // The contents list. `has_index` guards the table: an empty row loop would
+  // leave a table with no rows, which Word reads as a damaged file.
+  has_index: boolean;
+  index: ReportIndexRow[];
+  // Zone switches. Each zone is data, not a fixed layout, so a zone turned off
+  // leaves nothing behind and a zone never supplied cannot drop silently.
+  content: boolean;
+  closing: boolean;
   items: ReportItem[];
 };
 
@@ -613,11 +629,23 @@ export const gatherReportData = async (
     pushItem(key, EMPTY_LABEL);
   }
 
+  // A target label: the description, or the part code when the target has none.
+  const index: ReportIndexRow[] = items.map((item) => ({
+    index_label: item.description || item.part_code,
+    index_types: item.sections.map((section) => section.inspection_type).join(", "),
+  }));
+
   return {
     project_title: projectRecord.title,
     project_id: projectRecord.projectId,
     document_id: projectRecord.documentId ?? "",
     generated_at: new Date().toISOString(),
+    total_targets: items.length,
+    total_results: summary.length,
+    has_index: index.length > 0,
+    index,
+    content: true,
+    closing: true,
     items,
   };
 };

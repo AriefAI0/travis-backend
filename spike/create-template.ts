@@ -1,6 +1,12 @@
-// Builds the bundled report template docx from raw OOXML.
+// Builds the bundled report template from the user's own Word file.
 // Run: ~/.bun/bin/bun spike/create-template.ts
-// flow: build parts > zip > self-check render > write file
+// flow: read source.docx > keep every part > rebuild document.xml > zip > self-check > write
+//
+// `spike/source.docx` is the branding source: the user's Word file, holding the
+// letterhead, the styles, the theme and the report's placeholders. Replace that
+// file when the branding changes, then run this again. Every part rides through
+// verbatim except `word/document.xml`, which this file generates, so the fonts,
+// the logo and the first-page borders keep the user's look exactly.
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import {
@@ -16,6 +22,7 @@ const PizZip = require("pizzip");
 const Docxtemplater = require("docxtemplater");
 const ImageModule = require("docxtemplater-image-module-free");
 
+const SOURCE = new URL("./source.docx", import.meta.url);
 const OUT_PATH = new URL("../src/features/reports/default-template.docx", import.meta.url);
 
 // A4 portrait minus the 1134-twip side margins.
@@ -58,22 +65,23 @@ const BORDERS = ["top", "left", "bottom", "right", "insideH", "insideV"]
 // table carries this empty paragraph behind it.
 const EMPTY_PARA = "<w:p/>";
 
-// A bordered fixed-width table. `rows` are pre-built <w:tr> strings.
+// A fixed-width table. `rows` are pre-built <w:tr> strings. `bordered: false`
+// drops the grid, so the contents list on the title page reads as text.
 //
 // No paragraph behind it: the gap belongs outside the region, so a user can type
 // under the table and keep that text through a refresh. `regionBlock` adds it.
-const tbl = (cols: number, rows: string[]) =>
-  `<w:tbl><w:tblPr><w:tblW w:w="${TABLE_W}" w:type="dxa"/><w:tblBorders>${BORDERS}</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>` +
+const tbl = (cols: number, rows: string[], bordered = true) =>
+  `<w:tbl><w:tblPr><w:tblW w:w="${TABLE_W}" w:type="dxa"/>${bordered ? `<w:tblBorders>${BORDERS}</w:tblBorders>` : ""}<w:tblLayout w:type="fixed"/></w:tblPr>` +
   `<w:tblGrid>${Array.from({ length: cols }, () => `<w:gridCol w:w="${colW(cols)}"/>`).join("")}</w:tblGrid>` +
   `${rows.join("")}</w:tbl>`;
 
 // Header row plus one repeated data row. The loop tags sit in the outer cells
 // of that same row: docxtemplater expands the pair to <w:tr> and drops the tags.
-const loopTable = (cols: number, labels: string[], tags: string[], loop: string) => {
+const loopTable = (cols: number, labels: string[], tags: string[], loop: string, bordered = true) => {
   const rowTags = [...tags];
   rowTags[0] = `{#${loop}}${rowTags[0]}`;
   rowTags[rowTags.length - 1] = `${rowTags[rowTags.length - 1]}{/${loop}}`;
-  return tbl(cols, [headRow(cols, labels), dataRow(cols, rowTags)]);
+  return tbl(cols, [headRow(cols, labels), dataRow(cols, rowTags)], bordered);
 };
 
 const sectionHeading = (text: string) => para(text, { bold: true, size: 26 });
@@ -248,12 +256,72 @@ const TABLES: Record<InspectionType, string[]> = {
 
 /* ---------- document ---------- */
 
-const BODY =
-  para("Inspection Report", { bold: true, size: 32, align: "center" }) +
-  para("{project_title}", { bold: true, size: 26, align: "center" }) +
-  para("Document ID: {document_id}", { align: "center" }) +
-  para("Project ID: {project_id}", { align: "center" }) +
-  para("Generated: {generated_at}", { align: "center" }) +
+// The source document, taken apart. Its root element keeps Word's own namespace
+// declarations, and its section properties ride through whole, so the first-page
+// borders and the margins stay the user's. Only the body between them is built.
+const sourceZip = new PizZip(await Bun.file(SOURCE).arrayBuffer());
+const sourceDoc = sourceZip.file("word/document.xml").asText() as string;
+
+const BODY_OPEN = "<w:body>";
+const bodyAt = sourceDoc.indexOf(BODY_OPEN);
+const sectAt = sourceDoc.lastIndexOf("<w:sectPr");
+assert.ok(bodyAt > 0 && sectAt > bodyAt, "the source document has no body or no section properties");
+
+const DOC_TAIL = sourceDoc.slice(sectAt);
+
+// Word declares the prefixes its own drawings use, which is not the set the
+// image module injects. That module writes <w:drawing><wp:inline>...
+// <a:graphic><pic:pic> into the rendered document and expects the root to
+// declare those prefixes. Word tolerates an undeclared prefix; strict readers
+// reject the whole document with "undeclared-prefix", so the editor cannot open
+// the report. Add the ones the source root leaves out.
+const DRAWING_NAMESPACES: Record<string, string> = {
+  a: "http://schemas.openxmlformats.org/drawingml/2006/main",
+  pic: "http://schemas.openxmlformats.org/drawingml/2006/picture",
+  a14: "http://schemas.microsoft.com/office/drawing/2010/main",
+};
+
+const ROOT_OPEN = Object.entries(DRAWING_NAMESPACES).reduce(
+  (root, [prefix, uri]) =>
+    root.includes(`xmlns:${prefix}=`)
+      ? root
+      : root.replace("<w:document", `<w:document xmlns:${prefix}="${uri}"`),
+  sourceDoc.slice(0, bodyAt + BODY_OPEN.length),
+);
+
+// The intro block ends with its own page break. Split it off, so the counts and
+// the contents list land on the title page and the first result starts the page
+// after it. The break stays where the user drew it.
+const splitIntro = (body: string) => {
+  const breaks = body.match(/<w:br w:type="page"\/>/g) ?? [];
+  assert.equal(breaks.length, 1, `the intro block holds ${breaks.length} page breaks, not 1`);
+  const at = body.indexOf('<w:br w:type="page"/>');
+  const start = Math.max(body.lastIndexOf("<w:p ", at), body.lastIndexOf("<w:p>", at));
+  const end = body.indexOf("</w:p>", at) + "</w:p>".length;
+  assert.ok(start > 0 && end > start, "the page break sits in no paragraph");
+  return { intro: body.slice(0, start), pageBreak: body.slice(start, end) };
+};
+
+const { intro: INTRO, pageBreak: PAGE_BREAK } = splitIntro(
+  sourceDoc.slice(bodyAt + BODY_OPEN.length, sectAt),
+);
+
+// The title page tail: the counts, then a contents list built from the same
+// items the content zone loops. The heading rides inside `has_index`, so an
+// empty report shows no heading over an empty table.
+const INTRO_TAIL =
+  para(`Targets inspected: {total_targets}`, { size: 28, align: "center" }) +
+  para(`Results recorded: {total_results}`, { size: 28, align: "center" }) +
+  para("{#has_index}") +
+  para("Report Contents", { bold: true, size: 28, align: "center" }) +
+  loopTable(2, ["Target", "Inspection Types"], ["{index_label}", "{index_types}"], "index", false) +
+  para("{/has_index}");
+
+// The three zones. Each is a boolean block, so the shape of the document is
+// data, not a fixed layout: a zone the generator turns off leaves nothing
+// behind, and a zone it never supplies cannot drop silently.
+const CONTENT =
+  para("{#content}") +
   para("{#items}") +
   tbl(5, [
     headRow(5, ["Task Group", "Task Code", "Description", "Type Code", "Part Code"]),
@@ -276,61 +344,31 @@ const BODY =
   ) +
   TYPE_ORDER.map(conditional).join("") +
   para("{/sections}") +
-  para("{/items}");
+  para("{/items}") +
+  para("{/content}");
 
-const DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main">
-<w:body>
-${BODY}
-<w:sectPr>
-<w:pgSz w:w="11906" w:h="16838"/>
-<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/>
-</w:sectPr>
-</w:body>
-</w:document>`;
+// Sign-off. Static lines, inside a named zone so the closing page is a block of
+// its own rather than whatever follows the last result.
+const CLOSING =
+  para("{#closing}") +
+  para("Prepared by: ______________________", { size: 28 }) +
+  para("Approved by: ______________________", { size: 28 }) +
+  para("{/closing}");
 
-const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-<Default Extension="xml" ContentType="application/xml"/>
-<Default Extension="png" ContentType="image/png"/>
-<Default Extension="jpeg" ContentType="image/jpeg"/>
-<Default Extension="jpg" ContentType="image/jpeg"/>
-<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-</Types>`;
+const DOCUMENT_XML =
+  ROOT_OPEN + INTRO + INTRO_TAIL + PAGE_BREAK + CONTENT + CLOSING + DOC_TAIL;
 
-const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>`;
-
-const DOC_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>`;
-
-const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-<w:docDefaults>
-<w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:rPrDefault>
-<w:pPrDefault><w:pPr><w:spacing w:after="80" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault>
-</w:docDefaults>
-<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>
-</w:styles>`;
-
-// Assemble the zip parts. Every entry carries the same fixed timestamp so
+// Assemble the zip. Every part of the source rides through verbatim except the
+// document body this file generates, and each keeps its own timestamp so
 // regenerating the template only changes the file when its content changes.
-const ZIP_DATE = new Date(0);
-
-const buildTemplate = () => {
+const buildTemplate = async () => {
   const zip = new PizZip();
-  const entry = { date: ZIP_DATE };
-  zip.file("[Content_Types].xml", CONTENT_TYPES, entry);
-  zip.file("_rels/.rels", ROOT_RELS, entry);
-  zip.file("word/document.xml", DOCUMENT_XML, entry);
-  zip.file("word/_rels/document.xml.rels", DOC_RELS, entry);
-  zip.file("word/styles.xml", STYLES, entry);
+  for (const [name, file] of Object.entries(sourceZip.files)) {
+    const part = file as { dir: boolean; date: Date; asUint8Array: () => Uint8Array };
+    if (part.dir || name === "word/document.xml") continue;
+    zip.file(name, part.asUint8Array(), { date: part.date });
+  }
+  zip.file("word/document.xml", DOCUMENT_XML);
   return zip.generate({ type: "nodebuffer", compression: "DEFLATE" }) as Buffer;
 };
 
@@ -393,11 +431,20 @@ const section = (on: InspectionType) => ({
   rows: [ROW_FOR[on]],
 });
 
+// The zone switches and the title-page numbers, as `gatherReportData` supplies
+// them. `has_index` guards the contents table: an empty row loop would leave a
+// table with no rows behind, which Word reads as a damaged file.
 const base = {
   project_title: "Bridge A",
   project_id: 1,
   document_id: "DOC-1",
   generated_at: "2026-10-09",
+  content: true,
+  closing: true,
+  total_targets: 1,
+  total_results: 1,
+  has_index: true,
+  index: [{ index_label: "Desc", index_types: "GVI, CVI" }],
 };
 
 // Every type at once: the widest path through the template.
@@ -436,10 +483,28 @@ const noImagePayload = {
   }],
 };
 
-// Tables in a fully rendered document: item header (2) plus a header and one
-// data row per table in each block.
-const EXPECTED_ROWS =
-  2 + TYPE_ORDER.reduce((total, type) => total + 2 * TYPE_TABLES[type], 0);
+// The intro's own tables and logo come from the user's file, so the checks below
+// read their counts from it rather than restating the branding.
+const INTRO_ROWS = (INTRO.match(/<w:tr[ >]/g) ?? []).length;
+const INTRO_DRAWINGS = (INTRO.match(/<w:drawing>/g) ?? []).length;
+
+// Rows in a rendered document: the intro's tables, the contents list (a header
+// plus one row), the item header table (a header plus one row), and each type
+// table (a header row plus one row per result row). Read from the payload, so
+// each case states only what it varies.
+const rowsFor = (payload: typeof fullPayload) =>
+  INTRO_ROWS +
+  2 +
+  payload.items.length * 2 +
+  payload.items.reduce(
+    (total, item) =>
+      total +
+      item.sections.reduce(
+        (sum, s) => sum + TYPE_TABLES[s.inspection_type as InspectionType] * (1 + s.rows.length),
+        0,
+      ),
+    0,
+  );
 
 // The regions a payload renders, in document order. The renderer names each
 // placeholder after the section it holds, and it reads the same list, so this
@@ -460,18 +525,44 @@ const assertRegions = (xml: string, expected: string[]) => {
 
 // Run the checks, then write the file.
 const main = async () => {
-  const template = buildTemplate();
+  const template = await buildTemplate();
+
+  // Every source part must survive, or Word finds a relationship with no target.
+  const parts = new PizZip(template).files;
+  assert.equal(
+    Object.keys(parts).length,
+    Object.keys(sourceZip.files).length,
+    "the generated template lost a part",
+  );
+  assert.equal(
+    parts["word/media/image1.jpeg"].asUint8Array().length,
+    sourceZip.files["word/media/image1.jpeg"].asUint8Array().length,
+    "the logo did not ride through",
+  );
 
   const full = await renderWith(template, fullPayload);
   if (Bun.env.DUMP) await Bun.write("/tmp/rendered.xml", full);
   for (const type of TYPE_ORDER) {
     assert.ok(full.includes(`${type} Results`), `missing ${type} block`);
   }
+  // The title page comes first, its own page break follows, then the results.
+  const firstResult = full.indexOf("GVI Results");
+  assert.ok(full.indexOf("Project ID:") < firstResult, "the intro block did not render first");
+  assert.equal((full.match(/<w:br w:type="page"\/>/g) ?? []).length, 1, "wrong page break count");
+  assert.ok(full.indexOf("Report Contents") < firstResult, "the contents list is not on the title page");
+  assert.ok(full.indexOf("Prepared by:") > firstResult, "the sign-off block is not after the results");
+  assert.ok(full.includes("Targets inspected: 1"), "the target count did not render");
+  assert.ok(full.includes("Results recorded: 1"), "the result count did not render");
+  assert.ok(full.includes("Desc"), "an index row did not render");
   for (const marker of ["KP1", "cp-remark", "fmd-remark", "scour-remark", "cvi-finding", "dvi-finding", "Barnacle", "outb-rec", "cgb-remark", "riser-rec", "gr-note", "seabed-remark", "pi-remark"]) {
     assert.ok(full.includes(marker), `missing value ${marker}`);
   }
-  assert.equal((full.match(/<w:tr>/g) ?? []).length, EXPECTED_ROWS, "unexpected row count");
-  assert.equal((full.match(/<w:drawing>/g) ?? []).length, TYPE_ORDER.length, "wrong image count");
+  assert.equal((full.match(/<w:tr[ >]/g) ?? []).length, rowsFor(fullPayload), "unexpected row count");
+  assert.equal(
+    (full.match(/<w:drawing>/g) ?? []).length,
+    TYPE_ORDER.length + INTRO_DRAWINGS,
+    "wrong image count",
+  );
   assert.ok(!full.includes("{/"), "closing tag left in output");
   assert.ok(!/\{[#/%]/.test(full), "template tag left in output");
   assert.ok(!full.includes("{region}"), "the region tag never rendered");
@@ -499,12 +590,16 @@ const main = async () => {
   assertRegions(single, expectedRegions(singlePayload));
 
   const multi = await renderWith(template, multiRowPayload);
-  assert.equal((multi.match(/<w:tr>/g) ?? []).length, 6, "GVI row loop did not repeat");
+  assert.equal(
+    (multi.match(/<w:tr[ >]/g) ?? []).length,
+    rowsFor(multiRowPayload),
+    "the GVI row loop did not repeat",
+  );
 
   const noImage = await renderWith(template, noImagePayload);
   assert.equal(
     (noImage.match(/<w:drawing>/g) ?? []).length,
-    0,
+    INTRO_DRAWINGS,
     "a section with no picture still drew one",
   );
   // the picture region is still there, and still holds something
@@ -538,7 +633,11 @@ const main = async () => {
     !/<\/w:sdt>(?!<w:p|<w:sdt)/.test(full),
     "a region is followed by neither a paragraph nor another region",
   );
-  assert.ok(/<w:p\/>\s*<w:sectPr>/.test(full), "the body does not end with a paragraph");
+  // The body closes with a paragraph, never a table: a table cannot end a body.
+  assert.ok(
+    /(?:<\/w:p>|<w:p[^>]*\/>)\s*<w:sectPr[\s>]/.test(full),
+    "the body does not end with a paragraph",
+  );
 
   // The image module injects <w:drawing><wp:inline> markup and expects the
   // document root to declare the drawing namespaces, the way Word's own files
