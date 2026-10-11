@@ -2,7 +2,7 @@
 # Postgres and MinIO run as their own containers — create the shared
 # network first: docker network create travis
 services:
-  # one-shot: preflight-checks postgres+minio, pushes schema, then exits.
+  # one-shot: preflight-checks postgres+minio, applies pending migrations, then exits.
   # drizzle.config.ts imports src/config/env, so all four vars must parse.
   migrate:
     build:

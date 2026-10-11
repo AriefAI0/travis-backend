@@ -85,6 +85,6 @@ if (!pgOk || !minioOk) {
   console.log("\npreflight FAILED — fix the [FAIL] lines above, then redeploy");
   process.exit(1);
 }
-console.log("\npreflight passed — schema push starts now");
+console.log("\npreflight passed — migrations start now");
 // explicit exit: a lingering keep-alive socket must not hold the container
 process.exit(0);

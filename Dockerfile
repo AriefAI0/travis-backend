@@ -14,8 +14,10 @@ RUN bun install --frozen-lockfile
 COPY drizzle.config.ts ./
 COPY src ./src
 COPY scripts ./scripts
-# migrate_log names the broken connection; --force auto-accepts push statements
-CMD ["sh", "-c", "bun scripts/migrate_log.ts && bunx drizzle-kit push --force"]
+COPY migrations ./migrations
+# migrate_log names the broken connection; migrate applies pending SQL headless
+# (push prompts on constraints against live data and dies without a TTY)
+CMD ["sh", "-c", "bun scripts/migrate_log.ts && bunx drizzle-kit migrate"]
 
 # runtime: bun + ffmpeg (ffprobe ships with the ffmpeg package) + LibreOffice
 # (the report PDF converter) + Carlito, metric-compatible with the absent Calibri

@@ -1,5 +1,5 @@
 {
-  "id": "7bed7f86-4e82-4c4c-8e12-7b013e086014",
+  "id": "39f8094d-fad2-443c-8222-84735922501a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -36,13 +36,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "display_order": {
-          "name": "display_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         },
         "created_at": {
           "name": "created_at",
@@ -474,19 +467,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "display_order": {
-          "name": "display_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -565,6 +545,147 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.planned_inspection": {
+      "name": "planned_inspection",
+      "schema": "",
+      "columns": {
+        "planned_inspection_id": {
+          "name": "planned_inspection_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "planned_inspection_planned_inspection_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description_id": {
+          "name": "description_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "part_code_id": {
+          "name": "part_code_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "inspection_type_code": {
+          "name": "inspection_type_code",
+          "type": "inspection_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_planned_inspection_project_id": {
+          "name": "idx_planned_inspection_project_id",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "planned_inspection_project_id_project_project_id_fk": {
+          "name": "planned_inspection_project_id_project_project_id_fk",
+          "tableFrom": "planned_inspection",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "project_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "planned_inspection_description_id_description_description_id_fk": {
+          "name": "planned_inspection_description_id_description_description_id_fk",
+          "tableFrom": "planned_inspection",
+          "tableTo": "description",
+          "columnsFrom": [
+            "description_id"
+          ],
+          "columnsTo": [
+            "description_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "planned_inspection_part_code_id_part_code_part_code_id_fk": {
+          "name": "planned_inspection_part_code_id_part_code_part_code_id_fk",
+          "tableFrom": "planned_inspection",
+          "tableTo": "part_code",
+          "columnsFrom": [
+            "part_code_id"
+          ],
+          "columnsTo": [
+            "part_code_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "uq_planned_inspection_target": {
+          "name": "uq_planned_inspection_target",
+          "nullsNotDistinct": true,
+          "columns": [
+            "project_id",
+            "description_id",
+            "part_code_id",
+            "inspection_type_code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "planned_inspection_target_check": {
+          "name": "planned_inspection_target_check",
+          "value": "num_nonnulls(\"planned_inspection\".\"description_id\", \"planned_inspection\".\"part_code_id\") = 1"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.project": {
@@ -782,6 +903,12 @@
         },
         "last_segment_at": {
           "name": "last_segment_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -1006,6 +1133,140 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.report": {
+      "name": "report",
+      "schema": "",
+      "columns": {
+        "report_id": {
+          "name": "report_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "minio_key": {
+          "name": "minio_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "report_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'generating'"
+        },
+        "error_detail": {
+          "name": "error_detail",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_report_project_created": {
+          "name": "idx_report_project_created",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "report_project_id_project_project_id_fk": {
+          "name": "report_project_id_project_project_id_fk",
+          "tableFrom": "report",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "project_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "report_organization_id_organization_organization_id_fk": {
+          "name": "report_organization_id_organization_organization_id_fk",
+          "tableFrom": "report",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "organization_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.result": {
       "name": "result",
       "schema": "",
@@ -1044,7 +1305,14 @@
           "name": "session_id",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "is_ra": {
+          "name": "is_ra",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "description_id": {
           "name": "description_id",
@@ -1078,6 +1346,12 @@
         },
         "custom_values": {
           "name": "custom_values",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submitted_payload": {
+          "name": "submitted_payload",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
@@ -1235,6 +1509,50 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_result_ra_description": {
+          "name": "uq_result_ra_description",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "description_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"result\".\"is_ra\" AND \"result\".\"description_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_result_ra_part_code": {
+          "name": "uq_result_ra_part_code",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "part_code_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"result\".\"is_ra\" AND \"result\".\"part_code_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1825,6 +2143,300 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.result_cgb": {
+      "name": "result_cgb",
+      "schema": "",
+      "columns": {
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "movement": {
+          "name": "movement",
+          "type": "cgb_yes_no",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "remark": {
+          "name": "remark",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "debris": {
+          "name": "debris",
+          "type": "cgb_yes_no",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "debris_type": {
+          "name": "debris_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_cgb_result_id_result_result_id_fk": {
+          "name": "result_cgb_result_id_result_result_id_fk",
+          "tableFrom": "result_cgb",
+          "tableTo": "result",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_ci": {
+      "name": "result_ci",
+      "schema": "",
+      "columns": {
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "visual_damage": {
+          "name": "visual_damage",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "visual_damage_recommendation": {
+          "name": "visual_damage_recommendation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "debris_present": {
+          "name": "debris_present",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "debris_recommendation": {
+          "name": "debris_recommendation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "grating_present": {
+          "name": "grating_present",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grating_blockage": {
+          "name": "grating_blockage",
+          "type": "ci_blockage_level",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grating_anomaly_recommendation": {
+          "name": "grating_anomaly_recommendation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "associated_pipes_recommendation": {
+          "name": "associated_pipes_recommendation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_ci_result_id_result_result_id_fk": {
+          "name": "result_ci_result_id_result_result_id_fk",
+          "tableFrom": "result_ci",
+          "tableTo": "result",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_ci_cp_finding": {
+      "name": "result_ci_cp_finding",
+      "schema": "",
+      "columns": {
+        "finding_id": {
+          "name": "finding_id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cp_mv": {
+          "name": "cp_mv",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "remarks": {
+          "name": "remarks",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_ci_cp_finding_result_id_result_ci_result_id_fk": {
+          "name": "result_ci_cp_finding_result_id_result_ci_result_id_fk",
+          "tableFrom": "result_ci_cp_finding",
+          "tableTo": "result_ci",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_ci_gvi_associated_pipe": {
+      "name": "result_ci_gvi_associated_pipe",
+      "schema": "",
+      "columns": {
+        "pipe_id": {
+          "name": "pipe_id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_ci_gvi_associated_pipe_result_id_result_ci_result_id_fk": {
+          "name": "result_ci_gvi_associated_pipe_result_id_result_ci_result_id_fk",
+          "tableFrom": "result_ci_gvi_associated_pipe",
+          "tableTo": "result_ci",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.result_cp": {
       "name": "result_cp",
       "schema": "",
@@ -1936,19 +2548,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "member_type": {
-          "name": "member_type",
-          "type": "cvi_member_type",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "cp_potential_mv": {
-          "name": "cp_potential_mv",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1970,6 +2569,104 @@
           "name": "result_cvi_result_id_result_result_id_fk",
           "tableFrom": "result_cvi",
           "tableTo": "result",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_cvi_finding": {
+      "name": "result_cvi_finding",
+      "schema": "",
+      "columns": {
+        "finding_id": {
+          "name": "finding_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "result_cvi_finding_finding_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "remark": {
+          "name": "remark",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_result_cvi_finding_result_id": {
+          "name": "idx_result_cvi_finding_result_id",
+          "columns": [
+            {
+              "expression": "result_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "result_cvi_finding_result_id_result_cvi_result_id_fk": {
+          "name": "result_cvi_finding_result_id_result_cvi_result_id_fk",
+          "tableFrom": "result_cvi_finding",
+          "tableTo": "result_cvi",
           "columnsFrom": [
             "result_id"
           ],
@@ -2010,6 +2707,13 @@
         "result_id": {
           "name": "result_id",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "member_type": {
+          "name": "member_type",
+          "type": "cvi_member_type",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
@@ -2074,6 +2778,176 @@
           "name": "result_cvi_position_result_id_result_cvi_result_id_fk",
           "tableFrom": "result_cvi_position",
           "tableTo": "result_cvi",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_dvi": {
+      "name": "result_dvi",
+      "schema": "",
+      "columns": {
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "datum_reference": {
+          "name": "datum_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "member_type": {
+          "name": "member_type",
+          "type": "cvi_member_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cp_potential_mv": {
+          "name": "cp_potential_mv",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_dvi_result_id_result_result_id_fk": {
+          "name": "result_dvi_result_id_result_result_id_fk",
+          "tableFrom": "result_dvi",
+          "tableTo": "result",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_dvi_position": {
+      "name": "result_dvi_position",
+      "schema": "",
+      "columns": {
+        "position_id": {
+          "name": "position_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "result_dvi_position_position_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "clock_position": {
+          "name": "clock_position",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ut_mm": {
+          "name": "ut_mm",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "findings": {
+          "name": "findings",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_result_dvi_position_result_id": {
+          "name": "idx_result_dvi_position_result_id",
+          "columns": [
+            {
+              "expression": "result_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "result_dvi_position_result_id_result_dvi_result_id_fk": {
+          "name": "result_dvi_position_result_id_result_dvi_result_id_fk",
+          "tableFrom": "result_dvi_position",
+          "tableTo": "result_dvi",
           "columnsFrom": [
             "result_id"
           ],
@@ -2193,15 +3067,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "gvi_cp": {
-          "name": "gvi_cp",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "gvi_ut": {
           "name": "gvi_ut",
-          "type": "integer",
+          "type": "double precision",
           "primaryKey": false,
           "notNull": false
         },
@@ -2235,6 +3103,263 @@
           "tableTo": "result",
           "columnsFrom": [
             "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_gvi_finding": {
+      "name": "result_gvi_finding",
+      "schema": "",
+      "columns": {
+        "finding_id": {
+          "name": "finding_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "result_gvi_finding_finding_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "result_gvi_id": {
+          "name": "result_gvi_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "remark": {
+          "name": "remark",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_result_gvi_finding_gvi": {
+          "name": "idx_result_gvi_finding_gvi",
+          "columns": [
+            {
+              "expression": "result_gvi_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "result_gvi_finding_result_gvi_id_result_gvi_result_id_fk": {
+          "name": "result_gvi_finding_result_gvi_id_result_gvi_result_id_fk",
+          "tableFrom": "result_gvi_finding",
+          "tableTo": "result_gvi",
+          "columnsFrom": [
+            "result_gvi_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_gvi_mgi": {
+      "name": "result_gvi_mgi",
+      "schema": "",
+      "columns": {
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_gvi_mgi_result_id_result_gvi_result_id_fk": {
+          "name": "result_gvi_mgi_result_id_result_gvi_result_id_fk",
+          "tableFrom": "result_gvi_mgi",
+          "tableTo": "result_gvi",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_gvi_mgi_finding": {
+      "name": "result_gvi_mgi_finding",
+      "schema": "",
+      "columns": {
+        "finding_id": {
+          "name": "finding_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "result_gvi_mgi_finding_finding_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "result_gvi_mgi_id": {
+          "name": "result_gvi_mgi_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "depth": {
+          "name": "depth",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "soft_coverage_percent": {
+          "name": "soft_coverage_percent",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hard_coverage_percent": {
+          "name": "hard_coverage_percent",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "remarks": {
+          "name": "remarks",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_result_gvi_mgi_finding_mgi": {
+          "name": "idx_result_gvi_mgi_finding_mgi",
+          "columns": [
+            {
+              "expression": "result_gvi_mgi_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "result_gvi_mgi_finding_result_gvi_mgi_id_result_gvi_mgi_result_id_fk": {
+          "name": "result_gvi_mgi_finding_result_gvi_mgi_id_result_gvi_mgi_result_id_fk",
+          "tableFrom": "result_gvi_mgi_finding",
+          "tableTo": "result_gvi_mgi",
+          "columnsFrom": [
+            "result_gvi_mgi_id"
           ],
           "columnsTo": [
             "result_id"
@@ -2531,6 +3656,390 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.result_pipeline": {
+      "name": "result_pipeline",
+      "schema": "",
+      "columns": {
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "location": {
+          "name": "location",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "depth_el": {
+          "name": "depth_el",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "orientation": {
+          "name": "orientation",
+          "type": "pi_orientation",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_pipeline_result_id_result_result_id_fk": {
+          "name": "result_pipeline_result_id_result_result_id_fk",
+          "tableFrom": "result_pipeline",
+          "tableTo": "result",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_pipeline_finding": {
+      "name": "result_pipeline_finding",
+      "schema": "",
+      "columns": {
+        "finding_id": {
+          "name": "finding_id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category": {
+          "name": "category",
+          "type": "pi_finding_category",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "damage_dimensions": {
+          "name": "damage_dimensions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "damage_type": {
+          "name": "damage_type",
+          "type": "pi_damage_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "debris_type": {
+          "name": "debris_type",
+          "type": "pi_debris_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "debris_description": {
+          "name": "debris_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "riser_bend_condition": {
+          "name": "riser_bend_condition",
+          "type": "pi_riser_bend_condition",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stabilization_type": {
+          "name": "stabilization_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stabilization_condition": {
+          "name": "stabilization_condition",
+          "type": "pi_stabilization_condition",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "burial_start": {
+          "name": "burial_start",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "burial_end": {
+          "name": "burial_end",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "freespans_start": {
+          "name": "freespans_start",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "freespans_end": {
+          "name": "freespans_end",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "freespans_length": {
+          "name": "freespans_length",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "freespans_height": {
+          "name": "freespans_height",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "leak_type": {
+          "name": "leak_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "leak_description": {
+          "name": "leak_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "crossing_type": {
+          "name": "crossing_type",
+          "type": "pi_crossing_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "crossing_contact": {
+          "name": "crossing_contact",
+          "type": "pi_crossing_contact",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "crossing_gap_distance": {
+          "name": "crossing_gap_distance",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "crossing_damage_movement": {
+          "name": "crossing_damage_movement",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "features_type": {
+          "name": "features_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "features_condition": {
+          "name": "features_condition",
+          "type": "pi_features_condition",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "remarks": {
+          "name": "remarks",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_pipeline_finding_result_id_result_pipeline_result_id_fk": {
+          "name": "result_pipeline_finding_result_id_result_pipeline_result_id_fk",
+          "tableFrom": "result_pipeline_finding",
+          "tableTo": "result_pipeline",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_riser": {
+      "name": "result_riser",
+      "schema": "",
+      "columns": {
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "touchdown_distance_from_riser_bend": {
+          "name": "touchdown_distance_from_riser_bend",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "riser_bend_distance_to_mudbrace_member": {
+          "name": "riser_bend_distance_to_mudbrace_member",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "riser_bend_height_to_seabed": {
+          "name": "riser_bend_height_to_seabed",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "coating_status": {
+          "name": "coating_status",
+          "type": "riser_coating_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "coating_condition": {
+          "name": "coating_condition",
+          "type": "riser_coating_condition",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "knee_brace": {
+          "name": "knee_brace",
+          "type": "cgb_yes_no",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "debris": {
+          "name": "debris",
+          "type": "cgb_yes_no",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "debris_type": {
+          "name": "debris_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "anomaly": {
+          "name": "anomaly",
+          "type": "cgb_yes_no",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recommendation": {
+          "name": "recommendation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "restricted_access": {
+          "name": "restricted_access",
+          "type": "cgb_yes_no",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_riser_result_id_result_result_id_fk": {
+          "name": "result_riser_result_id_result_result_id_fk",
+          "tableFrom": "result_riser",
+          "tableTo": "result",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.result_scour": {
       "name": "result_scour",
       "schema": "",
@@ -2593,6 +4102,131 @@
           "name": "result_scour_result_id_result_result_id_fk",
           "tableFrom": "result_scour",
           "tableTo": "result",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_seabed": {
+      "name": "result_seabed",
+      "schema": "",
+      "columns": {
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_seabed_result_id_result_result_id_fk": {
+          "name": "result_seabed_result_id_result_result_id_fk",
+          "tableFrom": "result_seabed",
+          "tableTo": "result",
+          "columnsFrom": [
+            "result_id"
+          ],
+          "columnsTo": [
+            "result_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.result_seabed_finding": {
+      "name": "result_seabed_finding",
+      "schema": "",
+      "columns": {
+        "finding_id": {
+          "name": "finding_id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "result_id": {
+          "name": "result_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "range_meters": {
+          "name": "range_meters",
+          "type": "numeric",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fixes": {
+          "name": "fixes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "debris": {
+          "name": "debris",
+          "type": "cgb_yes_no",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "debris_type": {
+          "name": "debris_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "result_seabed_finding_result_id_result_seabed_result_id_fk": {
+          "name": "result_seabed_finding_result_id_result_seabed_result_id_fk",
+          "tableFrom": "result_seabed_finding",
+          "tableTo": "result_seabed",
           "columnsFrom": [
             "result_id"
           ],
@@ -2797,19 +4431,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "display_order": {
-          "name": "display_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2922,19 +4543,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "display_order": {
-          "name": "display_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         },
         "created_at": {
           "name": "created_at",
@@ -3158,19 +4766,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "display_order": {
-          "name": "display_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3311,8 +4906,8 @@
         }
       },
       "indexes": {
-        "uq_video_clip_result_id": {
-          "name": "uq_video_clip_result_id",
+        "idx_video_clip_result_id": {
+          "name": "idx_video_clip_result_id",
           "columns": [
             {
               "expression": "result_id",
@@ -3321,7 +4916,7 @@
               "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3403,8 +4998,34 @@
         "bottom"
       ]
     },
+    "public.cgb_yes_no": {
+      "name": "cgb_yes_no",
+      "schema": "public",
+      "values": [
+        "yes",
+        "no"
+      ]
+    },
+    "public.ci_blockage_level": {
+      "name": "ci_blockage_level",
+      "schema": "public",
+      "values": [
+        "0_25",
+        "25_50",
+        "50_75",
+        "75_100"
+      ]
+    },
     "public.cvi_member_type": {
       "name": "cvi_member_type",
+      "schema": "public",
+      "values": [
+        "chord",
+        "brace"
+      ]
+    },
+    "public.dvi_member_type": {
+      "name": "dvi_member_type",
       "schema": "public",
       "values": [
         "chord",
@@ -3434,11 +5055,18 @@
       "values": [
         "GVI",
         "CVI",
+        "DVI",
         "MGI",
         "CP",
         "FMD",
         "SCOUR",
-        "BSI"
+        "BSI",
+        "CAISSON",
+        "CGB",
+        "RISER",
+        "SEABED",
+        "PIPELINE",
+        "RA"
       ]
     },
     "public.mgi_criteria_preset": {
@@ -3458,12 +5086,131 @@
         "hard"
       ]
     },
+    "public.pi_crossing_contact": {
+      "name": "pi_crossing_contact",
+      "schema": "public",
+      "values": [
+        "touching",
+        "not_touching"
+      ]
+    },
+    "public.pi_crossing_type": {
+      "name": "pi_crossing_type",
+      "schema": "public",
+      "values": [
+        "over",
+        "under"
+      ]
+    },
+    "public.pi_damage_type": {
+      "name": "pi_damage_type",
+      "schema": "public",
+      "values": [
+        "bare_metal",
+        "crack",
+        "groove",
+        "bitumen_exposed",
+        "reinforcement_bar_exposed"
+      ]
+    },
+    "public.pi_debris_type": {
+      "name": "pi_debris_type",
+      "schema": "public",
+      "values": [
+        "hard",
+        "soft"
+      ]
+    },
+    "public.pi_features_condition": {
+      "name": "pi_features_condition",
+      "schema": "public",
+      "values": [
+        "good",
+        "bad",
+        "damage"
+      ]
+    },
+    "public.pi_finding_category": {
+      "name": "pi_finding_category",
+      "schema": "public",
+      "values": [
+        "damage",
+        "debris",
+        "riser_bend",
+        "stabilization",
+        "burial",
+        "freespans",
+        "leak_observation",
+        "Crossings",
+        "features"
+      ]
+    },
+    "public.pi_orientation": {
+      "name": "pi_orientation",
+      "schema": "public",
+      "values": [
+        "12_oclock",
+        "1_oclock",
+        "2_oclock",
+        "3_oclock",
+        "4_oclock",
+        "5_oclock",
+        "6_oclock",
+        "7_oclock",
+        "8_oclock",
+        "9_oclock",
+        "10_oclock",
+        "11_oclock"
+      ]
+    },
+    "public.pi_riser_bend_condition": {
+      "name": "pi_riser_bend_condition",
+      "schema": "public",
+      "values": [
+        "seabed_support",
+        "stabilization",
+        "in_suspension"
+      ]
+    },
+    "public.pi_stabilization_condition": {
+      "name": "pi_stabilization_condition",
+      "schema": "public",
+      "values": [
+        "supporting",
+        "not_supporting"
+      ]
+    },
     "public.recording_ingest_kind": {
       "name": "recording_ingest_kind",
       "schema": "public",
       "values": [
         "master",
         "clip"
+      ]
+    },
+    "public.report_status": {
+      "name": "report_status",
+      "schema": "public",
+      "values": [
+        "generating",
+        "ready",
+        "error"
+      ]
+    },
+    "public.riser_coating_condition": {
+      "name": "riser_coating_condition",
+      "schema": "public",
+      "values": [
+        "good",
+        "peel-off"
+      ]
+    },
+    "public.riser_coating_status": {
+      "name": "riser_coating_status",
+      "schema": "public",
+      "values": [
+        "present",
+        "not-present"
       ]
     },
     "public.scour_exposed_pile": {

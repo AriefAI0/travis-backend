@@ -1,1 +1,0 @@
-ALTER TABLE "result" ADD COLUMN "submitted_payload" jsonb;
