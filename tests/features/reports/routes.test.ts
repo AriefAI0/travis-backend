@@ -75,11 +75,16 @@ const withNote = (buffer: Buffer, text: string) => {
   return zip.generate({ type: "nodebuffer" }) as Buffer;
 };
 
-// The user deleting a generated region in the editor.
+// The user deleting a generated region in the editor. Word fills `w:sdtPr`
+// with more than the tag, so the block is matched by the tag it holds, not by
+// the exact shape of its properties.
 const withoutRegion = (buffer: Buffer, tag: string) => {
   const zip = new PizZip(buffer);
   const xml = zip.file("word/document.xml").asText() as string;
-  const control = new RegExp(`<w:sdt><w:sdtPr><w:tag w:val="${tag}"/></w:sdtPr>.*?</w:sdt>`, "s");
+  const control = new RegExp(
+    `<w:sdt>(?:(?!</w:sdt>).)*?<w:tag w:val="${tag}"/>(?:(?!</w:sdt>).)*?</w:sdt>`,
+    "s",
+  );
   zip.file("word/document.xml", xml.replace(control, ""));
 
   return zip.generate({ type: "nodebuffer" }) as Buffer;
