@@ -80,6 +80,11 @@ const normalizeResultUpdate = (
     nextData.submittedPayload = data.submittedPayload;
   }
 
+  // the submit-time class; an allowlist miss drops it silently
+  if ("resultClass" in data) {
+    nextData.resultClass = data.resultClass;
+  }
+
   // completed results re-pin to the form version live at stop time
   if ("inspectionFormId" in data) {
     nextData.inspectionFormId = data.inspectionFormId;
@@ -909,6 +914,7 @@ export const getResultFormState = async (
     sessionId: row.sessionId,
     masterEndMs: row.masterEndMs,
     submittedPayload: row.submittedPayload,
+    resultClass: row.resultClass,
   };
 };
 

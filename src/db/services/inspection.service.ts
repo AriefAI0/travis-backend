@@ -89,6 +89,8 @@ export type StopInspectionInput = {
   payload: unknown;
   customValues?: Record<string, unknown>;
   masterEndMs: number;
+  /** normal | anomaly; omitted keeps the column default */
+  resultClass?: "normal" | "anomaly";
   /** validate the whole stop, write nothing — the app's Submit gate */
   dryRun?: boolean;
 };
@@ -276,6 +278,7 @@ export const stopInspection = async (
       customValues: values,
       inspectionFormId: form.inspectionFormId,
       submittedPayload: input.payload,
+      resultClass: input.resultClass ?? "normal",
     };
     if (input.remarks !== undefined) update.remarks = input.remarks;
     const updated = await updateResult(resultId, update, tx);

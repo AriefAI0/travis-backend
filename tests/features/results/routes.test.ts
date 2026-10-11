@@ -92,6 +92,8 @@ describe("results routes", () => {
       masterEndMs: null,
       // an open row has not been submitted, so there is nothing to prefill from
       submittedPayload: null,
+      // the class is chosen at submit; an open row sits on the column default
+      resultClass: "normal",
     });
 
     const missing = await app.request("/api/v1/results/99999/form-state");
