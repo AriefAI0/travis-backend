@@ -22,6 +22,7 @@ import {
 } from "../../db/repositories/video-clip.repository";
 import { findResultById, lockResultRow } from "../../db/repositories/result.repository";
 import { findOpenClipIngestByResultId } from "../../db/repositories/recording-ingest.repository";
+import { ingestIdleSince } from "../../lib/ingest_lease";
 import { resolveTargetLabel } from "../../db/services/task-structure.service";
 import { createSession } from "../../db/services/session.service";
 import { enqueueClipStill, enqueueThumbnails } from "./jobs/thumbnails";
@@ -272,9 +273,10 @@ export const admitIngest = async (
    One idle rule bounds crash recovery: 15 s without a
    committed segment. Close and segment commit share the row
    lock, so the frozen range is never torn.
+   The lease rule itself lives in lib/ingest_lease.
 ========================================================= */
 
-export const INGEST_IDLE_CLOSE_MS = 15_000;
+export { INGEST_IDLE_CLOSE_MS } from "../../lib/ingest_lease";
 
 export type IngestCloseResult = {
   ingestId: number;
@@ -284,18 +286,6 @@ export type IngestCloseResult = {
   closedAt: Date;
   replayed: boolean;
 };
-
-// the ingest is idle when its last activity sits at or before the cutoff.
-// A heartbeat counts as activity: a paused capture stores no segments but is
-// still alive, and only a capture that stopped talking loses its lease.
-export const ingestIdleSince = (ingest: typeof recordingIngest.$inferSelect): Date =>
-  new Date(
-    Math.max(
-      ingest.openedAt.getTime(),
-      ingest.lastSegmentAt?.getTime() ?? 0,
-      ingest.lastSeenAt?.getTime() ?? 0,
-    ),
-  );
 
 // stamp the domain row with the facts the recording ended with
 const stampDomainClose = async (

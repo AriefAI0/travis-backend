@@ -283,8 +283,10 @@ export const importProjectTaskStructure = async (
             );
           }
         } else {
-          // refuses while an inspection runs, which rolls the whole import back
-          await deleteTaskStructureSelection(nodes, tx);
+          // Replacing the whole tree IS the confirmation, so unfinished
+          // inspections go with it; a capture still on the wire is refused,
+          // which rolls the whole import back.
+          await deleteTaskStructureSelection(nodes, tx, true);
         }
       }
     }

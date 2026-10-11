@@ -932,6 +932,9 @@ export type TaskStructureNodeKind = z.infer<typeof taskStructureNodeKindSchema>;
 // One request carries a whole ticked selection, so the cap is generous but present.
 export const bulkDeleteTaskStructureSchema = z.object({
   mode: z.enum(["preview", "delete"]),
+  // Confirms discarding unfinished inspections whose capture already stopped.
+  // Never overrides a live capture.
+  force: z.boolean().optional(),
   nodes: z
     .array(
       z.object({

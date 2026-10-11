@@ -10,6 +10,7 @@ import { removeMediaKeys, removeMediaPrefix } from "../../lib/minio_storage/clea
 import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
 import { db, type DbOrTx } from "../client";
 import { listIngestRecordsByClipIds } from "../repositories/recording-ingest.repository";
+import { ingestLeaseAlive } from "../../lib/ingest_lease";
 import {
   listAllResultRecordsByTargetIds,
   listOpenResultRecordsByTargetIds,
@@ -354,8 +355,12 @@ export type TaskStructureDeletePreview = {
   results: number;
   clips: number;
   images: number;
-  // true while an inspection under the selection is still running
+  // true while a capture is actually on the wire under the selection — the one
+  // refusal a force cannot relax
   blocked: boolean;
+  // Open inspections whose capture is not alive: unfinished work with no
+  // recorder behind it. Discardable, but only on an explicit confirm.
+  orphans: number;
   reason: string | null;
 };
 
@@ -476,7 +481,20 @@ const collectSelectionFacts = async (
     clips.map((clip) => clip.clipId),
     database,
   );
-  const unclosed = ingestRows.filter((row) => row.closedAt === null);
+
+  // Split the open ones by lease: a fresh open ingest means a capture is writing
+  // under the selection right now; a stale one is a leftover the sweep will close.
+  const liveIngests = ingestRows.filter(
+    (row) => row.closedAt === null && ingestLeaseAlive(row),
+  );
+  const liveClipIds = new Set(liveIngests.map((row) => row.clipId));
+  const liveResultIds = new Set(
+    clips.filter((clip) => liveClipIds.has(clip.clipId)).map((clip) => clip.resultId),
+  );
+  // An open inspection with no live capture behind it: the recorder stopped, the
+  // work never got submitted, and nothing will finish it but a person.
+  const orphans = openResults.filter((row) => !liveResultIds.has(row.resultId)).length;
+  const blocked = liveIngests.length > 0;
 
   // raw and annotated twins; the annotated leaf is only there when it was written
   const imageKeys = images.flatMap((row) => {
@@ -490,13 +508,13 @@ const collectSelectionFacts = async (
       results: results.length,
       clips: clips.length,
       images: images.length,
-      blocked: openResults.length > 0 || unclosed.length > 0,
-      reason:
-        openResults.length > 0
-          ? `${openResults.length} inspection${openResults.length === 1 ? "" : "s"} still running`
-          : unclosed.length > 0
-            ? `${unclosed.length} recording${unclosed.length === 1 ? "" : "s"} still open`
-            : null,
+      blocked,
+      orphans,
+      reason: blocked
+        ? `${liveIngests.length} recording${liveIngests.length === 1 ? "" : "s"} still being written`
+        : orphans > 0
+          ? orphanReason(orphans)
+          : null,
     },
     imageKeys,
     thumbnailKeys: clips
@@ -514,18 +532,31 @@ export const previewTaskStructureDelete = async (
 ): Promise<TaskStructureDeletePreview> =>
   (await collectSelectionFacts(await resolveSelection(nodes, database), database)).preview;
 
-// A running inspection or an unclosed recording means media still being written
-// under the selection, so the delete refuses before it touches anything.
-// flow: resolve > facts > block check > one tx > remove objects best-effort
+// What the confirm dialog says before it discards unfinished work. Exported so
+// the refusal and the preview can never drift apart.
+export const orphanReason = (orphans: number): string =>
+  `${orphans} unfinished inspection${orphans === 1 ? "" : "s"} stopped recording — they will be discarded with this delete`;
+
+/**
+ * A capture still writing under the selection refuses outright — force does not
+ * reach it. Orphans refuse too, but only until the caller confirms: they are
+ * cascaded away with the selection (result and clip FKs are onDelete cascade),
+ * and their media is cleared after commit with every other prefix here.
+ * flow: resolve > facts > live check > orphan confirm > one tx > remove objects
+ */
 export const deleteTaskStructureSelection = async (
   nodes: TaskStructureNodeRef[],
   database?: DbOrTx,
+  force = false,
 ): Promise<TaskStructureDeletePreview> => {
   const resolved = await resolveSelection(nodes, database);
   const facts = await collectSelectionFacts(resolved, database);
 
   if (facts.preview.blocked) {
     throw new AppError(409, "wrong_state", facts.preview.reason ?? "selection is still live");
+  }
+  if (facts.preview.orphans > 0 && !force) {
+    throw new AppError(409, "orphan_confirm_required", orphanReason(facts.preview.orphans));
   }
 
   // Deepest level first: deleting a parent cascades the rows below it, and a

@@ -195,7 +195,7 @@ describe("task structure import", () => {
     expect(after.descriptions.map((d) => d.label)).toEqual(["Deck"]);
   });
 
-  it("refuses a replace while an inspection under the project is still running", async () => {
+  it("refuses a replace while a capture under the project is on the wire", async () => {
     await seedProject();
     await importRows([row()]);
     const seeded = await tree();
@@ -213,10 +213,24 @@ describe("task structure import", () => {
       descriptionId: seeded.descriptions[0]!.descriptionId,
       layer: 1,
       masterStartMs: 0,
-      // open, so media is still being written under the selection
+      // open, and its capture is still renewing its lease
       masterEndMs: null,
       projectId: 1,
       sessionId: 101,
+    });
+    await testDb.insert(schema.videoClip).values({
+      clipId: 1,
+      resultId: 5001,
+      sessionId: 101,
+      startOffsetMs: 0,
+    });
+    await testDb.insert(schema.recordingIngest).values({
+      kind: "clip",
+      clipId: 1,
+      ticketHash: "c".repeat(64),
+      keyDate: "2026-09-24",
+      keyPrefix: "p/clip-1",
+      lastSeenAt: new Date(),
     });
 
     const res = await importRows([row({ taskGroup: "Bridge B" })], { mode: "replace" });
@@ -227,6 +241,39 @@ describe("task structure import", () => {
     const after = await tree();
     expect(after.groups.map((g) => g.code)).toEqual(["Bridge A"]);
     expect(after.descriptions).toHaveLength(1);
+  });
+
+  // Replacing the tree is its own confirmation: an unfinished inspection whose
+  // capture already stopped must not brick the import.
+  it("replaces the tree over an orphaned inspection", async () => {
+    await seedProject();
+    await importRows([row()]);
+    const seeded = await tree();
+
+    await testDb.insert(schema.session).values({
+      displayNumber: 1,
+      sessionId: 101,
+      projectId: 1,
+      name: "Run 1",
+    });
+    await testDb.insert(schema.result).values({
+      displayNumber: 5001,
+      resultId: 5001,
+      inspectionTypeCode: "GVI",
+      descriptionId: seeded.descriptions[0]!.descriptionId,
+      layer: 1,
+      masterStartMs: 0,
+      masterEndMs: null,
+      projectId: 1,
+      sessionId: 101,
+    });
+
+    const res = await importRows([row({ taskGroup: "Bridge B" })], { mode: "replace" });
+
+    expect(res.status).toBe(200);
+    const after = await tree();
+    expect(after.groups.map((g) => g.code)).toEqual(["Bridge B"]);
+    expect(await testDb.select().from(schema.result)).toHaveLength(0);
   });
 
   // One transaction: the first insert breaks its foreign key, so the rest of the

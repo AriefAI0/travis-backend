@@ -193,7 +193,7 @@ export const taskStructureRoutes = (database?: DbOrTx) => {
     const preview =
       input.mode === "preview"
         ? await previewTaskStructureDelete(input.nodes, database)
-        : await deleteTaskStructureSelection(input.nodes, database);
+        : await deleteTaskStructureSelection(input.nodes, database, input.force === true);
     return ok(c, preview);
   });
 

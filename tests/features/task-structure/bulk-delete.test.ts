@@ -22,7 +22,8 @@ const post = (body: unknown) =>
   });
 
 const preview = (nodes: unknown[]) => post({ mode: "preview", nodes });
-const remove = (nodes: unknown[]) => post({ mode: "delete", nodes });
+const remove = (nodes: unknown[], force = false) =>
+  post({ mode: "delete", nodes, ...(force ? { force: true } : {}) });
 
 // Two results so a mid-level delete can be told apart from a leaf delete:
 // 5001 hangs off the description, 5002 off the part code under it.
@@ -141,6 +142,7 @@ describe("bulk delete", () => {
       clips: 2,
       images: 2,
       blocked: false,
+      orphans: 0,
       reason: null,
     });
     // a preview never writes
@@ -197,8 +199,23 @@ describe("bulk delete", () => {
     expect((await remaining()).results).toBe(1);
   });
 
-  // A running inspection means media is still being written under the selection.
-  it("refuses with 409 while an inspection under the node is open", async () => {
+  // An open inspection whose capture is gone: unfinished work that nothing will
+  // finish. It is a preview fact and a confirm, never a hard block.
+  it("reports an open inspection with a dead capture as an orphan", async () => {
+    await seedTree();
+    await testDb
+      .update(schema.result)
+      .set({ masterEndMs: null })
+      .where(eq(schema.result.resultId, 5001));
+
+    const res = await json(await preview([{ kind: "description", id: 100 }]));
+
+    expect(res.data.blocked).toBe(false);
+    expect(res.data.orphans).toBe(1);
+    expect(res.data.reason).toContain("1 unfinished inspection stopped recording");
+  });
+
+  it("refuses to delete an orphan until the caller confirms", async () => {
     await seedTree();
     await testDb
       .update(schema.result)
@@ -208,14 +225,94 @@ describe("bulk delete", () => {
     const res = await remove([{ kind: "description", id: 100 }]);
 
     expect(res.status).toBe(409);
+    expect((await json(res)).code).toBe("orphan_confirm_required");
+    // nothing was touched
+    expect((await remaining()).results).toBe(2);
+  });
+
+  it("discards the orphan once the caller confirms", async () => {
+    await seedTree();
+    await testDb
+      .update(schema.result)
+      .set({ masterEndMs: null })
+      .where(eq(schema.result.resultId, 5001));
+
+    const res = await json(await remove([{ kind: "description", id: 100 }], true));
+
+    expect(res.data.orphans).toBe(1);
+    // the description owns the whole branch, so both results and their media go
+    const left = await remaining();
+    expect(left.results).toBe(0);
+    expect(left.clips).toBe(0);
+    expect(left.ingests).toBe(0);
+  });
+
+  // A running inspection means media is still being written under the selection.
+  it("refuses with 409 while a capture under the node is on the wire", async () => {
+    await seedTree();
+    await testDb
+      .update(schema.recordingIngest)
+      .set({ closedAt: null, lastSeenAt: new Date() })
+      .where(eq(schema.recordingIngest.ingestId, 1));
+
+    const res = await remove([{ kind: "description", id: 100 }]);
+
+    expect(res.status).toBe(409);
     expect((await json(res)).code).toBe("wrong_state");
     // nothing was touched
     expect((await remaining()).results).toBe(2);
   });
 
+  // Force is the orphan confirmation, never a way past a live capture.
+  it("still refuses a forced delete while the capture is on the wire", async () => {
+    await seedTree();
+    await testDb
+      .update(schema.recordingIngest)
+      .set({ closedAt: null, lastSeenAt: new Date() })
+      .where(eq(schema.recordingIngest.ingestId, 1));
+
+    const res = await remove([{ kind: "description", id: 100 }], true);
+
+    expect(res.status).toBe(409);
+    expect((await json(res)).code).toBe("wrong_state");
+    expect((await remaining()).results).toBe(2);
+  });
+
+  it("splits an open ingest by lease age", async () => {
+    await seedTree();
+    await testDb
+      .update(schema.result)
+      .set({ masterEndMs: null })
+      .where(eq(schema.result.resultId, 5001));
+
+    // a open ingest whose lease went stale is a leftover, not a capture
+    const stale = new Date(Date.now() - 60_000);
+    await testDb
+      .update(schema.recordingIngest)
+      .set({ closedAt: null, openedAt: stale, lastSeenAt: stale, lastSegmentAt: null })
+      .where(eq(schema.recordingIngest.ingestId, 1));
+
+    const orphaned = await json(await preview([{ kind: "description", id: 100 }]));
+    expect(orphaned.data.blocked).toBe(false);
+    expect(orphaned.data.orphans).toBe(1);
+
+    // the same row with a fresh lease is a capture, and blocks
+    await testDb
+      .update(schema.recordingIngest)
+      .set({ lastSeenAt: new Date() })
+      .where(eq(schema.recordingIngest.ingestId, 1));
+
+    const live = await json(await preview([{ kind: "description", id: 100 }]));
+    expect(live.data.blocked).toBe(true);
+    expect(live.data.orphans).toBe(0);
+  });
+
   it("refuses with 409 while a recording under the node is unclosed", async () => {
     await seedTree();
-    await testDb.update(schema.recordingIngest).set({ closedAt: null }).where(eq(schema.recordingIngest.ingestId, 2));
+    await testDb
+      .update(schema.recordingIngest)
+      .set({ closedAt: null, lastSeenAt: new Date() })
+      .where(eq(schema.recordingIngest.ingestId, 2));
 
     const res = await remove([{ kind: "part_code", id: 300 }]);
 
@@ -226,12 +323,15 @@ describe("bulk delete", () => {
 
   it("reports the block on preview without refusing it", async () => {
     await seedTree();
-    await testDb.update(schema.recordingIngest).set({ closedAt: null }).where(eq(schema.recordingIngest.ingestId, 1));
+    await testDb
+      .update(schema.recordingIngest)
+      .set({ closedAt: null, lastSeenAt: new Date() })
+      .where(eq(schema.recordingIngest.ingestId, 1));
 
     const res = await json(await preview([{ kind: "task_group", id: 1 }]));
 
     expect(res.data.blocked).toBe(true);
-    expect(res.data.reason).toContain("still open");
+    expect(res.data.reason).toContain("still being written");
   });
 
   // The whole selection rides one transaction, so a caller that rolls back keeps
