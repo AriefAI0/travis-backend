@@ -1,9 +1,9 @@
 import type { DbOrTx } from "../client";
 import { AppError } from "../../lib/error";
 import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
+import type { ReportScope } from "../../types/api";
 import { getProjectById } from "./project.service";
 import { listResultImageSummariesByResultIds } from "./result-media.service";
-import { listVideoClipPlaybackRowsByResultIds } from "../repositories/video-clip.repository";
 import {
   getBsiDetailByResultId,
   getCgbDetailByResultId,
@@ -495,38 +495,21 @@ const groupResultsByTarget = (summary: SummaryRow[]) => {
   return byTarget;
 };
 
-// Picture candidates per result, best first. The evidence image is the one the
-// inspector annotated; the clip still is what the recording captured, and it
-// exists for every inspected result. An annotated twin wins over the raw shot —
-// same rule as the UI.
-// flow: evidence leaves + clip stills > candidates per result
+// Picture candidates per result, best first: the evidence image is the one the
+// inspector annotated, so an annotated twin wins over the raw shot — same rule
+// as the UI. Nothing else stands in for it, so a result with no evidence image
+// renders an empty frame.
+// flow: evidence leaves > candidates per result
 const collectImageKeys = async (resultIds: number[], database?: DbOrTx) => {
-  const [imagesByResult, clips] = await Promise.all([
-    listResultImageSummariesByResultIds(resultIds, database),
-    listVideoClipPlaybackRowsByResultIds(resultIds, database),
-  ]);
-
-  const stillByResult = new Map<number, string>();
-  for (const clip of clips) {
-    if (clip.thumbnailKey && !stillByResult.has(clip.resultId)) {
-      stillByResult.set(clip.resultId, clip.thumbnailKey);
-    }
-  }
+  const imagesByResult = await listResultImageSummariesByResultIds(resultIds, database);
 
   const keys = new Map<number, string[]>();
   for (const resultId of resultIds) {
-    const candidates: string[] = [];
     const first = imagesByResult.get(resultId)?.[0];
+    if (!first) continue;
 
-    if (first) {
-      const leaves = imageEvidenceLeaves(first.storageStem, first.imageId, first.contentType);
-      candidates.push(first.hasAnnotated ? leaves.annotated.key : leaves.raw.key);
-    }
-
-    const still = stillByResult.get(resultId);
-    if (still) candidates.push(still);
-
-    if (candidates.length) keys.set(resultId, candidates);
+    const leaves = imageEvidenceLeaves(first.storageStem, first.imageId, first.contentType);
+    keys.set(resultId, [first.hasAnnotated ? leaves.annotated.key : leaves.raw.key]);
   }
 
   return keys;
@@ -564,9 +547,13 @@ const buildSections = (
 /* ---------- entry point ---------- */
 
 // Gather every variable the report template fills, in task-tree order.
-// flow: project > tree + summary > typed rows > images > grouped items
+// `scope` picks which results the report covers: `all` keeps every real result,
+// `anomaly` keeps only anomaly-class ones. Neither scope carries an RA mark —
+// a restricted-access mark is evidence of a gap, not an inspection result.
+// flow: project > tree + summary > scope filter > typed rows > images > items
 export const gatherReportData = async (
   projectId: number,
+  scope: ReportScope = "all",
   database?: DbOrTx,
 ): Promise<ReportTemplateData> => {
   if (!Number.isInteger(projectId) || projectId < 1) {
@@ -578,10 +565,14 @@ export const gatherReportData = async (
     throw new AppError(404, "project_not_found", `No project with id ${projectId}`);
   }
 
-  const [groups, summary] = await Promise.all([
+  const [groups, allResults] = await Promise.all([
     listProjectTaskStructureTree(projectId, database),
     listProjectSummary(projectId, database),
   ]);
+
+  const summary = allResults.filter(
+    (row) => !row.isRa && (scope === "all" || row.resultClass === "anomaly"),
+  );
 
   const { byDescriptionId, byPartCodeId, order } = collectTargets(groups);
   const byTarget = groupResultsByTarget(summary);

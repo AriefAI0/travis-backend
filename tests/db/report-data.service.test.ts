@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { eq } from "drizzle-orm";
 import {
   closeTestDatabase,
   ensureTestDatabase,
@@ -68,16 +69,16 @@ const seed = async () => {
     layer: 1,
     masterStartMs: 2000,
   });
-  // a type with no detail table: renders an empty section, never throws
+  // A restricted-access mark: sessionless, is_ra set, one per target. No report
+  // scope carries it, so it also proves the filter.
   await testDb.insert(schema.result).values({
     resultId: 5004,
     displayNumber: 4,
     projectId: 1,
-    sessionId: 101,
+    sessionId: null,
     inspectionTypeCode: "RA",
+    isRa: true,
     descriptionId: 100,
-    layer: 1,
-    masterStartMs: 3000,
   });
 
   await testDb.insert(schema.resultGvi).values([
@@ -137,7 +138,7 @@ describe("gatherReportData", () => {
   it("fills project vars and groups items in task-tree order", async () => {
     await seed();
 
-    const data = await gatherReportData(1, testDb);
+    const data = await gatherReportData(1, "all", testDb);
 
     expect(data.project_title).toBe("Alpha");
     expect(data.project_id).toBe(1);
@@ -156,7 +157,6 @@ describe("gatherReportData", () => {
     expect(description.sections.map((section) => section.inspection_type)).toEqual([
       "GVI",
       "CVI",
-      "RA",
     ]);
 
     expect(partCode.part_code).toBe("P1");
@@ -168,7 +168,7 @@ describe("gatherReportData", () => {
   it("carries the typed GVI columns and sets only the matching flag", async () => {
     await seed();
 
-    const description = (await gatherReportData(1, testDb)).items[0]!;
+    const description = (await gatherReportData(1, "all", testDb)).items[0]!;
     const gvi = description.sections[0]!;
 
     expect(gvi.isGVI).toBe(true);
@@ -188,7 +188,7 @@ describe("gatherReportData", () => {
   it("repeats the CVI header down one row per clock position", async () => {
     await seed();
 
-    const description = (await gatherReportData(1, testDb)).items[0]!;
+    const description = (await gatherReportData(1, "all", testDb)).items[0]!;
     const cvi = description.sections[1]!;
 
     expect(cvi.isCVI).toBe(true);
@@ -208,41 +208,41 @@ describe("gatherReportData", () => {
     expect(cvi.rows[2]!.findings).toBe("cp");
   });
 
-  it("emits an empty section for a type with no detail table", async () => {
+  it("drops restricted-access marks, with no section and no target key", async () => {
     await seed();
 
-    const description = (await gatherReportData(1, testDb)).items[0]!;
-    const unmapped = description.sections[2]!;
+    const data = await gatherReportData(1, "all", testDb);
+    const types = data.items.flatMap((item) =>
+      item.sections.map((section) => section.inspection_type),
+    );
+    const keys = data.items.flatMap((item) =>
+      item.sections.map((section) => section.target_key),
+    );
 
-    expect(unmapped.inspection_type).toBe("RA");
-    expect(unmapped.rows).toEqual([]);
-    for (const [key, value] of Object.entries(unmapped)) {
-      if (key.startsWith("is")) expect(value).toBe(false);
-    }
+    // the mark is on description:100, which still carries its real sections
+    expect(types).not.toContain("RA");
+    expect(keys).toContain("description:100");
+    expect(data.items[0]!.sections).toHaveLength(2);
   });
 
-  it("offers the evidence image first and the clip still second", async () => {
+  it("offers the evidence image alone, never a clip still", async () => {
     await seed();
 
-    const description = (await gatherReportData(1, testDb)).items[0]!;
+    const description = (await gatherReportData(1, "all", testDb)).items[0]!;
 
     expect(description.sections[0]!.image_keys).toEqual([
       "1-alpha/session-1/evidence-img/9001.png",
-      "1-alpha/session-1/clips/2-leg-a-gvi/thumbnail.jpg",
     ]);
-    // a type whose result has no evidence image offers the still alone
-    expect(description.sections[1]!.image_keys).toEqual([
-      "1-alpha/session-1/clips/3-leg-a-cvi/thumbnail.jpg",
-    ]);
-    // a type with no picture at all offers none
-    expect(description.sections[2]!.image_keys).toEqual([]);
+    // a type whose result has no evidence image offers none, even though a clip
+    // still exists for it
+    expect(description.sections[1]!.image_keys).toEqual([]);
   });
 
   it("prefers the annotated twin when the column says it exists", async () => {
     await seed();
     await testDb.update(schema.resultImage).set({ hasAnnotated: true });
 
-    const description = (await gatherReportData(1, testDb)).items[0]!;
+    const description = (await gatherReportData(1, "all", testDb)).items[0]!;
 
     expect(description.sections[0]!.image_keys[0]).toBe(
       "1-alpha/session-1/evidence-img/9001-annotated.png",
@@ -275,7 +275,7 @@ describe("gatherReportData", () => {
     });
     await testDb.insert(schema.resultGvi).values({ resultId: 5005, condition: "ok" });
 
-    const data = await gatherReportData(1, testDb);
+    const data = await gatherReportData(1, "all", testDb);
 
     // tree order first, then the orphan
     expect(data.items).toHaveLength(3);
@@ -287,7 +287,7 @@ describe("gatherReportData", () => {
 
   it("names each section's target key, so a refresh can find its regions", async () => {
     await seed();
-    const data = await gatherReportData(1, testDb);
+    const data = await gatherReportData(1, "all", testDb);
     const keys = data.items.flatMap((item) =>
       item.sections.map((section) => `${section.target_key}:${section.inspection_type}`),
     );
@@ -296,7 +296,6 @@ describe("gatherReportData", () => {
       [
         "description:100:CVI",
         "description:100:GVI",
-        "description:100:RA",
         "part_code:300:GVI",
       ].sort(),
     );
@@ -304,12 +303,32 @@ describe("gatherReportData", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it("anomaly scope keeps only anomaly-class results", async () => {
+    await seed();
+    // 5001 is the part-code GVI; 5003 is the CVI on description:100
+    await testDb
+      .update(schema.result)
+      .set({ resultClass: "anomaly" })
+      .where(eq(schema.result.resultId, 5003));
+
+    const anomaly = await gatherReportData(1, "anomaly", testDb);
+    expect(anomaly.items).toHaveLength(1);
+    expect(anomaly.items[0]!.description).toBe("Leg A");
+    expect(anomaly.items[0]!.sections.map((section) => section.inspection_type)).toEqual([
+      "CVI",
+    ]);
+
+    // the full scope still carries everything the class filter would drop
+    const all = await gatherReportData(1, "all", testDb);
+    expect(all.items).toHaveLength(2);
+  });
+
   it("throws for an unknown project", async () => {
-    await expect(gatherReportData(999, testDb)).rejects.toThrow();
+    await expect(gatherReportData(999, "all", testDb)).rejects.toThrow();
   });
 
   it("throws for a non-positive id", async () => {
-    await expect(gatherReportData(0, testDb)).rejects.toThrow();
+    await expect(gatherReportData(0, "all", testDb)).rejects.toThrow();
   });
 
   it("returns no items for a project with an empty tree", async () => {
@@ -317,7 +336,7 @@ describe("gatherReportData", () => {
       .insert(schema.project)
       .values({ projectId: 2, displayNumber: 2, title: "Empty" });
 
-    const data = await gatherReportData(2, testDb);
+    const data = await gatherReportData(2, "all", testDb);
 
     expect(data.items).toEqual([]);
     expect(data.document_id).toBe("");

@@ -208,3 +208,18 @@ export const deleteRestrictedAccessById = async (
 
   return deletedResults[0] ?? null;
 };
+
+/** Remarks-only edit on one RA mark; the is_ra guard keeps it off real results. */
+export const updateRestrictedAccessRemarks = async (
+  resultId: number,
+  remarks: string | null,
+  database: DbOrTx = db,
+) => {
+  const updatedResults = await database
+    .update(result)
+    .set({ remarks, updatedAt: new Date() })
+    .where(and(eq(result.resultId, resultId), eq(result.isRa, true)))
+    .returning();
+
+  return updatedResults[0] ?? null;
+};

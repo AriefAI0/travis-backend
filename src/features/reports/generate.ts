@@ -9,13 +9,14 @@ import type { DbOrTx } from "../../db/client";
 import { log } from "../../lib/logger";
 import { createReport, saveReportDocx, setReportStatus } from "../../db/services/report.service";
 import type { ReportRow } from "../../db/repositories/report.repository";
+import type { ReportScope } from "../../types/api";
 import { loadReportInputs, renderReport } from "./report-generator";
 
 // The row exists before any bytes do, so a failed render still leaves the user
 // something to see and delete.
 const renderInto = async (row: ReportRow, database?: DbOrTx) => {
   try {
-    const { template, data } = await loadReportInputs(row.projectId, database);
+    const { template, data } = await loadReportInputs(row.projectId, row.scope, database);
     const docx = await renderReport(template, data);
 
     // the row is still `generating`, so the version it was created with is
@@ -35,9 +36,10 @@ const renderInto = async (row: ReportRow, database?: DbOrTx) => {
 export const queueReportGeneration = async (
   projectId: number,
   name: string,
+  scope: ReportScope = "all",
   database?: DbOrTx,
 ): Promise<ReportRow> => {
-  const row = await createReport(projectId, name, database);
+  const row = await createReport(projectId, name, scope, database);
 
   // never awaited: renderInto swallows its own errors, so this cannot reject
   void renderInto(row, database);

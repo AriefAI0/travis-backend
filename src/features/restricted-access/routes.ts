@@ -4,11 +4,15 @@ import {
   createResultRecord,
   deleteRestrictedAccessById,
   listRestrictedAccessRecordsByProjectId,
+  updateRestrictedAccessRemarks,
 } from "../../db/repositories/result.repository";
 import { notFound } from "../../lib/error";
 import { parseBody, parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
-import { createRestrictedAccessSchema } from "../../types/api";
+import {
+  createRestrictedAccessSchema,
+  updateRestrictedAccessSchema,
+} from "../../types/api";
 
 // restricted-access marks (parse > repository > ok); the partial unique index
 // answers duplicates with 409 and a missing target with 404, via onError
@@ -34,6 +38,19 @@ export const restrictedAccessRoutes = (database?: DbOrTx) => {
       database,
     );
     return ok(c, row, 201);
+  });
+
+  // The mark is created when its card opens, so the operator's remarks land
+  // here afterwards. A null clears them.
+  routes.patch("/api/v1/restricted-access/:id", async (c) => {
+    const input = await parseBody(c, updateRestrictedAccessSchema);
+    const row = await updateRestrictedAccessRemarks(
+      parseId(c, "id"),
+      input.remarks ?? null,
+      database,
+    );
+    if (!row) throw notFound("Restricted access mark");
+    return ok(c, row);
   });
 
   routes.delete("/api/v1/restricted-access/:id", async (c) => {

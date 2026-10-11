@@ -1,6 +1,7 @@
 import {
   imageEvidenceLeaves,
   imageExtension,
+  raEvidenceStem,
   resultEvidenceStem,
 } from "../../lib/minio_storage/paths";
 import { AppError } from "../../lib/error";
@@ -55,17 +56,29 @@ const resolveImageStem = async (
     resultId: number;
     displayNumber: number;
     inspectionTypeCode: string;
+    isRa: boolean;
+    createdAt: Date;
   },
   database?: DbOrTx,
 ) => {
-  // an RA mark has no session, so it has no evidence folder
-  if (resultRow.sessionId === null) {
-    throw new AppError(409, "wrong_state", `result ${resultRow.resultId} has no session`);
-  }
-
   const project = await findProjectById(resultRow.projectId, database);
   if (!project) {
     throw new AppError(404, "not_found", `project ${resultRow.projectId} not found`);
+  }
+
+  // An RA mark has no session and no clip, so its evidence sits under the
+  // project folder alone — the 409 below stays for any other sessionless row.
+  if (resultRow.sessionId === null) {
+    if (!resultRow.isRa) {
+      throw new AppError(409, "wrong_state", `result ${resultRow.resultId} has no session`);
+    }
+
+    return raEvidenceStem({
+      projectNumber: project.displayNumber,
+      projectTitle: project.title,
+      markedAt: resultRow.createdAt,
+      itemLabel: await resolveTargetLabel(resultRow, database),
+    });
   }
 
   const session = await findSessionById(resultRow.sessionId, database);

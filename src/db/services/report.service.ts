@@ -16,7 +16,7 @@ import {
   updateReportRecord,
   type ReportRow,
 } from "../repositories/report.repository";
-import type { ReportListItem, ReportStatus } from "../../types/api";
+import type { ReportListItem, ReportScope, ReportStatus } from "../../types/api";
 
 export const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -67,17 +67,26 @@ const drainStream = async (stream: AsyncIterable<Buffer | Uint8Array>) => {
 
 // A row for a document that does not exist yet: the docx lands after the render,
 // so status starts at `generating`. The id is minted here rather than by the
-// column default, so the storage key is known before the insert.
+// column default, so the storage key is known before the insert. `scope` is
+// frozen on the row, so a later refresh re-renders the same report type.
 export const createReport = async (
   projectId: number,
   name: string,
+  scope: ReportScope = "all",
   database?: DbOrTx,
 ): Promise<ReportRow> => {
   const organizationId = await defaultOrgId(database);
   const reportId = randomUUID();
 
   const row = await insertReportRecord(
-    { reportId, organizationId, projectId, name: name.trim(), minioKey: reportDocxKey(reportId) },
+    {
+      reportId,
+      organizationId,
+      projectId,
+      name: name.trim(),
+      scope,
+      minioKey: reportDocxKey(reportId),
+    },
     database,
   );
 

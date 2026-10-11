@@ -188,7 +188,7 @@ const run = (text: string) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`;
 describe("template faults", () => {
   it("keeps a placeholder the data never fills, instead of writing undefined", async () => {
     await seed();
-    const { template, data } = await loadReportInputs(1, testDb);
+    const { template, data } = await loadReportInputs(1, "all", testDb);
     const patched = patchedTemplate(template, run("ID: {no_such_value}"));
 
     const xml = documentXmlIn(await renderReport(patched, data));
@@ -200,7 +200,7 @@ describe("template faults", () => {
 
   it("fails a template whose block tag is never closed", async () => {
     await seed();
-    const { template, data } = await loadReportInputs(1, testDb);
+    const { template, data } = await loadReportInputs(1, "all", testDb);
     // a report cannot be built without its openers and closers, so this throws
     const patched = patchedTemplate(template, run("{#never_closed}"));
 
@@ -209,7 +209,7 @@ describe("template faults", () => {
 
   it("names the tag when a block is closed but never opened", async () => {
     await seed();
-    const { template, data } = await loadReportInputs(1, testDb);
+    const { template, data } = await loadReportInputs(1, "all", testDb);
     const patched = patchedTemplate(template, run("{/never_opened}"));
 
     await expect(renderReport(patched, data)).rejects.toThrow(/never_opened/);
@@ -220,7 +220,7 @@ describe("generateReport", () => {
   it("renders the bundled template with data and one embedded image", async () => {
     await seed();
 
-    const buf = await generateReport(1, testDb);
+    const buf = await generateReport(1, "all", testDb);
 
     // a docx is a zip, so the first two bytes are the zip magic
     expect(buf.subarray(0, 2).toString()).toBe("PK");
@@ -262,7 +262,7 @@ describe("generateReport", () => {
       .insert(schema.project)
       .values({ projectId: 2, displayNumber: 2, title: "Empty" });
 
-    const buf = await generateReport(2, testDb);
+    const buf = await generateReport(2, "all", testDb);
 
     expect(buf.subarray(0, 2).toString()).toBe("PK");
     expect(documentXmlIn(buf)).toContain("Empty");
@@ -272,7 +272,7 @@ describe("generateReport", () => {
   it("renders one table per inspection type with that type's columns", async () => {
     await seedMixedTypes();
 
-    const buf = await generateReport(1, testDb);
+    const buf = await generateReport(1, "all", testDb);
     const xml = documentXmlIn(buf);
 
     // one block per type on the target, each with its own heading
@@ -391,7 +391,7 @@ describe("generateReport", () => {
       remarks: "pi-remark",
     });
 
-    const xml = documentXmlIn(await generateReport(1, testDb));
+    const xml = documentXmlIn(await generateReport(1, "all", testDb));
 
     for (const type of ["CGB", "RISER", "CAISSON", "SEABED", "PIPELINE"]) {
       expect(xml).toContain(`${type} Results`);
@@ -423,8 +423,8 @@ describe("generateReport", () => {
     const tagsIn = (buf: Buffer) =>
       [...documentXmlIn(buf).matchAll(/<w:tag w:val="([^"]*)"\/>/g)].map((match) => match[1]!);
 
-    const first = await generateReport(1, testDb);
-    const second = await generateReport(1, testDb);
+    const first = await generateReport(1, "all", testDb);
+    const second = await generateReport(1, "all", testDb);
 
     // a picture region plus a table region per section: GVI, CVI and MGI on the
     // description target, and the second result's GVI on the part-code target
@@ -447,7 +447,7 @@ describe("generateReport", () => {
   it("ends every region with its table, so the paragraph behind it is the user's", async () => {
     await seedMixedTypes();
 
-    const xml = documentXmlIn(await generateReport(1, testDb));
+    const xml = documentXmlIn(await generateReport(1, "all", testDb));
 
     // docxtemplater inserts a paragraph behind a table that closes a region,
     // since it cannot see the content control. The render removes it, which is
@@ -461,6 +461,6 @@ describe("generateReport", () => {
   }, 20_000);
 
   it("rejects an unknown project", async () => {
-    await expect(generateReport(999, testDb)).rejects.toThrow();
+    await expect(generateReport(999, "all", testDb)).rejects.toThrow();
   });
 });

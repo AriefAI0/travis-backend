@@ -15,7 +15,7 @@ import { AppError } from "../../lib/error";
 import { parseBody, parseId, parseUuid } from "../../lib/parse";
 import { ok } from "../../lib/response";
 import { convertDocxToPdf } from "../../lib/pdf/convert";
-import { reportNameSchema } from "../../types/api";
+import { reportCreateSchema, reportNameSchema } from "../../types/api";
 import { queueReportGeneration } from "./generate";
 import { refreshReport } from "./refresh";
 
@@ -97,8 +97,8 @@ export const reportRoutes = (database?: DbOrTx) => {
     const projectId = parseId(c, "projectId");
     await requireProject(projectId);
 
-    const { name } = await parseBody(c, reportNameSchema);
-    const report = await queueReportGeneration(projectId, name, database);
+    const { name, scope } = await parseBody(c, reportCreateSchema);
+    const report = await queueReportGeneration(projectId, name, scope ?? "all", database);
 
     return ok(c, reportListItem(report), 202);
   });

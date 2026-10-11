@@ -148,6 +148,30 @@ export function resultEvidenceStem(input: ResultEvidenceStemInput): string {
   return `${root}/results/${results}/${EVIDENCE_FOLDER}`;
 }
 
+// folder for a restricted-access mark's evidence, under the project alone
+export const RA_FOLDER = "ra";
+
+export interface RaEvidenceStemInput {
+  projectNumber: number;
+  projectTitle: string;
+  // an RA mark has no session, so the project folder carries the mark's own date
+  markedAt: Date;
+  itemLabel: string;
+}
+
+// RA evidence hangs off the project folder: no session and no clip to sit beside.
+// The mark's date fixes the folder; the image row freezes the stem at ticket time.
+export function raEvidenceStem(input: RaEvidenceStemInput): string {
+  const root = projectFolder({
+    projectNumber: input.projectNumber,
+    projectTitle: input.projectTitle,
+    displayNumber: 0,
+    startEpoch: Math.floor(input.markedAt.getTime() / 1000),
+  });
+
+  return `${root}/${RA_FOLDER}/${slugify(input.itemLabel)}/${EVIDENCE_FOLDER}`;
+}
+
 // raw and annotated twins of one image, minted from a stored stem.
 // A readable stem names the file by its id. A legacy numeric stem keeps the
 // names already on disk, so every image uploaded before this change resolves.
