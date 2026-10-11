@@ -17,11 +17,15 @@ COPY scripts ./scripts
 # migrate_log names the broken connection; --force auto-accepts push statements
 CMD ["sh", "-c", "bun scripts/migrate_log.ts && bunx drizzle-kit push --force"]
 
-# runtime: bun + ffmpeg (ffprobe ships with the ffmpeg package)
+# runtime: bun + ffmpeg (ffprobe ships with the ffmpeg package) + LibreOffice
+# (the report PDF converter) + Carlito, metric-compatible with the absent Calibri
 FROM oven/bun:1.3-debian AS runtime
 USER root
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg \
+  && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libreoffice-writer \
+    fonts-crosextra-carlito \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules

@@ -14,26 +14,30 @@ import {
 import { AppError } from "../../lib/error";
 import { parseBody, parseId, parseUuid } from "../../lib/parse";
 import { ok } from "../../lib/response";
+import { convertDocxToPdf } from "../../lib/pdf/convert";
 import { reportNameSchema } from "../../types/api";
 import { queueReportGeneration } from "./generate";
+
+const PDF_MIME = "application/pdf";
 
 // A docx is a zip, and the editor refuses anything else — so does this.
 const isZip = (bytes: Uint8Array): boolean => bytes[0] === 0x50 && bytes[1] === 0x4b;
 
 // The name is user text, so anything outside a safe set drops out. A quote or a
 // newline in a header splits the response.
-const docxFilename = (name: string, reportId: string) => {
+const attachmentFilename = (name: string, reportId: string, extension: string) => {
   const safe = name.replace(/[^A-Za-z0-9 ._-]/g, "").trim();
-  return `${safe || `report-${reportId}`}.docx`;
+  return `${safe || `report-${reportId}`}.${extension}`;
 };
 
-const docxResponse = (c: Context, bytes: Uint8Array, filename: string) => {
+// The bytes leave as a download, never as a page the browser renders.
+const attachmentResponse = (c: Context, bytes: Uint8Array, filename: string, mime: string) => {
   // copy into an exactly-sized ArrayBuffer so the body type stays honest
   const buffer = new Uint8Array(bytes.byteLength);
   buffer.set(bytes);
 
   return c.body(buffer.buffer, 200, {
-    "content-type": DOCX_MIME,
+    "content-type": mime,
     "content-disposition": `attachment; filename="${filename}"`,
     "cache-control": "no-store",
   });
@@ -106,7 +110,26 @@ export const reportRoutes = (database?: DbOrTx) => {
     }
 
     const docx = new Uint8Array(await loadReportDocx(reportId, database));
-    return docxResponse(c, docx, docxFilename(status.name, reportId));
+    return attachmentResponse(
+      c,
+      docx,
+      attachmentFilename(status.name, reportId, "docx"),
+      DOCX_MIME,
+    );
+  });
+
+  // The printable copy of the same stored document, rendered off-process. The
+  // editor has no exporter, so this is where a PDF comes from.
+  routes.get("/api/v1/reports/:reportId/pdf", async (c) => {
+    const reportId = parseUuid(c, "reportId");
+
+    const status = await getReportStatus(reportId, database);
+    if (status.status === "generating") {
+      throw new AppError(409, "report_not_ready", "The report is still generating");
+    }
+
+    const pdf = await convertDocxToPdf(new Uint8Array(await loadReportDocx(reportId, database)));
+    return attachmentResponse(c, pdf, attachmentFilename(status.name, reportId, "pdf"), PDF_MIME);
   });
 
   // the browser editor's save path

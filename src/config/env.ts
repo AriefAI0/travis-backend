@@ -22,6 +22,10 @@ const schema = z.object({
   PLAYBACK_TOKEN_SECRET: z
     .string()
     .min(32, { message: "must be at least 32 characters" }),
+  // The report PDF converter. One run at a time, and one run may not outlive
+  // the timeout below.
+  SOFFICE_PATH: z.string().min(1).default("soffice"),
+  PDF_CONVERT_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
   FFMPEG_CONCURRENCY: z.coerce.number().int().positive().default(1),
   // One FFmpeg run may not outlive this. A hung encoder is killed, never
