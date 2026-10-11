@@ -1483,6 +1483,9 @@ export type ReportListItem = {
   reportId: string;
   name: string;
   status: ReportStatus;
+  // The scope the document was generated with. The app sends it back on a
+  // retry, so a failed anomaly report cannot come back as a full one.
+  scope: ReportScope;
   // set only while status is "error"
   errorDetail: string | null;
   // bumped on every write of the stored document; the editor sends it back

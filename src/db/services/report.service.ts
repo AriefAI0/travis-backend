@@ -52,6 +52,7 @@ export const reportListItem = (row: ReportRow): ReportListItem => ({
   reportId: row.reportId,
   name: row.name,
   status: row.status as ReportStatus,
+  scope: row.scope as ReportScope,
   errorDetail: row.errorDetail,
   version: row.version,
   createdAt: row.createdAt.toISOString(),
