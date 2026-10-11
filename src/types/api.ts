@@ -708,6 +708,7 @@ export type ResultFormState = {
   sessionId: number | null;
   masterEndMs: number | null;
   submittedPayload: unknown;
+  resultClass: "normal" | "anomaly";
 };
 
 /* =========================================================
@@ -1058,6 +1059,8 @@ export const stopInspectionSchema = z.object({
   payload: z.unknown(),
   customValues: z.record(z.string(), z.unknown()).optional(),
   masterEndMs: z.number().int().nonnegative(),
+  // result-level class; omitted keeps the column default
+  resultClass: z.enum(["normal", "anomaly"]).optional(),
   // validate everything a real stop would, then write nothing
   dryRun: z.boolean().optional(),
 });

@@ -12,9 +12,16 @@ import { json } from "../../helpers/json";
 import { inspectionRoutes } from "../../../src/features/inspections/routes";
 import { inspectionFormRoutes } from "../../../src/features/inspection-forms/routes";
 import { projectRoutes } from "../../../src/features/projects/routes";
+import { resultRoutes } from "../../../src/features/results/routes";
 import * as schema from "../../../src/db/schema";
 
-const app = appFor(testDb, inspectionRoutes, inspectionFormRoutes, projectRoutes);
+const app = appFor(
+  testDb,
+  inspectionRoutes,
+  inspectionFormRoutes,
+  projectRoutes,
+  resultRoutes,
+);
 
 const post = async (path: string, body: unknown) =>
   app.request(path, {
@@ -227,6 +234,102 @@ describe("inspections routes", () => {
     });
     expect(row?.submittedPayload).toEqual(GVI_PAYLOAD);
     expect(row?.remarks).toBe("seen from the deck");
+  });
+
+  it("stores the submit-time result class and defaults an omitted one to normal", async () => {
+    await seedWorld();
+
+    const anomaly = await startInspection({});
+    const anomalyId = (await json(anomaly)).data.resultId as number;
+    const stopped = await post(`/api/v1/inspections/${anomalyId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 5000,
+      resultClass: "anomaly",
+    });
+    expect(stopped.status).toBe(200);
+
+    const anomalyRow = await testDb.query.result.findFirst({
+      where: eq(schema.result.resultId, anomalyId),
+    });
+    expect(anomalyRow?.resultClass).toBe("anomaly");
+
+    // an omitted class keeps the column default, so every existing caller holds
+    const plain = await startInspection({ layer: 2, descriptionId: undefined, partCodeId: 60 });
+    const plainId = (await json(plain)).data.resultId as number;
+    const plainStop = await post(`/api/v1/inspections/${plainId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 6000,
+    });
+    expect(plainStop.status).toBe(200);
+
+    const plainRow = await testDb.query.result.findFirst({
+      where: eq(schema.result.resultId, plainId),
+    });
+    expect(plainRow?.resultClass).toBe("normal");
+  });
+
+  it("rejects an unknown result class", async () => {
+    await seedWorld();
+    const started = await startInspection({});
+    const resultId = (await json(started)).data.resultId as number;
+
+    const res = await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 5000,
+      resultClass: "critical",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("validates the class on a dry run without writing it", async () => {
+    await seedWorld();
+    const started = await startInspection({});
+    const resultId = (await json(started)).data.resultId as number;
+
+    const bad = await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 5000,
+      resultClass: "critical",
+      dryRun: true,
+    });
+    expect(bad.status).toBe(400);
+
+    const pass = await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 5000,
+      resultClass: "anomaly",
+      dryRun: true,
+    });
+    expect(pass.status).toBe(200);
+
+    const untouched = await testDb.query.result.findFirst({
+      where: eq(schema.result.resultId, resultId),
+    });
+    expect(untouched?.resultClass).toBe("normal");
+    expect(untouched?.masterEndMs).toBeNull();
+  });
+
+  // Continue prefills from this read, so the class must ride it
+  it("returns the stored class on the form-state read", async () => {
+    await seedWorld();
+    const started = await startInspection({});
+    const resultId = (await json(started)).data.resultId as number;
+    await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 5000,
+      resultClass: "anomaly",
+    });
+
+    const res = await app.request(`/api/v1/results/${resultId}/form-state`);
+    expect(res.status).toBe(200);
+    const state = (await json(res)).data as Record<string, any>;
+    expect(state.resultClass).toBe("anomaly");
   });
 
   it("dry-run fails exactly where the real stop fails, and writes nothing", async () => {

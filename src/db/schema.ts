@@ -448,6 +448,9 @@ export const plannedInspection = pgTable(
 /* =========================================================
    RESULT (CORE FACT TABLE)
 ========================================================= */
+// result-level classification, chosen by the operator at submit
+export const resultClass = pgEnum("result_class", ["normal", "anomaly"]);
+
 export const result = pgTable(
   "result",
   {
@@ -462,6 +465,9 @@ export const result = pgTable(
     // mirrors type = 'RA' for the unique indexes below: a partial index
     // predicate cannot use an enum value added in the same migration txn
     isRa: boolean("is_ra").notNull().default(false),
+
+    // normal | anomaly, chosen at submit. Legacy rows and RA rows stay normal.
+    resultClass: resultClass("result_class").notNull().default("normal"),
 
     // target: description XOR part_code (check below)
     descriptionId: integer("description_id").references(() => description.descriptionId, {
@@ -508,6 +514,11 @@ export const result = pgTable(
     idxResultSessionLayer: index("idx_result_session_layer").on(table.sessionId, table.layer),
     idxResultInspectionTypeCode: index("idx_result_inspection_type_code").on(
       table.inspectionTypeCode
+    ),
+    // the anomaly report filters exactly this pair
+    idxResultProjectClass: index("idx_result_project_class").on(
+      table.projectId,
+      table.resultClass
     ),
     resultTargetCheck: check(
       "result_target_check",
