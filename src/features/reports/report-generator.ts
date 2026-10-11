@@ -10,6 +10,7 @@ import {
   type ReportSection,
   type ReportTemplateData,
 } from "../../db/services/report-data.service";
+import { findRegions } from "../../lib/docx/regions";
 import { sectionRegionTags } from "./report-layout";
 import type { ReportScope } from "../../types/api";
 
@@ -194,6 +195,38 @@ const tagRegions = (xml: string, regions: string[]): string => {
   });
 };
 
+// A region's name says what it holds: `...:GVI:1` is the block whose heading
+// reads "GVI Results".
+//
+// Word keeps a tag where it is when a user drags a block somewhere else, so a
+// moved block leaves its tag on a neighbour's content. The render would look
+// fine, and the next refresh would then write one type's rows under another
+// type's heading. This rule catches every such move: whichever block inherits a
+// type's name holds the wrong heading, and a picture block dragged into the type
+// blocks inherits one too.
+// flow: read each tagged region > check its name against its content
+const assertRegionAnchors = (xml: string): void => {
+  for (const region of findRegions(xml)) {
+    const content = xml.slice(region.contentStart, region.contentEnd);
+    const parts = region.tag.split(":");
+    const slot = parts.pop();
+
+    if (slot === "picture") continue;
+
+    // only the first table of a type carries its heading
+    if (slot !== "1") continue;
+
+    const type = parts.pop();
+    if (!content.includes(`${type} Results`)) {
+      throw new AppError(
+        500,
+        "region_order_mismatch",
+        `Region ${region.tag} holds no "${type} Results" heading. The template's blocks were moved.`,
+      );
+    }
+  }
+};
+
 // docxtemplater cannot see a content control, so a table that closes a region
 // looks to it like a table ending a block, and its `joinUncorrupt` step inserts
 // a paragraph behind it — inside the region, where the next refresh would
@@ -286,6 +319,7 @@ export const renderReport = async (
     // one tag per picture and per table, in the order the template renders them
     const regions = sections.flatMap((section) => sectionRegionTags(section));
     const named = tagRegions(page.asText() as string, regions);
+    assertRegionAnchors(named);
     zip.file("word/document.xml", renumberDrawingIds(dropInsertedGaps(named)));
   }
 

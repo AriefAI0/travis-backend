@@ -188,6 +188,43 @@ const patchedTemplate = (template: Buffer, paragraph: string) => {
   return zip.generate({ type: "nodebuffer" }) as Buffer;
 };
 
+// The bundled template with its document rewritten. Word keeps a region's tag
+// where it is when a user drags a block somewhere else, so this is how a moved
+// block reaches the renderer.
+const mapTemplate = (template: Buffer, transform: (xml: string) => string) => {
+  const zip = new PizZip(template);
+  const xml = zip.file("word/document.xml").asText() as string;
+  zip.file("word/document.xml", transform(xml));
+
+  return zip.generate({ type: "nodebuffer" }) as Buffer;
+};
+
+// Swap the picture's region with the type's, the way a user drags one block
+// past another. Every tag stays where the parser wrote it, so the picture's
+// name now sits on the type's table and the type's name on the picture.
+// The template's regions all sit side by side, so their ends pair in order.
+const swappedRegionsTemplate = (template: Buffer) =>
+  mapTemplate(template, (xml) => {
+    const open = "<w:sdt>";
+    const close = "</w:sdt>";
+    const bounds = (from: number) => {
+      const start = xml.indexOf(open, from);
+      return [start, xml.indexOf(close, start) + close.length] as const;
+    };
+
+    const [firstStart, firstEnd] = bounds(0);
+    const [secondStart, secondEnd] = bounds(firstEnd);
+    if (firstStart < 0 || secondStart < 0) throw new Error("the template holds fewer than two blocks");
+
+    return (
+      xml.slice(0, firstStart) +
+      xml.slice(secondStart, secondEnd) +
+      xml.slice(firstEnd, secondStart) +
+      xml.slice(firstStart, firstEnd) +
+      xml.slice(secondEnd)
+    );
+  });
+
 const run = (text: string) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`;
 
 describe("template faults", () => {
@@ -218,6 +255,25 @@ describe("template faults", () => {
     const patched = patchedTemplate(template, run("{/never_opened}"));
 
     await expect(renderReport(patched, data)).rejects.toThrow(/never_opened/);
+  }, 20_000);
+
+  it("rejects a template whose picture block moved under a type's name", async () => {
+    await seed();
+    const { template, data } = await loadReportInputs(1, "all", testDb);
+
+    // the rendered document would look right, and a refresh would then write
+    // the wrong content into the region the picture's name points at
+    await expect(renderReport(swappedRegionsTemplate(template), data)).rejects.toThrow(
+      /holds no "GVI Results" heading/,
+    );
+  }, 20_000);
+
+  it("rejects a template whose type heading was renamed", async () => {
+    await seed();
+    const { template, data } = await loadReportInputs(1, "all", testDb);
+    const renamed = mapTemplate(template, (xml) => xml.replace("GVI Results", "GVI Summary"));
+
+    await expect(renderReport(renamed, data)).rejects.toThrow(/GVI Results/);
   }, 20_000);
 });
 
