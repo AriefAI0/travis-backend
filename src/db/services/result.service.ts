@@ -1246,6 +1246,8 @@ case "PIPELINE": {
       resultRecord.inspectionTypeCode,
       detailFor(resultRecord),
     ),
+    resultClass: resultRecord.resultClass,
+    isRa: resultRecord.isRa,
   }));
 };
 

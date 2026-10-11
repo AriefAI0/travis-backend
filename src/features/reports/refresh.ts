@@ -36,7 +36,7 @@ export const refreshReport = async (
 
   await setReportStatus(reportId, "generating", null, database);
   try {
-    const { template, data } = await loadReportInputs(row.projectId, database);
+    const { template, data } = await loadReportInputs(row.projectId, row.scope, database);
     const fresh = await renderReport(template, data);
     const { docx, result } = spliceRegions(stored, fresh);
 

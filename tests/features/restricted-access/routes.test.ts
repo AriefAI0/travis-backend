@@ -24,6 +24,13 @@ const list = () => app.request("/api/v1/projects/1/restricted-access");
 const remove = (id: number) =>
   app.request(`/api/v1/restricted-access/${id}`, { method: "DELETE" });
 
+const patch = (id: number, body: unknown) =>
+  app.request(`/api/v1/restricted-access/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
 // one chain: project > group > task code > description > type > part code
 const seedTree = async () => {
   await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
@@ -110,5 +117,32 @@ describe("restricted access", () => {
 
     const res = await remove(500);
     expect(res.status).toBe(404);
+  });
+
+  it("edits the remarks of a mark, and clears them with null", async () => {
+    const created = await json(await post({ projectId: 1, descriptionId: 100 }));
+    const resultId = created.data.resultId as number;
+
+    const edited = await patch(resultId, { remarks: "blocked by mattress" });
+    expect(edited.status).toBe(200);
+    expect((await json(edited)).data.remarks).toBe("blocked by mattress");
+
+    const cleared = await patch(resultId, { remarks: null });
+    expect(cleared.status).toBe(200);
+    expect((await json(cleared)).data.remarks).toBeNull();
+  });
+
+  it("refuses a remarks edit through a real result, and an unknown id", async () => {
+    await testDb.insert(schema.result).values({
+      resultId: 501,
+      inspectionTypeCode: "GVI",
+      projectId: 1,
+      sessionId: null,
+      descriptionId: 100,
+      displayNumber: 0,
+    });
+
+    expect((await patch(501, { remarks: "nope" })).status).toBe(404);
+    expect((await patch(9999, { remarks: "nope" })).status).toBe(404);
   });
 });

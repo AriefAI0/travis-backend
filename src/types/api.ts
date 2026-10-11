@@ -594,6 +594,9 @@ export type ProjectResultSummaryRow = {
   partCodeId: number | null;
   remarks: string | null;
   resultValue: string;
+  // the anomaly report filters on the class; both reports drop RA marks
+  resultClass: "normal" | "anomaly";
+  isRa: boolean;
 };
 
 // one finding row of a PIPELINE summary
@@ -1491,3 +1494,17 @@ export type ReportListItem = {
 // POST /api/v1/projects/:projectId/reports and PATCH /api/v1/reports/:reportId
 // take one shape: the user-facing document name
 export const reportNameSchema = z.object({ name: z.string().trim().min(1).max(200) });
+
+// Which results a report gathers. `anomaly` keeps only anomaly-class results;
+// RA marks are excluded from both.
+export type ReportScope = "all" | "anomaly";
+
+export const reportCreateSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  scope: z.enum(["all", "anomaly"]).optional(),
+});
+
+// Remarks-only edit on an RA mark. An empty string clears them, like a null.
+export const updateRestrictedAccessSchema = z.object({
+  remarks: z.string().nullable().optional(),
+});

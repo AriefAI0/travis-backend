@@ -356,4 +356,54 @@ describe("evidence image routes", () => {
     expect(data.images[0].url).toContain("travis-media");
     expect(data.clips).toEqual([]);
   });
+
+  // An RA mark has no session and no clip, so its evidence hangs off the project
+  // folder alone. The date is the mark's own row, which is why it is read back.
+  it("an RA mark takes evidence under the project folder, with no session", async () => {
+    await seedResultContext();
+    await testDb.insert(schema.result).values({
+      displayNumber: 0,
+      resultId: 6001,
+      inspectionTypeCode: "RA",
+      isRa: true,
+      descriptionId: 100,
+      projectId: 1,
+      sessionId: null,
+    });
+
+    const res = await app.request("/api/v1/results/6001/images", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contentType: "image/png" }),
+    });
+    expect(res.status).toBe(201);
+
+    const { data } = await json<{ data: Ticket }>(res);
+    const mark = await testDb.query.result.findFirst({
+      where: eq(schema.result.resultId, 6001),
+    });
+    const day = mark!.createdAt.toISOString().slice(0, 10);
+    expect(data.storageStem).toBe(`1-alpha-${day}/ra/jl-01/evidence-img`);
+    expect(data.url).toContain(`${data.storageStem}/${data.imageId}.png`);
+  });
+
+  // The RA branch must not open the door for every sessionless row.
+  it("a sessionless non-RA result still refuses an evidence image", async () => {
+    await seedResultContext();
+    await testDb.insert(schema.result).values({
+      displayNumber: 0,
+      resultId: 6002,
+      inspectionTypeCode: "GVI",
+      descriptionId: 100,
+      projectId: 1,
+      sessionId: null,
+    });
+
+    const res = await app.request("/api/v1/results/6002/images", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contentType: "image/png" }),
+    });
+    expect(res.status).toBe(409);
+  });
 });

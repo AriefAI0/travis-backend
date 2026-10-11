@@ -1335,6 +1335,8 @@ export const recordingIngestSegment = pgTable(
    readable. status flips generating > ready, or > error with the reason.
 ========================================================= */
 export const reportStatus = pgEnum("report_status", ["generating", "ready", "error"]);
+// all results, or anomaly-class results only
+export const reportScope = pgEnum("report_scope", ["all", "anomaly"]);
 
 export const report = pgTable(
   "report",
@@ -1355,6 +1357,9 @@ export const report = pgTable(
     name: text("name").notNull(),
     minioKey: text("minio_key").notNull(),
     status: reportStatus("status").notNull().default("generating"),
+    // Frozen on the row: a refresh re-renders the scope the document was
+    // generated with, never a different one.
+    scope: reportScope("scope").notNull().default("all"),
     errorDetail: text("error_detail"),
 
     // Bumped on every write of the stored document. The editor sends the

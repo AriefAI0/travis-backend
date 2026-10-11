@@ -11,6 +11,7 @@ import {
   type ReportTemplateData,
 } from "../../db/services/report-data.service";
 import { sectionRegionTags } from "./report-layout";
+import type { ReportScope } from "../../types/api";
 
 // All three ship CommonJS only, so one require form covers them. The image
 // module must be required by its installed name: the older
@@ -25,8 +26,9 @@ const ImageModule = require("docxtemplater-image-module-free");
 const MAX_WIDTH_PX = 480;
 const MAX_HEIGHT_PX = 360;
 
-// Candidates per section: the evidence image, then the clip still.
-const MAX_CANDIDATES = 2;
+// Candidates per section: the evidence image alone. A clip still is a
+// placeholder, not evidence, so a section with no image renders no frame.
+const MAX_CANDIDATES = 1;
 
 // One picture, ready for the page.
 type ReportPicture = { data: Buffer; width: number; height: number };
@@ -292,10 +294,14 @@ export const renderReport = async (
 
 // A project's template and data. Both report paths start here, so the template
 // lookup and its bundled fallback stay in one place.
-export const loadReportInputs = async (projectId: number, database?: DbOrTx) => {
+export const loadReportInputs = async (
+  projectId: number,
+  scope: ReportScope = "all",
+  database?: DbOrTx,
+) => {
   const [template, data] = await Promise.all([
     loadTemplate(projectId),
-    gatherReportData(projectId, database),
+    gatherReportData(projectId, scope, database),
   ]);
 
   return { template, data };
@@ -304,8 +310,9 @@ export const loadReportInputs = async (projectId: number, database?: DbOrTx) => 
 // Render a project's report in this process.
 export const generateReport = async (
   projectId: number,
+  scope: ReportScope = "all",
   database?: DbOrTx,
 ): Promise<Buffer> => {
-  const { template, data } = await loadReportInputs(projectId, database);
+  const { template, data } = await loadReportInputs(projectId, scope, database);
   return renderReport(template, data);
 };
