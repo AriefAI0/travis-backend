@@ -19,9 +19,9 @@ import { findProjectById } from "../../db/repositories/project.repository";
 import {
   createVideoClipRecord,
   findVideoClipById,
-  listVideoClipRecordsByResultId,
 } from "../../db/repositories/video-clip.repository";
-import { findResultById } from "../../db/repositories/result.repository";
+import { findResultById, lockResultRow } from "../../db/repositories/result.repository";
+import { findOpenClipIngestByResultId } from "../../db/repositories/recording-ingest.repository";
 import { resolveTargetLabel } from "../../db/services/task-structure.service";
 import { createSession } from "../../db/services/session.service";
 import { enqueueClipStill, enqueueThumbnails } from "./jobs/thumbnails";
@@ -137,10 +137,13 @@ const admitMaster = async (
   };
 };
 
-// flow: result + session checks > clip row (one per result) > open-ingest check > ingest row
+// flow: result + session checks > open-ingest guard > clip row > ingest row
 const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmission> => {
   const result = await findResultById(input.resultId, tx);
   if (!result) throw notFound("Result");
+  // serializes admission per result: the open-ingest guard below cannot lock a
+  // row that does not exist yet, so two concurrent takes would both pass it
+  await lockResultRow(input.resultId, tx);
 
   const session = await findSessionById(input.sessionId, tx);
   if (!session) throw notFound("Session");
@@ -151,23 +154,23 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
   // the target label names the clip folder
   const targetLabel = await resolveTargetLabel(result, tx);
 
-  // uq_video_clip_result_id: one clip per result, so a re-record reuses the row
-  const [existing] = await listVideoClipRecordsByResultId(input.resultId, tx);
-  const clip =
-    existing ??
-    (await createVideoClipRecord(
-      {
-        resultId: input.resultId,
-        sessionId: input.sessionId,
-        startOffsetMs: input.startOffsetMs,
-      },
-      tx,
-    ))!;
-
-  const open = await findOpenIngestByClip(clip.clipId, tx);
+  // one live capture per result: the app stops the old clip before restarting,
+  // so an open ingest here is a genuine conflict
+  const open = await findOpenClipIngestByResultId(input.resultId, tx);
   if (open) {
-    throw new AppError(409, "recording_in_progress", "Clip already has an open ingest");
+    throw new AppError(409, "recording_in_progress", "Result already has an open ingest");
   }
+
+  // one clip row per admission: a restart inside the same result mints a new
+  // row, so the two takes never share segments or offsets
+  const clip = (await createVideoClipRecord(
+    {
+      resultId: input.resultId,
+      sessionId: input.sessionId,
+      startOffsetMs: input.startOffsetMs,
+    },
+    tx,
+  ))!;
 
   // frozen here, from the master's start: never the clip's own wall clock
   const keyPrefix = buildClipKeyPrefix({
@@ -178,6 +181,7 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
     resultNumber: result.displayNumber,
     itemLabel: targetLabel,
     inspectionType: result.inspectionTypeCode,
+    clipId: clip.clipId,
   });
 
   return {
@@ -252,16 +256,6 @@ const loadDomain = async (
     projectId: result.projectId,
   };
 };
-
-// the partial unique index is the race guard; this read gives the clear 409 first
-export const findOpenIngestByClip = async (clipId: number, database: DbOrTx = db) =>
-  (await database.query.recordingIngest.findFirst({
-    where: and(
-      eq(recordingIngest.clipId, clipId),
-      isNull(recordingIngest.closedAt),
-      eq(recordingIngest.kind, "clip"),
-    ),
-  })) ?? null;
 
 // single attempt by contract: a lost response leaves one empty row for the sweep
 export const admitIngest = async (

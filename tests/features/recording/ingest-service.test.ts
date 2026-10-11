@@ -11,6 +11,7 @@ import {
 import * as schema from "../../../src/db/schema";
 import {
   admitIngest,
+  closeIngest,
   hashTicket,
   parseSegmentContentLength,
   parseSegmentHeaders,
@@ -187,11 +188,11 @@ describe("direct ingest admission", () => {
     // the clip inherits the master's key date, not its own wall clock
     expect(ingest!.keyDate).toBe("2026-09-20");
     // and its folder nests under the same session root, naming the item. The
-    // number is the RESULT's ordinal (9200 here), never the clip's own id.
+    // number is the RESULT's ordinal (9200 here), never the clip's own id; the
+    // clip id names the take, so a restart never lands on the same keys.
     expect(ingest!.keyPrefix).toBe(
-      "9200-p-2026-09-20/session-2-2026-09-20-2359/clips/9200-i-gvi",
+      `9200-p-2026-09-20/session-2-2026-09-20-2359/clips/9200-i-gvi/clip-${clip.domain.clipId}`,
     );
-    expect(ingest!.keyPrefix).not.toContain(`/${clip.domain.clipId}-i-gvi`);
   });
 
   test("a second clip admission is refused while the first ingest stays open", async () => {
@@ -210,11 +211,70 @@ describe("direct ingest admission", () => {
     await admitIngest(body, testDb);
     await expect(admitIngest(body, testDb)).rejects.toThrow(/open ingest/i);
 
-    // one clip row per result survives the refusal
+    // admission is one tx, so the refusal takes its clip row with it
     const clips = await testDb.select().from(schema.videoClip);
     expect(clips).toHaveLength(1);
     const ingests = await testDb.select().from(schema.recordingIngest);
     expect(ingests).toHaveLength(2); // master + clip, never a third
+  });
+
+  test("a second admission after the first closes mints its own clip row and keys", async () => {
+    const master = await admitIngest(
+      { kind: "master", projectId: 9200, startEpoch: LATE_NIGHT_EPOCH },
+      testDb,
+    );
+    if (master.domain.kind !== "master") throw new Error("expected a master domain");
+    const body = {
+      kind: "clip" as const,
+      resultId: 9200,
+      sessionId: master.domain.sessionId,
+      startOffsetMs: 4000,
+    };
+
+    // both takes capture segment zero, the way a restart does
+    const puts: { key: string; body: Uint8Array }[] = [];
+    const storage: SegmentStorage = {
+      put: async (_bucket, key, bytes) => {
+        puts.push({ key, body: bytes });
+      },
+    };
+    const bodyA = segmentBody("a");
+    const bodyB = segmentBody("b");
+
+    const first = await admitIngest(body, testDb);
+    await storeIngestSegment(
+      { ...segmentRequest(first.ingestId, first.ticket, 0, bodyA), storage },
+      testDb,
+    );
+    await closeIngest({ ingestId: first.ingestId, ticket: first.ticket }, testDb);
+    const second = await admitIngest({ ...body, startOffsetMs: 90_000 }, testDb);
+    await storeIngestSegment(
+      { ...segmentRequest(second.ingestId, second.ticket, 0, bodyB), storage },
+      testDb,
+    );
+
+    if (first.domain.kind !== "clip" || second.domain.kind !== "clip") {
+      throw new Error("expected clip domains");
+    }
+    expect(second.domain.clipId).not.toBe(first.domain.clipId);
+    expect(await testDb.select().from(schema.videoClip)).toHaveLength(2);
+
+    // Distinct object keys with each take's own bytes: row counts alone pass
+    // while take 1 plays take 2's segments, so this asserts the bytes.
+    expect(puts).toHaveLength(2);
+    expect(puts[0]!.key).not.toBe(puts[1]!.key);
+    expect(puts[0]!.body).toEqual(bodyA);
+    expect(puts[1]!.body).toEqual(bodyB);
+
+    const rows = await testDb.select().from(schema.recordingIngestSegment);
+    const keyByIngest = new Map(rows.map((row) => [row.ingestId, row.objectKey]));
+    expect(keyByIngest.get(first.ingestId)).toBe(puts[0]!.key);
+    expect(keyByIngest.get(second.ingestId)).toBe(puts[1]!.key);
+
+    const prefixes = (await testDb.select().from(schema.recordingIngest))
+      .filter((row) => row.kind === "clip")
+      .map((row) => row.keyPrefix);
+    expect(new Set(prefixes).size).toBe(2);
   });
 
   test("the raw ticket reaches no column — only its digest", async () => {

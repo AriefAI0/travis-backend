@@ -72,8 +72,25 @@ describe("readable key prefixes", () => {
         resultNumber: 455,
         itemLabel: "Anode 14",
         inspectionType: "GVI",
+        clipId: 88,
       }),
-    ).toBe(`${SESSION_ROOT}/clips/455-anode-14-gvi`);
+    ).toBe(`${SESSION_ROOT}/clips/455-anode-14-gvi/clip-88`);
+  });
+
+  // one result can hold several takes: each admission needs its own key space,
+  // or take 2 PUTs straight over take 1's segments
+  test("each admission gets its own folder, so two takes never share keys", () => {
+    const take = (clipId: number) =>
+      buildClipKeyPrefix({
+        ...PROJECT,
+        resultNumber: 455,
+        itemLabel: "Anode 14",
+        inspectionType: "GVI",
+        clipId,
+      });
+
+    expect(take(88)).not.toBe(take(89));
+    expect(take(89)).toBe(`${SESSION_ROOT}/clips/455-anode-14-gvi/clip-89`);
   });
 
   test("an empty part drops out instead of leaving a double dash", () => {
@@ -86,8 +103,9 @@ describe("readable key prefixes", () => {
         resultNumber: 455,
         itemLabel: "",
         inspectionType: "GVI",
+        clipId: 88,
       }),
-    ).toBe(`${SESSION_ROOT}/clips/455-gvi`);
+    ).toBe(`${SESSION_ROOT}/clips/455-gvi/clip-88`);
   });
 
   test("dates and times are UTC, so a local reading never leaks in", () => {

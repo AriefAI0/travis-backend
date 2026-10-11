@@ -56,6 +56,19 @@ export const findResultById = async (
     where: eq(result.resultId, resultId),
   })) ?? null;
 
+/**
+ * Same read, holding the row lock: admission serializes per result on it, so
+ * two concurrent takes cannot both pass the open-ingest guard.
+ */
+export const lockResultRow = async (resultId: number, database: DbOrTx = db) =>
+  (
+    await database
+      .select({ resultId: result.resultId })
+      .from(result)
+      .where(eq(result.resultId, resultId))
+      .for("update")
+  )[0] ?? null;
+
 /** Active results of one whole session (open-inspection listing). */
 export const listResultRecordsBySessionId = async (
   sessionId: number,

@@ -1,10 +1,10 @@
 // Data access for the direct ingest ledger. The playlist reader and the
 // playback-URL minter share these reads, so the visibility rule lives once.
 
-import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
-import { recordingIngest, recordingIngestSegment } from "../schema";
+import { recordingIngest, recordingIngestSegment, videoClip } from "../schema";
 
 export type IngestScope = { kind: "master" | "clip"; id: number };
 
@@ -34,6 +34,19 @@ export const listIngestRecordsByClipIds = async (
     .from(recordingIngest)
     .where(inArray(recordingIngest.clipId, clipIds))
     .orderBy(sql`${recordingIngest.closedAt} IS NULL DESC`, desc(recordingIngest.ingestId));
+
+// A result can hold several clip rows (one per admission), so the live capture
+// is found across all of them. Admission refuses while this returns a row.
+export const findOpenClipIngestByResultId = async (
+  resultId: number,
+  database: DbOrTx = db,
+) =>
+  (await database
+    .select({ ingestId: recordingIngest.ingestId })
+    .from(recordingIngest)
+    .innerJoin(videoClip, eq(videoClip.clipId, recordingIngest.clipId))
+    .where(and(eq(videoClip.resultId, resultId), isNull(recordingIngest.closedAt)))
+    .limit(1))[0] ?? null;
 
 // the ingest ids that hold a stored segment zero, in one query
 export const listFirstSegmentIngestIds = async (

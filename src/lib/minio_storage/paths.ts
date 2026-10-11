@@ -103,8 +103,8 @@ export function buildMasterKeyPrefix(input: KeyPrefixInput): string {
 }
 
 export interface ClipFolderInput {
-  // the RESULT's per-session ordinal: a clip is 1:1 with a result, so one
-  // number names both this folder and the result's evidence folder
+  // the RESULT's per-session ordinal: one result folder groups every take of
+  // that result, beside the result's own evidence folder
   resultNumber: number;
   itemLabel: string;
   inspectionType: string;
@@ -114,11 +114,17 @@ export interface ClipFolderInput {
 const clipFolder = (clip: ClipFolderInput): string =>
   joinParts([String(clip.resultNumber), slugify(clip.itemLabel), clip.inspectionType.toLowerCase()]);
 
-export interface ClipKeyPrefixInput extends KeyPrefixInput, ClipFolderInput {}
+export interface ClipKeyPrefixInput extends KeyPrefixInput, ClipFolderInput {
+  // The clip ROW id: one row per admission, so a restart inside the same result
+  // gets its own object-key space. Without it the second take would PUT over
+  // the first take's segments — every ingest numbers segments from 0, and the
+  // replay guard is per ingest, not per key.
+  clipId: number;
+}
 
-// same session root as the master, then the clip's own folder
+// same session root as the master, then the clip's result folder, then the take
 export function buildClipKeyPrefix(input: ClipKeyPrefixInput): string {
-  return `${projectFolder(input)}/${sessionFolder(input)}/clips/${clipFolder(input)}`;
+  return `${projectFolder(input)}/${sessionFolder(input)}/clips/${clipFolder(input)}/clip-${input.clipId}`;
 }
 
 // where an evidence image lives, frozen on its own row at ticket time

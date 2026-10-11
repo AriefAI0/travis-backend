@@ -46,7 +46,8 @@ export const listVideoClipRecordsByResultId = async (
 ) =>
   database.query.videoClip.findMany({
     where: eq(videoClip.resultId, resultId),
-    orderBy: asc(videoClip.startOffsetMs),
+    // oldest take first, so `.at(-1)` is the newest admission
+    orderBy: [asc(videoClip.startOffsetMs), asc(videoClip.clipId)],
   });
 
 /** Batched clip read across many results (bulk delete key collection). */

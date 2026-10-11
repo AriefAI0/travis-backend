@@ -328,33 +328,42 @@ export const listActiveBySessionId = async (
 
   const rows = await listActiveRows(sessionId, database);
 
-  const clipIdByResultId = new Map<number, number>();
+  // A result can hold one clip row per admission. The live take wins; with none
+  // open, the newest one does (the repo orders by startOffsetMs, then clipId).
+  // Playback picks the same way, so the stack and the player never disagree
+  // about which take a layer is showing.
+  const clipsByResultId = new Map<number, Awaited<ReturnType<typeof listVideoClipsByResultId>>>();
   for (const row of rows) {
-    const clip = (await listVideoClipsByResultId(row.resultId, database))[0];
-    if (clip) clipIdByResultId.set(row.resultId, clip.clipId);
+    clipsByResultId.set(row.resultId, await listVideoClipsByResultId(row.resultId, database));
   }
   const capturingClipIds = await listCapturingClipIds(
-    [...clipIdByResultId.values()],
+    [...clipsByResultId.values()].flat().map((clip) => clip.clipId),
     database,
   );
 
-  return rows.map((row) => {
-    const clipId = clipIdByResultId.get(row.resultId);
-    return {
-      resultId: row.resultId,
-      layer: row.layer!,
-      descriptionId: row.descriptionId,
-      partCodeId: row.partCodeId,
-      inspectionTypeCode: row.inspectionTypeCode,
-      remarks: row.remarks,
-      masterStartMs: row.masterStartMs,
-      createdAt: row.createdAt,
-      clip:
-        clipId === undefined
-          ? null
-          : { clipId, capturing: capturingClipIds.has(clipId) },
-    };
-  });
+  const clipByResultId = new Map<number, { clipId: number; capturing: boolean }>();
+  for (const [resultId, clips] of clipsByResultId) {
+    const live = clips.filter((clip) => capturingClipIds.has(clip.clipId)).at(-1);
+    const chosen = live ?? clips.at(-1);
+    if (chosen) {
+      clipByResultId.set(resultId, {
+        clipId: chosen.clipId,
+        capturing: live !== undefined,
+      });
+    }
+  }
+
+  return rows.map((row) => ({
+    resultId: row.resultId,
+    layer: row.layer!,
+    descriptionId: row.descriptionId,
+    partCodeId: row.partCodeId,
+    inspectionTypeCode: row.inspectionTypeCode,
+    remarks: row.remarks,
+    masterStartMs: row.masterStartMs,
+    createdAt: row.createdAt,
+    clip: clipByResultId.get(row.resultId) ?? null,
+  }));
 };
 
 /* ---------- session timeline: rows for the event table, markers for playback ---------- */

@@ -1189,7 +1189,7 @@ export const timelineThumbnail = pgTable(
 );
 
 /* =========================================================
-   VIDEO CLIP (one per result / inspection instance)
+   VIDEO CLIP (one per capture admission — a result may hold several)
 ========================================================= */
 export const videoClip = pgTable(
   "video_clip",
@@ -1213,7 +1213,7 @@ export const videoClip = pgTable(
       .defaultNow(),
   },
   (table) => ({
-    uqVideoClipResultId: uniqueIndex("uq_video_clip_result_id").on(table.resultId),
+    idxVideoClipResultId: index("idx_video_clip_result_id").on(table.resultId),
     idxVideoClipSessionId: index("idx_video_clip_session_id").on(table.sessionId),
   })
 );

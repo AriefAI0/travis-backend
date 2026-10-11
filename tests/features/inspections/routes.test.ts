@@ -293,6 +293,70 @@ describe("inspections routes", () => {
     expect(active.map((row) => row.layer).sort()).toEqual([1, 2]);
   });
 
+  // one clip row per admission: a restart leaves the older take behind, and the
+  // stack must point at the take that is actually on the wire
+  it("reports a restarted result's newest take, preferring a live one", async () => {
+    await seedWorld();
+    const started = await startInspection({});
+    const resultId = (await json(started)).data.resultId as number;
+
+    const seedTake = async (clipId: number, startOffsetMs: number, open: boolean) => {
+      await testDb.insert(schema.videoClip).values({
+        clipId,
+        resultId,
+        sessionId: 101,
+        startOffsetMs,
+        endOffsetMs: open ? null : startOffsetMs + 3000,
+      });
+      await testDb.insert(schema.recordingIngest).values({
+        kind: "clip",
+        clipId,
+        ticketHash: String(clipId).repeat(64).slice(0, 64),
+        keyDate: "2026-09-24",
+        keyPrefix: `p/take-${clipId}`,
+        closedAt: open ? null : new Date(),
+      });
+    };
+
+    await seedTake(700, 1000, false);
+    await seedTake(701, 90_000, true);
+
+    const active = (await json(await app.request("/api/v1/sessions/101/inspections/active")))
+      .data as Array<Record<string, any>>;
+    expect(active[0]!.clip).toEqual({ clipId: 701, capturing: true });
+  });
+
+  it("falls back to the newest take when no capture is on the wire", async () => {
+    await seedWorld();
+    const started = await startInspection({});
+    const resultId = (await json(started)).data.resultId as number;
+
+    for (const [clipId, startOffsetMs] of [
+      [700, 1000],
+      [701, 90_000],
+    ] as const) {
+      await testDb.insert(schema.videoClip).values({
+        clipId,
+        resultId,
+        sessionId: 101,
+        startOffsetMs,
+        endOffsetMs: startOffsetMs + 3000,
+      });
+      await testDb.insert(schema.recordingIngest).values({
+        kind: "clip",
+        clipId,
+        ticketHash: String(clipId).repeat(64).slice(0, 64),
+        keyDate: "2026-09-24",
+        keyPrefix: `p/take-${clipId}`,
+        closedAt: new Date(),
+      });
+    }
+
+    const active = (await json(await app.request("/api/v1/sessions/101/inspections/active")))
+      .data as Array<Record<string, any>>;
+    expect(active[0]!.clip).toEqual({ clipId: 701, capturing: false });
+  });
+
   it("lets an open inspection adopt a form version saved mid-inspection", async () => {
     await seedWorld();
     const started = await startInspection({});
