@@ -331,11 +331,12 @@ export const renderReport = async (
 export const loadReportInputs = async (
   projectId: number,
   scope: ReportScope = "all",
+  organizationId: number,
   database?: DbOrTx,
 ) => {
   const [template, data] = await Promise.all([
     loadTemplate(projectId),
-    gatherReportData(projectId, scope, database),
+    gatherReportData(projectId, scope, organizationId, database),
   ]);
 
   return { template, data };
@@ -345,8 +346,9 @@ export const loadReportInputs = async (
 export const generateReport = async (
   projectId: number,
   scope: ReportScope = "all",
+  organizationId: number,
   database?: DbOrTx,
 ): Promise<Buffer> => {
-  const { template, data } = await loadReportInputs(projectId, scope, database);
+  const { template, data } = await loadReportInputs(projectId, scope, organizationId, database);
   return renderReport(template, data);
 };

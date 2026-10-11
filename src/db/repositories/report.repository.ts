@@ -32,6 +32,22 @@ export const findReportRecord = async (
   return rows[0] ?? null;
 };
 
+// NO org filter: the report's own row supplies the org for the editor, whose
+// cookie names a report id and no organization. The cookie is the credential,
+// and it is signed for that one id.
+export const findReportRecordByIdInternal = async (
+  reportId: string,
+  database: DbOrTx = db,
+) => {
+  const rows = await database
+    .select()
+    .from(report)
+    .where(eq(report.reportId, reportId))
+    .limit(1);
+
+  return rows[0] ?? null;
+};
+
 export const insertReportRecord = async (
   values: typeof report.$inferInsert,
   database: DbOrTx = db,

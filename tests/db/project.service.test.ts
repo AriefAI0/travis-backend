@@ -5,6 +5,7 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../helpers/db";
 import * as schema from "../../src/db/schema";
@@ -18,6 +19,9 @@ import {
 } from "../../src/db/services/project.service";
 import { createSessionRecord } from "../../src/db/repositories/session.repository";
 import { createResultRecord } from "../../src/db/repositories/result.repository";
+
+// No user exists at this level, so the audit rows are system writes.
+const caller = () => ({ organizationId: testOrgId, userId: null });
 
 describe("project.service", () => {
   beforeAll(ensureTestDatabase);
@@ -34,6 +38,7 @@ describe("project.service", () => {
         description: "Initial campaign",
         documentId: "DOC-001",
       },
+      caller(),
       testDb,
     );
 
@@ -46,9 +51,9 @@ describe("project.service", () => {
   // The ordinal a user reads and every media key carries: 1, 2, 3 — never the
   // identity column, which is global and never reused.
   it("numbers projects sequentially from one", async () => {
-    const first = await createProject({ title: "Alpha" }, testDb);
-    const second = await createProject({ title: "Beta" }, testDb);
-    const third = await createProject({ title: "Gamma" }, testDb);
+    const first = await createProject({ title: "Alpha" }, caller(), testDb);
+    const second = await createProject({ title: "Beta" }, caller(), testDb);
+    const third = await createProject({ title: "Gamma" }, caller(), testDb);
 
     expect([first!.displayNumber, second!.displayNumber, third!.displayNumber]).toEqual([1, 2, 3]);
   });
@@ -57,26 +62,26 @@ describe("project.service", () => {
   // expectation. Delete a middle one and the gap stays, because renumbering
   // would break every frozen media key and stored reference.
   it("reuses the number of the newest deleted project, and keeps a middle gap", async () => {
-    const first = await createProject({ title: "Alpha" }, testDb);
-    const second = await createProject({ title: "Beta" }, testDb);
+    const first = await createProject({ title: "Alpha" }, caller(), testDb);
+    const second = await createProject({ title: "Beta" }, caller(), testDb);
 
-    await deleteProject(second!.projectId, testDb);
-    const reused = await createProject({ title: "Gamma" }, testDb);
+    await deleteProject(second!.projectId, caller(), testDb);
+    const reused = await createProject({ title: "Gamma" }, caller(), testDb);
     expect(reused!.displayNumber).toBe(second!.displayNumber);
 
     // now delete the FIRST one: its number is stranded, so the next is max+1
-    await deleteProject(first!.projectId, testDb);
-    const afterGap = await createProject({ title: "Delta" }, testDb);
+    await deleteProject(first!.projectId, caller(), testDb);
+    const afterGap = await createProject({ title: "Delta" }, caller(), testDb);
     expect(afterGap!.displayNumber).toBe(3);
   });
 
   // The original bug: a deleted project left the next one numbered 57.
   it("numbers the next project by count, not by the identity column", async () => {
-    const first = await createProject({ title: "Alpha" }, testDb);
-    await createProject({ title: "Beta" }, testDb);
-    await deleteProject(first!.projectId, testDb);
+    const first = await createProject({ title: "Alpha" }, caller(), testDb);
+    await createProject({ title: "Beta" }, caller(), testDb);
+    await deleteProject(first!.projectId, caller(), testDb);
 
-    const replacement = await createProject({ title: "Gamma" }, testDb);
+    const replacement = await createProject({ title: "Gamma" }, caller(), testDb);
 
     expect(replacement!.displayNumber).toBe(3);
     // the ordinal is not the identity: the two diverge as soon as anything is
@@ -89,6 +94,7 @@ describe("project.service", () => {
       {
         title: "Project 1",
       },
+      caller(),
       testDb,
     );
 
@@ -96,10 +102,11 @@ describe("project.service", () => {
       {
         title: "Project 2",
       },
+      caller(),
       testDb,
     );
 
-    const projects = await listProjects(testDb);
+    const projects = await listProjects(caller(), testDb);
 
     expect(projects).toHaveLength(2);
     expect(projects[0]!.title).toBe("Project 1");
@@ -111,6 +118,7 @@ describe("project.service", () => {
       {
         title: "Project 1",
       },
+      caller(),
       testDb,
     );
 
@@ -118,17 +126,18 @@ describe("project.service", () => {
       {
         title: "Project 2",
       },
+      caller(),
       testDb,
     );
 
-    const dashboard = await listDashboard(testDb);
+    const dashboard = await listDashboard(caller(), testDb);
 
     expect(dashboard).toHaveLength(2);
     expect(dashboard[0]!.projectId).toBe(project1!.projectId);
   });
 
   it("counts progress from stopped results, not from targets alone", async () => {
-    const projectRecord = await createProject({ title: "Progress Project" }, testDb);
+    const projectRecord = await createProject({ title: "Progress Project" }, caller(), testDb);
     const projectId = projectRecord!.projectId;
 
     const group = await testDb
@@ -185,7 +194,7 @@ describe("project.service", () => {
       inspectionFormId: form.inspectionFormId,
     });
 
-    const dashboard = await listDashboard(testDb);
+    const dashboard = await listDashboard(caller(), testDb);
     const row = dashboard.find((entry) => entry.projectId === projectId);
 
     expect(row).toBeDefined();
@@ -202,10 +211,11 @@ describe("project.service", () => {
       {
         title: "Test Project",
       },
+      caller(),
       testDb,
     );
 
-    const foundProject = await getProjectById(createdProject!.projectId, testDb);
+    const foundProject = await getProjectById(createdProject!.projectId, caller(), testDb);
 
     expect(foundProject).not.toBeNull();
     expect(foundProject!.projectId).toBe(createdProject!.projectId);
@@ -217,6 +227,7 @@ describe("project.service", () => {
       {
         title: "Original Title",
       },
+      caller(),
       testDb,
     );
 
@@ -225,6 +236,7 @@ describe("project.service", () => {
       {
         title: "Updated Title",
       },
+      caller(),
       testDb,
     );
 
@@ -237,15 +249,16 @@ describe("project.service", () => {
       {
         title: "To Delete",
       },
+      caller(),
       testDb,
     );
 
-    const deletedProject = await deleteProject(createdProject!.projectId, testDb);
+    const deletedProject = await deleteProject(createdProject!.projectId, caller(), testDb);
 
     expect(deletedProject).not.toBeNull();
     expect(deletedProject!.projectId).toBe(createdProject!.projectId);
 
-    const foundProject = await getProjectById(createdProject!.projectId, testDb);
+    const foundProject = await getProjectById(createdProject!.projectId, caller(), testDb);
     expect(foundProject).toBeNull();
   });
 
@@ -255,7 +268,7 @@ describe("project.service", () => {
     });
 
     it("creates project with task group, task code, component, type, component code, session, result, clip, master", async () => {
-      const project = await createProject({ title: "Full Hierarchy" }, testDb);
+      const project = await createProject({ title: "Full Hierarchy" }, caller(), testDb);
 
       const session = await testDb
         .insert(schema.session)

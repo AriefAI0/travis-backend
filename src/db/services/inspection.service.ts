@@ -7,7 +7,8 @@ import { AppError, notFound } from "../../lib/error";
 import { removeMediaPrefix } from "../../lib/minio_storage/cleanup";
 import { listIngestRecordsByClipIds } from "../repositories/recording-ingest.repository";
 import { listInspectionFormFieldRecordsByFormId } from "../repositories/inspection-form.repository";
-import { getSessionById } from "./session.service";
+// Internal read: these ids come from a result row the route already scoped.
+import { findSessionByIdInternal } from "./session.service";
 import {
   findRecordingMasterBySessionId,
   listVideoClipsByResultId,
@@ -22,13 +23,17 @@ import {
   writeTypedDetail,
 } from "./result.service";
 import { getCurrentInspectionForm } from "./inspection-form.service";
-import {
-  getDescriptionById,
-  getPartCodeById,
-  getTaskCodeById,
-  getTaskGroupById,
-  getTypeById,
-} from "./task-structure.service";
+import { writeAudit } from "./audit.service";
+import { findProjectById } from "../repositories/project.repository";
+import type { Caller } from "../../lib/caller";
+// Read straight from the repositories: these walk the tree for a label or a
+// validation, on ids that came from a result row the route already scoped.
+// No caller is involved, so no org check is repeated here.
+import { findDescriptionById as getDescriptionById } from "../repositories/description.repository";
+import { findPartCodeById as getPartCodeById } from "../repositories/part-code.repository";
+import { findTaskCodeById as getTaskCodeById } from "../repositories/task-code.repository";
+import { findTaskGroupById as getTaskGroupById } from "../repositories/task-group.repository";
+import { findTypeById as getTypeById } from "../repositories/type.repository";
 
 
 
@@ -180,15 +185,21 @@ const listActiveRows = async (sessionId: number, database?: DbOrTx) => {
   return rows.filter((row) => row.layer !== null && row.masterEndMs === null);
 };
 
-// flow: master > target > duplicate > layer > pin form > create — one tx
+// flow: master > session in org > target > duplicate > layer > pin form >
+// create > audit — one tx
 export const startInspection = async (
   input: StartInspectionInput,
+  caller: Caller,
   database?: DbOrTx,
 ) => {
   const run = async (tx: DbOrTx) => {
     await requireRecordingMaster(input.sessionId, tx);
-    const sessionRecord = await getSessionById(input.sessionId, tx);
+    const sessionRecord = await findSessionByIdInternal(input.sessionId, tx);
     if (!sessionRecord) throw notFound(`session ${input.sessionId}`);
+    // A session in another org reads as absent, never as forbidden.
+    if (!(await findProjectById(sessionRecord.projectId, caller.organizationId, tx))) {
+      throw notFound(`session ${input.sessionId}`);
+    }
 
     const target = await resolveInspectionTarget(input, tx);
     if (target.projectId !== sessionRecord.projectId) {
@@ -236,21 +247,40 @@ export const startInspection = async (
       tx,
     );
     if (!created) throw new Error("result insert returned no row");
+
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "create",
+        resourceType: "Result",
+        resourceId: created.resultId,
+        after: created,
+      },
+      tx,
+    );
+
     return created;
   };
 
   return database ? run(database) : db.transaction(run);
 };
 
-// flow: fetch > open guard > validate customs > update row > write detail — one tx
+// flow: fetch > org guard > open guard > validate customs > update row >
+// write detail > audit — one tx
 export const stopInspection = async (
   resultId: number,
   input: StopInspectionInput,
+  caller: Caller,
   database?: DbOrTx,
 ) => {
   const run = async (tx: DbOrTx) => {
     const result = await getResultById(resultId, tx);
     if (!result) throw notFound(`result ${resultId}`);
+    // A result in another org reads as absent, never as forbidden.
+    if (!(await findProjectById(result.projectId, caller.organizationId, tx))) {
+      throw notFound(`result ${resultId}`);
+    }
     if (result.layer === null) {
       throw new AppError(409, "inspection_already_stopped", `inspection ${resultId} is not a task-tree inspection`);
     }
@@ -285,39 +315,85 @@ export const stopInspection = async (
     if (!updated) throw new Error(`failed to update result ${resultId}`);
 
     await writeTypedDetail(result.inspectionTypeCode, input.payload, resultId, tx);
+
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "modify",
+        resourceType: "Result",
+        resourceId: resultId,
+        before: result,
+        after: updated,
+      },
+      tx,
+    );
+
     return updated;
   };
 
   return database ? run(database) : db.transaction(run);
 };
 
-// cancel removes the open row, its clip, and the clip's uploaded media
-export const cancelInspection = async (resultId: number, database?: DbOrTx) => {
-  const result = await getResultById(resultId, database);
-  if (!result) throw notFound(`result ${resultId}`);
-  if (result.layer === null) {
-    throw new AppError(409, "inspection_already_stopped", `inspection ${resultId} is not a task-tree inspection`);
-  }
-  if (result.masterEndMs !== null) {
-    throw new AppError(
-      409,
-      "inspection_already_stopped",
-      `inspection ${resultId} is already stopped and cannot be cancelled`,
-    );
-  }
+// cancel removes the open row, its clip, and the clip's uploaded media.
+// flow: fetch > org guard > open guard > collect clip ingests > delete row >
+// audit — one tx, then the media sweep after commit
+export const cancelInspection = async (
+  resultId: number,
+  caller: Caller,
+  database?: DbOrTx,
+) => {
+  const run = async (tx: DbOrTx) => {
+    const result = await getResultById(resultId, tx);
+    if (!result) throw notFound(`result ${resultId}`);
+    // A result in another org reads as absent, never as forbidden.
+    if (!(await findProjectById(result.projectId, caller.organizationId, tx))) {
+      throw notFound(`result ${resultId}`);
+    }
+    if (result.layer === null) {
+      throw new AppError(409, "inspection_already_stopped", `inspection ${resultId} is not a task-tree inspection`);
+    }
+    if (result.masterEndMs !== null) {
+      throw new AppError(
+        409,
+        "inspection_already_stopped",
+        `inspection ${resultId} is already stopped and cannot be cancelled`,
+      );
+    }
 
-  // fetch clip ingests before the row delete cascades them away
-  const clips = await listVideoClipsByResultId(resultId, database);
-  const ingestRows = await listIngestRecordsByClipIds(
-    clips.map((clip) => clip.clipId),
-    database,
-  );
+    // fetch clip ingests before the row delete cascades them away
+    const clips = await listVideoClipsByResultId(resultId, tx);
+    const ingestRows = await listIngestRecordsByClipIds(
+      clips.map((clip) => clip.clipId),
+      tx,
+    );
+
+    const deleted = await deleteResult(resultId, tx);
+    if (!deleted) throw new Error(`failed to delete result ${resultId}`);
+
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "remove",
+        resourceType: "Result",
+        resourceId: resultId,
+        before: result,
+      },
+      tx,
+    );
+
+    return { deleted, ingestRows };
+  };
+
+  const { deleted, ingestRows } = database ? await run(database) : await db.transaction(run);
+
+  // The sweep stays outside the transaction: a rollback must not leave the row
+  // behind with its media already gone.
   for (const ingest of ingestRows) {
     await removeMediaPrefix(ingest.keyPrefix);
   }
 
-  const deleted = await deleteResult(resultId, database);
-  if (!deleted) throw new Error(`failed to delete result ${resultId}`);
   return deleted;
 };
 
@@ -326,7 +402,7 @@ export const listActiveBySessionId = async (
   sessionId: number,
   database?: DbOrTx,
 ): Promise<ActiveInspection[]> => {
-  const sessionRecord = await getSessionById(sessionId, database);
+  const sessionRecord = await findSessionByIdInternal(sessionId, database);
   if (!sessionRecord) throw notFound(`session ${sessionId}`);
 
   const rows = await listActiveRows(sessionId, database);
@@ -437,7 +513,7 @@ export const listSessionInspectionRows = async (
   sessionId: number,
   database?: DbOrTx,
 ): Promise<SessionInspectionRow[]> => {
-  const sessionRecord = await getSessionById(sessionId, database);
+  const sessionRecord = await findSessionByIdInternal(sessionId, database);
   if (!sessionRecord) throw notFound(`session ${sessionId}`);
 
   const rows = (await listResultsBySessionId(sessionId, database)).filter(

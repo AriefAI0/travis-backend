@@ -1,9 +1,11 @@
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { appFor } from "../../helpers/app";
+import { createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
@@ -12,8 +14,11 @@ import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, importRoutes);
 
+// minted per test in beforeEach; every request below carries it
+let adminToken = "";
+
 const post = (body: unknown) =>
-  app.request("/api/v1/import/task-structure", {
+  authRequest("/api/v1/import/task-structure", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -46,7 +51,7 @@ const tree = async () => ({
 const seedProject = async () => {
   await testDb
     .insert(schema.project)
-    .values({ displayNumber: 1, projectId: 1, title: "Alpha" });
+    .values({ organizationId: testOrgId, displayNumber: 1, projectId: 1, title: "Alpha" });
 };
 
 // The whole sheet is the fixture for the repeat-import tests: two rows, the
@@ -59,7 +64,11 @@ const sheet = () => [
 describe("task structure import", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
-  beforeEach(truncateTestDatabase);
+  // every route is guarded now; an Admin holds the rights these suites exercise
+  beforeEach(async () => {
+    await truncateTestDatabase();
+    adminToken = (await createTestUser({ preset: "Admin" })).token;
+  });
 
   it("creates the whole tree for a fresh sheet and counts every node", async () => {
     await seedProject();
@@ -297,3 +306,13 @@ describe("task structure import", () => {
     expect((await importRows([row({ taskCode: "" })])).status).toBe(400);
   });
 });
+
+// every request carries the Admin token minted in beforeEach
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

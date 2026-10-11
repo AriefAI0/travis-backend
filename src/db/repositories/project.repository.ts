@@ -37,7 +37,7 @@ export const createProjectRecord = async (
 // highest assigned ordinal in one org; archived rows keep their number, so
 // they count. Races on max+1 are caught by the uniq index and retried.
 export const maxProjectDisplayNumber = async (
-  organizationId: number | null,
+  organizationId: number,
   database: DbOrTx = db,
 ) => {
   const rows = await database
@@ -46,9 +46,7 @@ export const maxProjectDisplayNumber = async (
     .where(
       and(
         isNotNull(project.displayNumber),
-        organizationId === null
-          ? isNull(project.organizationId)
-          : eq(project.organizationId, organizationId),
+        eq(project.organizationId, organizationId),
       ),
     )
     .orderBy(desc(project.displayNumber))
@@ -57,13 +55,43 @@ export const maxProjectDisplayNumber = async (
   return rows[0]?.displayNumber ?? null;
 };
 
-export const listProjectRecords = async (database: DbOrTx = db) =>
+export const listProjectRecords = async (organizationId: number, database: DbOrTx = db) =>
   database.query.project.findMany({
-    where: isNull(project.archivedAt),
+    where: and(isNull(project.archivedAt), eq(project.organizationId, organizationId)),
     orderBy: asc(project.projectId),
   });
 
+// The org's project ids, for a read whose own query cannot join the project
+// table. Archived projects stay in: their recordings are still readable.
+export const listProjectIdsByOrganizationId = async (
+  organizationId: number,
+  database: DbOrTx = db,
+) =>
+  (
+    await database
+      .select({ projectId: project.projectId })
+      .from(project)
+      .where(eq(project.organizationId, organizationId))
+  ).map((row) => row.projectId);
+
+// Org is part of the lookup, so another org's id is simply not found.
 export const findProjectById = async (
+  projectId: number,
+  organizationId: number,
+  database: DbOrTx = db,
+) =>
+  (await database.query.project.findFirst({
+    where: and(
+      eq(project.projectId, projectId),
+      eq(project.organizationId, organizationId),
+    ),
+  })) ?? null;
+
+// NO org filter. Only for a project id that a trusted server-side path already
+// established: an ingest ticket's project, or a result row the caller fetched
+// through a scoped route. A route handler serving a client-supplied id must
+// use findProjectById with a caller instead.
+export const findProjectByIdInternal = async (
   projectId: number,
   database: DbOrTx = db,
 ) =>
@@ -72,14 +100,17 @@ export const findProjectById = async (
   })) ?? null;
 
 // flow: tree counts > target counts > finished-target counts > merge by project
+// Only the project list is org-filtered; every count joins on projectId, so it
+// is scoped by construction.
 export const listProjectDashboardRows = async (
+  organizationId: number,
   database: DbOrTx = db,
 ): Promise<ProjectDashboardRow[]> => {
   const count = (expr: ReturnType<typeof sql>) => sql<number>`${expr}`.mapWith(Number);
 
   const [projects, groups, codes, components, codesPerBranch, finished] = await Promise.all([
     database.query.project.findMany({
-      where: isNull(project.archivedAt),
+      where: and(isNull(project.archivedAt), eq(project.organizationId, organizationId)),
       orderBy: asc(project.projectId),
     }),
 
@@ -162,13 +193,14 @@ export const listProjectDashboardRows = async (
 
 export const updateProjectById = async (
   projectId: number,
+  organizationId: number,
   data: Partial<typeof project.$inferInsert>,
   database: DbOrTx = db,
 ) => {
   const updatedProjects = await database
     .update(project)
     .set({ ...data, updatedAt: new Date() })
-    .where(eq(project.projectId, projectId))
+    .where(and(eq(project.projectId, projectId), eq(project.organizationId, organizationId)))
     .returning();
 
   return updatedProjects[0] ?? null;
@@ -176,11 +208,12 @@ export const updateProjectById = async (
 
 export const deleteProjectById = async (
   projectId: number,
+  organizationId: number,
   database: DbOrTx = db,
 ) => {
   const deletedProjects = await database
     .delete(project)
-    .where(eq(project.projectId, projectId))
+    .where(and(eq(project.projectId, projectId), eq(project.organizationId, organizationId)))
     .returning();
 
   return deletedProjects[0] ?? null;

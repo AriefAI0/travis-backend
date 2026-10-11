@@ -2,10 +2,12 @@ import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test"
 import { eq } from "drizzle-orm";
 
 import { appFor } from "../../helpers/app";
+import { createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
@@ -14,9 +16,13 @@ import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, resultRoutes);
 
+// minted per test in beforeEach; every request below carries one of these
+let adminToken = "";
+let operatorToken = "";
+
 // project > session > asset > component > item > sessionItem > result (GVI)
 const seedResultContext = async () => {
-  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.session).values({
     displayNumber: 1,
     sessionId: 101,
@@ -61,7 +67,7 @@ type Ticket = {
 };
 
 const createImage = async (body: unknown) =>
-  app.request("/api/v1/results/5001/images", {
+  authRequest("/api/v1/results/5001/images", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -95,7 +101,16 @@ const seedMasterAndClip = async (startEpoch: number) => {
 describe("evidence image routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
-  beforeEach(truncateTestDatabase);
+  // Every route is guarded now. An Operator preset is the one that carries
+  // `create Result`, because an admin does not run an inspection. `remove
+  // Result` comes from the Admin preset, so the delete test uses that token.
+  beforeEach(async () => {
+    await truncateTestDatabase();
+    const operator = await createTestUser({ preset: "Operator" });
+    operatorToken = operator.token;
+    const admin = await createTestUser({ preset: "Admin" });
+    adminToken = admin.token;
+  });
 
   it("create mints the row and a presigned PUT, no clip involved", async () => {
     await seedResultContext();
@@ -157,7 +172,7 @@ describe("evidence image routes", () => {
   it("create on a missing result is 404", async () => {
     await seedResultContext();
 
-    const res = await app.request("/api/v1/results/9999/images", {
+    const res = await authRequest("/api/v1/results/9999/images", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ contentType: "image/png" }),
@@ -169,7 +184,7 @@ describe("evidence image routes", () => {
     await seedResultContext();
     const { data } = await json<{ data: Ticket }>(await createImage({ contentType: "image/png" }));
 
-    const res = await app.request(`/api/v1/images/${data.imageId}/annotated`, {
+    const res = await authRequest(`/api/v1/images/${data.imageId}/annotated`, {
       method: "POST",
     });
     expect(res.status).toBe(201);
@@ -185,7 +200,7 @@ describe("evidence image routes", () => {
   it("annotated on a missing image is 404", async () => {
     await seedResultContext();
 
-    const res = await app.request("/api/v1/images/9999/annotated", { method: "POST" });
+    const res = await authRequest("/api/v1/images/9999/annotated", { method: "POST" });
     expect(res.status).toBe(404);
   });
 
@@ -193,11 +208,11 @@ describe("evidence image routes", () => {
     await seedResultContext();
     const { data } = await json<{ data: Ticket }>(await createImage({ contentType: "image/png" }));
 
-    const gone = await app.request(`/api/v1/images/${data.imageId}`, { method: "DELETE" });
+    const gone = await asAdminRequest(`/api/v1/images/${data.imageId}`, { method: "DELETE" });
     expect(gone.status).toBe(200);
     expect(await testDb.select().from(schema.resultImage)).toHaveLength(0);
 
-    const again = await app.request(`/api/v1/images/${data.imageId}`, { method: "DELETE" });
+    const again = await asAdminRequest(`/api/v1/images/${data.imageId}`, { method: "DELETE" });
     expect(again.status).toBe(404);
   });
 
@@ -206,7 +221,7 @@ describe("evidence image routes", () => {
     const first = await json<{ data: Ticket }>(await createImage({ contentType: "image/png" }));
     const second = await json<{ data: Ticket }>(await createImage({ contentType: "image/jpeg" }));
 
-    const res = await app.request("/api/v1/descriptions/100/results");
+    const res = await authRequest("/api/v1/descriptions/100/results");
     expect(res.status).toBe(200);
     const { data } = await json(res);
     const entry = data.sessions[0].results[0];
@@ -219,8 +234,8 @@ describe("evidence image routes", () => {
     expect(entry.posterUrl).toBe(entry.images[0].url);
 
     // after annotating the FIRST image, its url AND the poster flip leaves
-    await app.request(`/api/v1/images/${first.data.imageId}/annotated`, { method: "POST" });
-    const after = await json(await app.request("/api/v1/descriptions/100/results"));
+    await authRequest(`/api/v1/images/${first.data.imageId}/annotated`, { method: "POST" });
+    const after = await json(await authRequest("/api/v1/descriptions/100/results"));
     const entryAfter = after.data.sessions[0].results[0];
     expect(entryAfter.images[0].url).toContain(`/${first.data.imageId}-annotated.png`);
     expect(entryAfter.images[1].url).toContain(`/${second.data.imageId}.jpg`);
@@ -239,7 +254,7 @@ describe("evidence image routes", () => {
       hasAnnotated: true,
     });
 
-    const { data } = await json(await app.request("/api/v1/descriptions/100/results"));
+    const { data } = await json(await authRequest("/api/v1/descriptions/100/results"));
     const entry = data.sessions[0].results[0];
 
     expect(entry.images[0].url).toContain("img_61_annotated.png");
@@ -263,7 +278,7 @@ describe("evidence image routes", () => {
       endOffsetMs: 40_000,
     });
 
-    const empty = await json(await app.request("/api/v1/descriptions/100/results"));
+    const empty = await json(await authRequest("/api/v1/descriptions/100/results"));
     const emptyClip = empty.data.sessions[0].results[0].clips[0];
     expect(emptyClip.videoUrl).toBeNull();
     // the still still follows the finalize run, so it stays null here
@@ -291,7 +306,7 @@ describe("evidence image routes", () => {
       objectKey: "1/1/101/2026/09/20/clips/7/segments/0000000000.ts",
     });
 
-    const open = await json(await app.request("/api/v1/descriptions/100/results"));
+    const open = await json(await authRequest("/api/v1/descriptions/100/results"));
     const openClip = open.data.sessions[0].results[0].clips[0];
     expect(openClip.videoUrl).toMatch(/^\/api\/v2\/hls\/clip\/7\/index[.]m3u8[?]t=v1[.]/);
     // no clip still producer: the card face stays absent
@@ -322,7 +337,7 @@ describe("evidence image routes", () => {
     });
     // no segments either, so the clip has no playback URL
 
-    const res = await json(await app.request("/api/v1/results/5001/evidence"));
+    const res = await json(await authRequest("/api/v1/results/5001/evidence"));
     expect(res.data.clips[0].videoUrl).toBeNull();
     expect(res.data.clips[0].thumbnailUrl).toBeNull();
   });
@@ -341,7 +356,7 @@ describe("evidence image routes", () => {
       endOffsetMs: 5_000,
     });
 
-    const res = await json(await app.request("/api/v1/results/5001/evidence"));
+    const res = await json(await authRequest("/api/v1/results/5001/evidence"));
     expect(res.data.clips[0].thumbnailUrl).toBeNull();
     expect(res.data.clips[0].endOffsetMs).toBe(5_000);
   });
@@ -350,7 +365,7 @@ describe("evidence image routes", () => {
     await seedResultContext();
     await createImage({ contentType: "image/png" });
 
-    const res = await app.request("/api/v1/results/5001/evidence");
+    const res = await authRequest("/api/v1/results/5001/evidence");
     expect(res.status).toBe(200);
     const { data } = await json(res);
     expect(data.images[0].url).toContain("travis-media");
@@ -371,7 +386,7 @@ describe("evidence image routes", () => {
       sessionId: null,
     });
 
-    const res = await app.request("/api/v1/results/6001/images", {
+    const res = await authRequest("/api/v1/results/6001/images", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ contentType: "image/png" }),
@@ -399,7 +414,7 @@ describe("evidence image routes", () => {
       sessionId: null,
     });
 
-    const res = await app.request("/api/v1/results/6002/images", {
+    const res = await authRequest("/api/v1/results/6002/images", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ contentType: "image/png" }),
@@ -407,3 +422,23 @@ describe("evidence image routes", () => {
     expect(res.status).toBe(409);
   });
 });
+
+// Most calls are evidence writes, which need `create Result` — the Operator
+// preset. A call that needs `remove Result` passes the Admin token instead.
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${operatorToken}`,
+    },
+  });
+
+const asAdminRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

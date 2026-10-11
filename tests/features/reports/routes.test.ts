@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { createRequire } from "node:module";
 import { appFor } from "../../helpers/app";
+import { createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import { reportRoutes } from "../../../src/features/reports/routes";
@@ -18,6 +20,9 @@ const PizZip = require("pizzip");
 
 const app = appFor(testDb, reportRoutes);
 
+// minted per test in beforeEach; every request below carries it
+let adminToken = "";
+
 // soffice ships in the runtime image. A dev host may not carry it, and the
 // conversion test needs the real binary.
 const sofficeAvailable = Bun.which(env.SOFFICE_PATH) !== null;
@@ -28,13 +33,16 @@ if (!sofficeAvailable) {
 }
 
 beforeAll(ensureTestDatabase);
-beforeEach(truncateTestDatabase);
+beforeEach(async () => {
+  await truncateTestDatabase();
+  adminToken = (await createTestUser({ preset: "Admin" })).token;
+});
 afterAll(closeTestDatabase);
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const seedProject = () =>
-  testDb.insert(schema.project).values({ projectId: 1, displayNumber: 1, title: "Alpha" });
+  testDb.insert(schema.project).values({ organizationId: testOrgId, projectId: 1, displayNumber: 1, title: "Alpha" });
 
 // Project, one target, one result: enough for the render to produce a tagged
 // region a refresh can rewrite.
@@ -62,7 +70,7 @@ type ReportBody = { reportId: string; name: string; status: string; version: num
 
 // The stored document's XML, so a test can look at what a write really kept.
 const documentXml = async (reportId: string) => {
-  const res = await app.request(`/api/v1/reports/${reportId}/docx`);
+  const res = await authRequest(`/api/v1/reports/${reportId}/docx`);
   return new PizZip(Buffer.from(await res.arrayBuffer())).file("word/document.xml").asText() as string;
 };
 
@@ -95,7 +103,7 @@ const readData = async <T>(res: Response): Promise<T> =>
   ((await res.json()) as { data: T }).data;
 
 const generate = async (name = "Alpha 2026-10-11"): Promise<ReportBody> => {
-  const res = await app.request("/api/v1/projects/1/reports", {
+  const res = await authRequest("/api/v1/projects/1/reports", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name }),
@@ -106,7 +114,7 @@ const generate = async (name = "Alpha 2026-10-11"): Promise<ReportBody> => {
 };
 
 const statusOf = async (reportId: string) => {
-  const res = await app.request(`/api/v1/reports/${reportId}`);
+  const res = await authRequest(`/api/v1/reports/${reportId}`);
   expect(res.status).toBe(200);
 
   return readData<{
@@ -150,7 +158,7 @@ describe("report generation", () => {
   }, 20_000);
 
   it("answers 404 for an unknown project", async () => {
-    const res = await app.request("/api/v1/projects/999/reports", {
+    const res = await authRequest("/api/v1/projects/999/reports", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "Nope" }),
@@ -162,7 +170,7 @@ describe("report generation", () => {
   it("rejects a name that is empty once trimmed", async () => {
     await seedProject();
 
-    const res = await app.request("/api/v1/projects/1/reports", {
+    const res = await authRequest("/api/v1/projects/1/reports", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "   " }),
@@ -178,7 +186,7 @@ describe("report list", () => {
     const first = await generate("First");
     const second = await generate("Second");
 
-    const res = await app.request("/api/v1/projects/1/reports");
+    const res = await authRequest("/api/v1/projects/1/reports");
     expect(res.status).toBe(200);
 
     const reports = await readData<{ reportId: string; name: string }[]>(res);
@@ -189,7 +197,7 @@ describe("report list", () => {
   }, 20_000);
 
   it("answers 404 for an unknown project", async () => {
-    const res = await app.request("/api/v1/projects/999/reports");
+    const res = await authRequest("/api/v1/projects/999/reports");
 
     expect(res.status).toBe(404);
   });
@@ -201,7 +209,7 @@ describe("stored document", () => {
     const { reportId } = await generate();
     await waitForRender(reportId);
 
-    const res = await app.request(`/api/v1/reports/${reportId}/docx`);
+    const res = await authRequest(`/api/v1/reports/${reportId}/docx`);
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("wordprocessingml.document");
@@ -218,13 +226,13 @@ describe("stored document", () => {
     await waitForRender(reportId);
 
     const original = Buffer.from(
-      await (await app.request(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
+      await (await authRequest(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
     );
     // an edit must differ from the render, or the write proves nothing
     const edited = Buffer.concat([original, Buffer.from([0x00])]);
     const { version } = await statusOf(reportId);
 
-    const written = await app.request(`/api/v1/reports/${reportId}/docx`, {
+    const written = await authRequest(`/api/v1/reports/${reportId}/docx`, {
       method: "PUT",
       headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
       body: edited,
@@ -234,7 +242,7 @@ describe("stored document", () => {
     expect((await readData<{ version: number }>(written)).version).toBe(version + 1);
 
     const read = Buffer.from(
-      await (await app.request(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
+      await (await authRequest(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
     );
     expect(read.byteLength).toBe(edited.byteLength);
   }, 20_000);
@@ -245,20 +253,20 @@ describe("stored document", () => {
     await waitForRender(reportId);
 
     const original = Buffer.from(
-      await (await app.request(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
+      await (await authRequest(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
     );
     const { version } = await statusOf(reportId);
     const edited = withNote(original, "first tab");
     const stale = withNote(original, "stale tab");
 
-    const first = await app.request(`/api/v1/reports/${reportId}/docx`, {
+    const first = await authRequest(`/api/v1/reports/${reportId}/docx`, {
       method: "PUT",
       headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
       body: edited,
     });
     expect(first.status).toBe(200);
 
-    const second = await app.request(`/api/v1/reports/${reportId}/docx`, {
+    const second = await authRequest(`/api/v1/reports/${reportId}/docx`, {
       method: "PUT",
       headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
       body: stale,
@@ -274,7 +282,7 @@ describe("stored document", () => {
     const { reportId } = await generate();
     await waitForRender(reportId);
 
-    const res = await app.request(`/api/v1/reports/${reportId}/docx`, {
+    const res = await authRequest(`/api/v1/reports/${reportId}/docx`, {
       method: "PUT",
       headers: { "content-type": DOCX_MIME },
       body: Buffer.from("PK\u0003\u0004 not a real zip"),
@@ -289,7 +297,7 @@ describe("stored document", () => {
     const { reportId } = await generate();
 
     const put = (body: Uint8Array | string, contentType: string) =>
-      app.request(`/api/v1/reports/${reportId}/docx`, {
+      authRequest(`/api/v1/reports/${reportId}/docx`, {
         method: "PUT",
         headers: { "content-type": contentType },
         body,
@@ -302,13 +310,13 @@ describe("stored document", () => {
   }, 20_000);
 
   it("answers 400 for an id that is not a uuid", async () => {
-    const res = await app.request("/api/v1/reports/not-a-uuid/docx");
+    const res = await authRequest("/api/v1/reports/not-a-uuid/docx");
 
     expect(res.status).toBe(400);
   });
 
   it("answers 404 for an unknown report", async () => {
-    const res = await app.request(
+    const res = await authRequest(
       "/api/v1/reports/00000000-0000-4000-8000-000000000000/docx",
     );
 
@@ -321,7 +329,7 @@ describe("stored document", () => {
     const { reportId } = await generate('Bad"Name\nX');
     await waitForRender(reportId);
 
-    const res = await app.request(`/api/v1/reports/${reportId}/docx`);
+    const res = await authRequest(`/api/v1/reports/${reportId}/docx`);
 
     expect(res.headers.get("content-disposition")).toBe('attachment; filename="BadNameX.docx"');
   }, 20_000);
@@ -335,7 +343,7 @@ describe("report PDF", () => {
       const { reportId } = await generate("Printable");
       await waitForRender(reportId);
 
-      const res = await app.request(`/api/v1/reports/${reportId}/pdf`);
+      const res = await authRequest(`/api/v1/reports/${reportId}/pdf`);
 
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toBe("application/pdf");
@@ -362,7 +370,7 @@ describe("report PDF", () => {
   });
 
   it("answers 404 for an unknown report", async () => {
-    const res = await app.request(
+    const res = await authRequest(
       "/api/v1/reports/00000000-0000-4000-8000-000000000000/pdf",
     );
 
@@ -370,7 +378,7 @@ describe("report PDF", () => {
   });
 
   it("answers 400 for an id that is not a uuid", async () => {
-    const res = await app.request("/api/v1/reports/not-a-uuid/pdf");
+    const res = await authRequest("/api/v1/reports/not-a-uuid/pdf");
 
     expect(res.status).toBe(400);
   });
@@ -383,18 +391,18 @@ describe("region refresh", () => {
     await waitForRender(reportId);
 
     const original = Buffer.from(
-      await (await app.request(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
+      await (await authRequest(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
     );
     const { version } = await statusOf(reportId);
 
-    const written = await app.request(`/api/v1/reports/${reportId}/docx`, {
+    const written = await authRequest(`/api/v1/reports/${reportId}/docx`, {
       method: "PUT",
       headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
       body: withNote(original, "inspector note"),
     });
     expect(written.status).toBe(200);
 
-    const res = await app.request(`/api/v1/reports/${reportId}/refresh`, { method: "POST" });
+    const res = await authRequest(`/api/v1/reports/${reportId}/refresh`, { method: "POST" });
     expect(res.status).toBe(200);
 
     const result = await readData<{ replaced: string[]; version: number }>(res);
@@ -418,17 +426,17 @@ describe("region refresh", () => {
     await waitForRender(reportId);
 
     const original = Buffer.from(
-      await (await app.request(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
+      await (await authRequest(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
     );
     const { version } = await statusOf(reportId);
 
-    await app.request(`/api/v1/reports/${reportId}/docx`, {
+    await authRequest(`/api/v1/reports/${reportId}/docx`, {
       method: "PUT",
       headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
       body: withoutRegion(original, "region:description:100:GVI:1"),
     });
 
-    const res = await app.request(`/api/v1/reports/${reportId}/refresh`, { method: "POST" });
+    const res = await authRequest(`/api/v1/reports/${reportId}/refresh`, { method: "POST" });
     const result = await readData<{ replaced: string[]; unplaced: string[] }>(res);
 
     // the picture region still lands; the table region the user removed does not
@@ -439,13 +447,13 @@ describe("region refresh", () => {
   }, 20_000);
 
   it("answers 404 for an unknown report, and 400 for an id that is not a uuid", async () => {
-    const unknown = await app.request(
+    const unknown = await authRequest(
       "/api/v1/reports/00000000-0000-4000-8000-000000000000/refresh",
       { method: "POST" },
     );
     expect(unknown.status).toBe(404);
 
-    const bad = await app.request("/api/v1/reports/not-a-uuid/refresh", { method: "POST" });
+    const bad = await authRequest("/api/v1/reports/not-a-uuid/refresh", { method: "POST" });
     expect(bad.status).toBe(400);
   });
 });
@@ -455,7 +463,7 @@ describe("rename and delete", () => {
     await seedProject();
     const { reportId } = await generate("Before");
 
-    const res = await app.request(`/api/v1/reports/${reportId}`, {
+    const res = await authRequest(`/api/v1/reports/${reportId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "After" }),
@@ -466,7 +474,7 @@ describe("rename and delete", () => {
   }, 20_000);
 
   it("answers 404 when renaming an unknown report", async () => {
-    const res = await app.request(
+    const res = await authRequest(
       "/api/v1/reports/00000000-0000-4000-8000-000000000000",
       {
         method: "PATCH",
@@ -483,15 +491,15 @@ describe("rename and delete", () => {
     const { reportId } = await generate();
     await waitForRender(reportId);
 
-    const removed = await app.request(`/api/v1/reports/${reportId}`, { method: "DELETE" });
+    const removed = await authRequest(`/api/v1/reports/${reportId}`, { method: "DELETE" });
     expect(removed.status).toBe(200);
 
-    expect((await app.request(`/api/v1/reports/${reportId}`)).status).toBe(404);
-    expect((await app.request(`/api/v1/reports/${reportId}/docx`)).status).toBe(404);
+    expect((await authRequest(`/api/v1/reports/${reportId}`)).status).toBe(404);
+    expect((await authRequest(`/api/v1/reports/${reportId}/docx`)).status).toBe(404);
   }, 20_000);
 
   it("answers 404 when deleting an unknown report", async () => {
-    const res = await app.request(
+    const res = await authRequest(
       "/api/v1/reports/00000000-0000-4000-8000-000000000000",
       { method: "DELETE" },
     );
@@ -499,3 +507,13 @@ describe("rename and delete", () => {
     expect(res.status).toBe(404);
   });
 });
+
+// every request carries the Admin token minted in beforeEach
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

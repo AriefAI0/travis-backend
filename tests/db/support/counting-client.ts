@@ -1,8 +1,7 @@
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 
-import type { Db } from "../../../src/db/client";
-import * as schema from "../../../src/db/schema";
+import { fullSchema, type Db } from "../../../src/db/client";
 import { testDatabaseUrl } from "../../helpers/db";
 
 export type QueryCounter = {
@@ -56,7 +55,7 @@ export const createCountingDatabase = async (): Promise<CountingDatabase> => {
   });
 
   return {
-    database: drizzle(proxied as unknown as pg.Client, { schema }),
+    database: drizzle(proxied as unknown as pg.Client, { schema: fullSchema }),
     counter,
     close: () => inner.end(),
   };

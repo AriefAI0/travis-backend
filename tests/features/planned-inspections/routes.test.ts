@@ -1,9 +1,11 @@
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { appFor } from "../../helpers/app";
+import { createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
@@ -12,21 +14,24 @@ import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, plannedInspectionRoutes);
 
+// minted per test in beforeEach; every request below carries it
+let adminToken = "";
+
 const post = (body: unknown) =>
-  app.request("/api/v1/planned-inspections", {
+  authRequest("/api/v1/planned-inspections", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
 
-const list = () => app.request("/api/v1/projects/1/planned-inspections");
+const list = () => authRequest("/api/v1/projects/1/planned-inspections");
 
 const remove = (id: number) =>
-  app.request(`/api/v1/planned-inspections/${id}`, { method: "DELETE" });
+  authRequest(`/api/v1/planned-inspections/${id}`, { method: "DELETE" });
 
 // one chain: project > group > task code > description > type > part code
 const seedTree = async () => {
-  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.taskGroup).values({ taskGroupId: 1, projectId: 1, code: "100" });
   await testDb.insert(schema.taskCode).values({ taskCodeId: 10, taskGroupId: 1, code: "101" });
   await testDb.insert(schema.description).values({ descriptionId: 100, taskCodeId: 10, label: "I" });
@@ -38,6 +43,7 @@ beforeAll(ensureTestDatabase);
 beforeEach(async () => {
   await truncateTestDatabase();
   await seedTree();
+  adminToken = (await createTestUser({ preset: "Admin" })).token;
 });
 afterAll(closeTestDatabase);
 
@@ -103,3 +109,13 @@ describe("planned inspections", () => {
     expect(again.status).toBe(404);
   });
 });
+
+// every request carries the Admin token minted in beforeEach
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

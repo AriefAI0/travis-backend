@@ -1,26 +1,48 @@
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { appFor } from "../../helpers/app";
+import { createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
+import * as schema from "../../../src/db/schema";
 import { taskStructureRoutes } from "../../../src/features/task-structure/routes";
-import { projectRoutes } from "../../../src/features/projects/routes";
 
-const app = appFor(testDb, taskStructureRoutes, projectRoutes);
+const app = appFor(testDb, taskStructureRoutes);
+
+// minted per test in beforeEach; every request below carries it
+let adminToken = "";
+
+// Seeded directly: projectRoutes is guarded now, and this suite is about the
+// tree. A project row is all it needs.
+// display_number is unique within an org, and one test seeds twice, so take
+// the next ordinal the way the route would.
+const seedProject = async () => {
+  const existing = await testDb
+    .select({ displayNumber: schema.project.displayNumber })
+    .from(schema.project);
+  const next = existing.reduce((max, row) => Math.max(max, row.displayNumber), 0) + 1;
+
+  const rows = await testDb
+    .insert(schema.project)
+    .values({ organizationId: testOrgId, displayNumber: next, title: "Alpha" })
+    .returning();
+  return rows[0]!.projectId;
+};
 
 const post = async (path: string, body: unknown) =>
-  app.request(path, {
+  authRequest(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
 
 const patch = async (path: string, body: unknown) =>
-  app.request(path, {
+  authRequest(path, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -28,8 +50,7 @@ const patch = async (path: string, body: unknown) =>
 
 // full chain: project > group > task code > description > type > part code
 const seedChain = async () => {
-  const projectId = (await json(await post("/api/v1/projects", { title: "Alpha" }))).data
-    .projectId as number;
+  const projectId = await seedProject();
 
   const groupRes = await post("/api/v1/task-groups", {
     projectId,
@@ -69,16 +90,15 @@ const seedChain = async () => {
   return { projectId, taskGroupId, taskCodeId, descriptionId, typeId, partCodeId };
 };
 
-const seedProject = async () => {
-  const res = await post("/api/v1/projects", { title: "Alpha" });
-  return (await json(res)).data.projectId as number;
-};
-
 // flow: seed chain > tree read > type rules > cascade
 describe("task structure routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
-  beforeEach(truncateTestDatabase);
+  // every route is guarded now; an Admin holds the rights these suites exercise
+  beforeEach(async () => {
+    await truncateTestDatabase();
+    adminToken = (await createTestUser({ preset: "Admin" })).token;
+  });
 
   it("builds the tree and returns it nested", async () => {
     const { projectId } = await seedChain();
@@ -98,7 +118,7 @@ describe("task structure routes", () => {
       label: "Anode A-1",
     });
 
-    const treeRes = await app.request(`/api/v1/projects/${projectId}/task-structure`);
+    const treeRes = await authRequest(`/api/v1/projects/${projectId}/task-structure`);
     expect(treeRes.status).toBe(200);
     const tree = (await json(treeRes)).data as Array<Record<string, any>>;
 
@@ -148,7 +168,7 @@ describe("task structure routes", () => {
       code: "VDM",
     });
 
-    const catalogRes = await app.request(`/api/v1/projects/${projectId}/type-catalog`);
+    const catalogRes = await authRequest(`/api/v1/projects/${projectId}/type-catalog`);
     const catalog = (await json(catalogRes)).data as Array<Record<string, any>>;
     expect(catalog).toHaveLength(1);
     expect(catalog[0]!.code).toBe("VDM");
@@ -164,7 +184,7 @@ describe("task structure routes", () => {
     expect((await json(renamed)).data.typeId).toBe(typeId);
 
     const tree = (await json(
-      await app.request(`/api/v1/projects/${projectId}/task-structure`),
+      await authRequest(`/api/v1/projects/${projectId}/task-structure`),
     )).data as Array<Record<string, any>>;
     expect(tree[0]!.taskCodes[0]!.descriptions[0]!.types[0]!.code).toBe("VHM");
   });
@@ -172,11 +192,11 @@ describe("task structure routes", () => {
   it("deleting a task group cascades the whole subtree", async () => {
     const { projectId, taskGroupId } = await seedChain();
 
-    const del = await app.request(`/api/v1/task-groups/${taskGroupId}`, { method: "DELETE" });
+    const del = await authRequest(`/api/v1/task-groups/${taskGroupId}`, { method: "DELETE" });
     expect(del.status).toBe(200);
 
     const tree = (await json(
-      await app.request(`/api/v1/projects/${projectId}/task-structure`),
+      await authRequest(`/api/v1/projects/${projectId}/task-structure`),
     )).data as unknown[];
     expect(tree).toHaveLength(0);
   });
@@ -192,9 +212,19 @@ describe("task structure routes", () => {
     }
 
     const tree = (await json(
-      await app.request(`/api/v1/projects/${projectId}/task-structure`),
+      await authRequest(`/api/v1/projects/${projectId}/task-structure`),
     )).data as Array<Record<string, any>>;
 
     expect(tree.map((row) => row.code)).toEqual(["103", "101", "102"]);
   });
 });
+
+// every request carries the Admin token minted in beforeEach
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

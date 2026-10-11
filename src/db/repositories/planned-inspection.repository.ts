@@ -1,7 +1,7 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
-import { plannedInspection } from "../schema";
+import { plannedInspection, project } from "../schema";
 
 export const createPlannedInspectionRecord = async (
   data: typeof plannedInspection.$inferInsert,
@@ -21,13 +21,28 @@ export const listPlannedInspectionRecordsByProjectId = async (
     orderBy: [asc(plannedInspection.plannedInspectionId)],
   });
 
+// Org-scoped delete: the subquery keeps the row's project inside the caller's
+// org, so a foreign id deletes nothing and reads as absent.
+// flow: id + org filter > delete > returning
 export const deletePlannedInspectionById = async (
   plannedInspectionId: number,
+  organizationId: number,
   database: DbOrTx = db,
 ) => {
   const deleted = await database
     .delete(plannedInspection)
-    .where(eq(plannedInspection.plannedInspectionId, plannedInspectionId))
+    .where(
+      and(
+        eq(plannedInspection.plannedInspectionId, plannedInspectionId),
+        inArray(
+          plannedInspection.projectId,
+          database
+            .select({ projectId: project.projectId })
+            .from(project)
+            .where(eq(project.organizationId, organizationId)),
+        ),
+      ),
+    )
     .returning();
   return deleted[0] ?? null;
 };

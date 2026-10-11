@@ -5,15 +5,17 @@ import {
   resultEvidenceStem,
 } from "../../lib/minio_storage/paths";
 import { AppError } from "../../lib/error";
+import type { Caller } from "../../lib/caller";
 import { mintPutUrl } from "../../lib/minio_storage/mint";
-import type { DbOrTx } from "../client";
+import { db, type DbOrTx } from "../client";
+import { writeAudit } from "./audit.service";
 import {
   createResultImageRecord,
   deleteResultImageById,
   findResultImageById,
   updateResultImageById,
 } from "../repositories/result-image.repository";
-import { findProjectById } from "../repositories/project.repository";
+import { findProjectByIdInternal } from "../repositories/project.repository";
 import { findSessionById } from "../repositories/session.repository";
 import { listVideoClipRecordsByResultId } from "../repositories/video-clip.repository";
 import { getResultById, touchResult } from "./result.service";
@@ -61,7 +63,10 @@ const resolveImageStem = async (
   },
   database?: DbOrTx,
 ) => {
-  const project = await findProjectById(resultRow.projectId, database);
+  // The id comes from a result row the caller already fetched through a
+  // scoped route, so the org check has already happened upstream. This only
+  // reads the project's number and title for the media path.
+  const project = await findProjectByIdInternal(resultRow.projectId, database);
   if (!project) {
     throw new AppError(404, "not_found", `project ${resultRow.projectId} not found`);
   }
@@ -109,33 +114,55 @@ const resolveImageStem = async (
   });
 };
 
-// flow: result row > results stem > insert row > leaf from assigned imageId > PUT url
+// flow: result row > results stem > insert row > audit, one transaction >
+//       then the presigned PUT outside it
 // The stem comes from the RESULT alone, never a clip: evidence images must
 // survive a failed recording, so an image with no clip is the normal case.
+// Minting the URL stays out of the transaction: it is network I/O, and a
+// MinIO call must not hold a database transaction open.
 export const createImageUploadTicket = async (
   input: { resultId: number; contentType: string; remarks?: string | null },
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<ImageUploadTicket> => {
   if (!imageExtension(input.contentType)) {
     throw new AppError(400, "bad_request", `unsupported contentType ${input.contentType}`);
   }
 
-  const resultRow = await requireResult(input.resultId, database);
-  const stem = await resolveImageStem(resultRow, database);
+  const commit = async (tx: DbOrTx) => {
+    const resultRow = await requireResult(input.resultId, tx);
+    const stem = await resolveImageStem(resultRow, tx);
 
-  const imageRow = await createResultImageRecord(
-    {
-      resultId: resultRow.resultId,
-      storageStem: stem,
-      contentType: input.contentType,
-      remarks: input.remarks?.trim() || null,
-    },
-    database,
-  );
-  if (!imageRow) throw new Error("result image insert returned no row");
+    const imageRow = await createResultImageRecord(
+      {
+        resultId: resultRow.resultId,
+        storageStem: stem,
+        contentType: input.contentType,
+        remarks: input.remarks?.trim() || null,
+      },
+      tx,
+    );
+    if (!imageRow) throw new Error("result image insert returned no row");
 
-  // report staleness keys on result.updatedAt — a new image must move it
-  await touchResult(resultRow.resultId, database);
+    // report staleness keys on result.updatedAt — a new image must move it
+    await touchResult(resultRow.resultId, tx);
+
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "create",
+        resourceType: "ResultImage",
+        resourceId: imageRow.imageId,
+        after: imageRow,
+      },
+      tx,
+    );
+
+    return { imageRow, stem };
+  };
+
+  const { imageRow, stem } = database ? await commit(database) : await db.transaction(commit);
 
   const leaf = imageEvidenceLeaves(stem, imageRow.imageId, input.contentType).raw;
   return {
@@ -148,24 +175,40 @@ export const createImageUploadTicket = async (
   };
 };
 
-// flow: image row > annotated leaf > flag the row > PUT url
+// flow: image row > flag + audit in one transaction > annotated PUT url
 // Same imageId as the raw write: annotation edits an image, never clones it.
 export const createAnnotatedUploadTicket = async (
   imageId: number,
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<ImageUploadTicket> => {
-  const imageRow = await requireImage(imageId, database);
+  const commit = async (tx: DbOrTx) => {
+    const imageRow = await requireImage(imageId, tx);
 
-  // flag before the upload: a minted URL the app never PUTs leaves a false
-  // true, which mints a 404-ing GET. A missed flag hides a real image forever.
-  await updateResultImageById(imageId, { hasAnnotated: true }, database);
-  await touchResult(imageRow.resultId, database);
+    // flag before the upload: a minted URL the app never PUTs leaves a false
+    // true, which mints a 404-ing GET. A missed flag hides a real image forever.
+    await updateResultImageById(imageId, { hasAnnotated: true }, tx);
+    await touchResult(imageRow.resultId, tx);
 
-  const leaf = imageEvidenceLeaves(
-    imageRow.storageStem,
-    imageId,
-    imageRow.contentType,
-  ).annotated;
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "modify",
+        resourceType: "ResultImage",
+        resourceId: imageId,
+        before: imageRow,
+        after: { ...imageRow, hasAnnotated: true },
+      },
+      tx,
+    );
+
+    return imageRow;
+  };
+
+  const imageRow = database ? await commit(database) : await db.transaction(commit);
+
+  const leaf = imageEvidenceLeaves(imageRow.storageStem, imageId, imageRow.contentType).annotated;
   return {
     imageId,
     storageStem: imageRow.storageStem,
@@ -177,9 +220,30 @@ export const createAnnotatedUploadTicket = async (
 };
 
 // remove the row; the objects are swept separately (no delete-on-read path)
-export const removeResultImage = async (imageId: number, database?: DbOrTx) => {
-  const imageRow = await requireImage(imageId, database);
-  const deleted = await deleteResultImageById(imageId, database);
-  await touchResult(imageRow.resultId, database);
-  return deleted;
+export const removeResultImage = async (
+  imageId: number,
+  caller: Caller,
+  database?: DbOrTx,
+) => {
+  const commit = async (tx: DbOrTx) => {
+    const imageRow = await requireImage(imageId, tx);
+    const deleted = await deleteResultImageById(imageId, tx);
+    await touchResult(imageRow.resultId, tx);
+
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "remove",
+        resourceType: "ResultImage",
+        resourceId: imageId,
+        before: imageRow,
+      },
+      tx,
+    );
+
+    return deleted;
+  };
+
+  return database ? commit(database) : db.transaction(commit);
 };

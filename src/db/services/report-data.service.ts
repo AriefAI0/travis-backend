@@ -570,19 +570,22 @@ const buildSections = (
 export const gatherReportData = async (
   projectId: number,
   scope: ReportScope = "all",
+  organizationId: number,
   database?: DbOrTx,
 ): Promise<ReportTemplateData> => {
   if (!Number.isInteger(projectId) || projectId < 1) {
     throw new AppError(400, "invalid_project_id", "Project id must be a positive integer");
   }
 
-  const projectRecord = await getProjectById(projectId, database);
+  // the org rides in from the report row, so a render cannot cross tenants
+  const projectRecord = await getProjectById(projectId, { organizationId, userId: null }, database);
   if (!projectRecord) {
     throw new AppError(404, "project_not_found", `No project with id ${projectId}`);
   }
 
+  // the org was already checked above, so the tree read takes the same caller
   const [groups, allResults] = await Promise.all([
-    listProjectTaskStructureTree(projectId, database),
+    listProjectTaskStructureTree(projectId, { organizationId, userId: null }, database),
     listProjectSummary(projectId, database),
   ]);
 

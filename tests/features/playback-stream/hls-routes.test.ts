@@ -6,6 +6,7 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import * as schema from "../../../src/db/schema";
@@ -34,7 +35,7 @@ describe("hls routes", () => {
 
   beforeEach(async () => {
     await truncateTestDatabase();
-    await testDb.insert(schema.project).values({ displayNumber: PROJECT_ID, projectId: PROJECT_ID, title: "P" });
+    await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: PROJECT_ID, projectId: PROJECT_ID, title: "P" });
     await testDb
       .insert(schema.session)
       .values({ displayNumber: 1, sessionId: PROJECT_ID, projectId: PROJECT_ID, name: "S" });

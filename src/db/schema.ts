@@ -157,8 +157,10 @@ export const project = pgTable(
     description: text("description"),
     documentId: text("document_id"),
 
-    // nullable until better-auth lands, then NOT NULL
-    organizationId: integer("organization_id").references(() => organization.organizationId),
+    // every project belongs to one org
+    organizationId: integer("organization_id")
+      .notNull()
+      .references(() => organization.organizationId),
 
     // per-org ordinal; also keys every media object for this project
     displayNumber: integer("display_number").notNull(),
@@ -169,12 +171,11 @@ export const project = pgTable(
   },
   (table) => ({
     idxProjectTitle: index("idx_project_title").on(table.title),
-    uqProjectDisplayOrg: uniqueIndex("uq_project_display_org")
-      .on(table.organizationId, table.displayNumber)
-      .where(sql`${table.organizationId} IS NOT NULL`),
-    uqProjectDisplayNoOrg: uniqueIndex("uq_project_display_noorg")
-      .on(table.displayNumber)
-      .where(sql`${table.organizationId} IS NULL`),
+    // display_number is per-org; org is NOT NULL, so the index is plain
+    uqProjectDisplayOrg: uniqueIndex("uq_project_display_org").on(
+      table.organizationId,
+      table.displayNumber
+    ),
   })
 );
 
@@ -1349,7 +1350,7 @@ export const report = pgTable(
       .references(() => project.projectId, { onDelete: "cascade" }),
 
     // org scoping is a hard requirement; the seeded default org fills this
-    // until auth lands
+    // until the report routes take the caller's org
     organizationId: integer("organization_id")
       .notNull()
       .references(() => organization.organizationId),

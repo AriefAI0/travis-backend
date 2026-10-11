@@ -5,6 +5,7 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../helpers/db";
 import * as schema from "../../src/db/schema";
@@ -26,6 +27,7 @@ import {
 
 const seedVideoContext = async () => {
   await testDb.insert(schema.project).values({
+    organizationId: testOrgId,
     displayNumber: 1,
     projectId: 1,
     title: "Project Alpha",
@@ -118,11 +120,13 @@ const seedVideoContext = async () => {
 const seedProjectRecordingContext = async () => {
   await testDb.insert(schema.project).values([
     {
+      organizationId: testOrgId,
       displayNumber: 1,
       projectId: 1,
       title: "Project Alpha",
     },
     {
+      organizationId: testOrgId,
       displayNumber: 2,
       projectId: 2,
       title: "Project Beta",

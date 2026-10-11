@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { healthRoutesFor } from "./features/health/routes";
 import { inspectionRoutes } from "./features/inspections/routes";
@@ -16,7 +17,12 @@ import { inspectionFormRoutes } from "./features/inspection-forms/routes";
 import { importRoutes } from "./features/import/routes";
 import { sessionTimelineRoutes } from "./features/session-timeline/routes";
 import { reportRoutes } from "./features/reports/routes";
-import { env } from "./config/env";
+import { editorRoutes } from "./features/reports/editor-page";
+import { archiveRoutes } from "./features/archive/routes";
+import { auditRoutes } from "./features/audit/routes";
+import { authRoutes } from "./features/auth/routes";
+import { userRoutes } from "./features/users/routes";
+import { corsAllowedOrigins, env } from "./config/env";
 import { pingDb } from "./db/client";
 import { onError } from "./lib/error";
 import { minio } from "./lib/minio_storage/clients";
@@ -29,7 +35,29 @@ if (env.NODE_ENV !== "test") {
 }
 
 app.onError(onError);
+
+// One CORS layer for the whole API, before every route. Credentials are on, so
+// the bearer header and any cookie survive. `set-auth-token` MUST stay exposed:
+// the bearer plugin hands the token back in that header, and a layer that hides
+// it breaks sign-in silently.
+// The HLS subtree underneath adds its own scoped layer; a request through both
+// answers the same origin, so the two never conflict.
+app.use(
+  "*",
+  cors({
+    origin: corsAllowedOrigins,
+    credentials: true,
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowHeaders: ["content-type", "authorization", "x-report-version"],
+    exposeHeaders: ["set-auth-token"],
+    maxAge: 600,
+  }),
+);
+// Mounted first: this is where a token comes from, so it cannot sit behind one.
+app.route("/", authRoutes());
 app.route("/", healthRoutesFor(minio, [{ name: "db", check: pingDb }]));
+app.route("/", userRoutes());
+app.route("/", auditRoutes());
 app.route("/", projectRoutes());
 app.route("/", taskStructureRoutes());
 app.route("/", plannedInspectionRoutes());
@@ -39,6 +67,9 @@ app.route("/", importRoutes());
 app.route("/", sessionTimelineRoutes());
 // Report dialog, template download/upload, and the filled docx.
 app.route("/", reportRoutes());
+// The report editor page, served here so the serve can set its cookie.
+app.route("/", editorRoutes());
+app.route("/", archiveRoutes());
 app.route("/", sessionRoutes());
 app.route("/", inspectionRoutes());
 app.route("/", recordingRoutes());

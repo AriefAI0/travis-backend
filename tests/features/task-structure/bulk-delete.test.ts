@@ -1,10 +1,12 @@
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { appFor } from "../../helpers/app";
+import { createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
@@ -14,8 +16,14 @@ import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, taskStructureRoutes);
 
+// minted per test in beforeEach; every request below carries it
+let adminToken = "";
+
+// No user exists at this level, so the audit rows are system writes.
+const caller = () => ({ organizationId: testOrgId, userId: null });
+
 const post = (body: unknown) =>
-  app.request("/api/v1/task-structure/bulk-delete", {
+  authRequest("/api/v1/task-structure/bulk-delete", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -28,7 +36,7 @@ const remove = (nodes: unknown[], force = false) =>
 // Two results so a mid-level delete can be told apart from a leaf delete:
 // 5001 hangs off the description, 5002 off the part code under it.
 const seedTree = async () => {
-  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.session).values({
     displayNumber: 1,
     sessionId: 101,
@@ -128,7 +136,11 @@ const remaining = async () => ({
 describe("bulk delete", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
-  beforeEach(truncateTestDatabase);
+  // every route is guarded now; an Admin holds the rights these suites exercise
+  beforeEach(async () => {
+    await truncateTestDatabase();
+    adminToken = (await createTestUser({ preset: "Admin" })).token;
+  });
 
   it("counts a whole subtree before anything is removed", async () => {
     await seedTree();
@@ -346,6 +358,7 @@ describe("bulk delete", () => {
             { kind: "part_code", id: 300 },
             { kind: "description", id: 100 },
           ],
+          caller(),
           tx,
         );
         throw new Error("boom");
@@ -379,3 +392,13 @@ describe("bulk delete", () => {
     expect(badKind.status).toBe(400);
   });
 });
+
+// every request carries the Admin token minted in beforeEach
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

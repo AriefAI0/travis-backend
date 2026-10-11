@@ -5,6 +5,7 @@ import type {
   TaskStructureTaskGroupNode,
 } from "../../types/api";
 import { AppError } from "../../lib/error";
+import type { Caller } from "../../lib/caller";
 import { inspectionType } from "../../types/api";
 import { db, type DbOrTx } from "../client";
 import {
@@ -91,6 +92,7 @@ const resolveRow = async (
   tx: DbOrTx,
   projectId: number,
   row: ImportRowInput,
+  caller: Caller,
 ): Promise<{ leaf: ImportLeaf; created: number }> => {
   let created = 0;
 
@@ -98,7 +100,7 @@ const resolveRow = async (
   let group = tree.get(groupName);
   if (!group) {
     const record = required(
-      await createTaskGroup({ projectId, code: row.taskGroup }, tx),
+      await createTaskGroup({ projectId, code: row.taskGroup }, caller, tx),
       "Task group",
     );
     group = { taskGroupId: record.taskGroupId, taskCodes: new Map() };
@@ -110,7 +112,7 @@ const resolveRow = async (
   let taskCode = group.taskCodes.get(taskCodeName);
   if (!taskCode) {
     const record = required(
-      await createTaskCode({ taskGroupId: group.taskGroupId, code: row.taskCode }, tx),
+      await createTaskCode({ taskGroupId: group.taskGroupId, code: row.taskCode }, caller, tx),
       "Task code",
     );
     taskCode = { taskCodeId: record.taskCodeId, descriptions: new Map() };
@@ -127,7 +129,7 @@ const resolveRow = async (
   let description = taskCode.descriptions.get(descriptionName);
   if (!description) {
     const record = required(
-      await createDescription({ taskCodeId: taskCode.taskCodeId, label: row.description }, tx),
+      await createDescription({ taskCodeId: taskCode.taskCodeId, label: row.description }, caller, tx),
       "Description",
     );
     description = { descriptionId: record.descriptionId, types: new Map() };
@@ -147,7 +149,7 @@ const resolveRow = async (
   let type = description.types.get(typeName);
   if (!type) {
     const record = required(
-      await createType({ descriptionId: description.descriptionId, code: row.type }, tx),
+      await createType({ descriptionId: description.descriptionId, code: row.type }, caller, tx),
       "Type",
     );
     type = { typeId: record.typeId, partCodes: new Map() };
@@ -167,7 +169,7 @@ const resolveRow = async (
   let partCodeId = type.partCodes.get(partCodeName);
   if (partCodeId === undefined) {
     const record = required(
-      await createPartCode({ typeId: type.typeId, code: row.partCode }, tx),
+      await createPartCode({ typeId: type.typeId, code: row.partCode }, caller, tx),
       "Part code",
     );
     partCodeId = record.partCodeId;
@@ -252,6 +254,7 @@ const dryRunRollback = new Error("import dry run");
 // flow: [replace guard] > seed the tree > per row resolve > plan inspections
 export const importProjectTaskStructure = async (
   input: ImportTaskStructureInput,
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<ImportTaskStructureSummary> => {
   const dryRun = input.dryRun ?? false;
@@ -264,7 +267,7 @@ export const importProjectTaskStructure = async (
 
   const run = async (tx: DbOrTx) => {
     if (input.mode === "replace") {
-      const groups = await listProjectTaskStructureTree(input.projectId, tx);
+      const groups = await listProjectTaskStructureTree(input.projectId, caller, tx);
       if (groups.length > 0) {
         const nodes: TaskStructureNodeRef[] = groups.map((group) => ({
           kind: "task_group",
@@ -274,7 +277,7 @@ export const importProjectTaskStructure = async (
           // Read-only. The real delete also removes objects from storage after it
           // commits, and a rollback cannot bring those back, so a preview must
           // never call it.
-          const preview = await previewTaskStructureDelete(nodes, tx);
+          const preview = await previewTaskStructureDelete(nodes, caller, tx);
           if (preview.blocked) {
             throw new AppError(
               409,
@@ -286,7 +289,7 @@ export const importProjectTaskStructure = async (
           // Replacing the whole tree IS the confirmation, so unfinished
           // inspections go with it; a capture still on the wire is refused,
           // which rolls the whole import back.
-          await deleteTaskStructureSelection(nodes, tx, true);
+          await deleteTaskStructureSelection(nodes, caller, tx, true);
         }
       }
     }
@@ -294,7 +297,7 @@ export const importProjectTaskStructure = async (
     const tree =
       input.mode === "replace"
         ? new Map<string, ImportGroup>()
-        : seedTree(await listProjectTaskStructureTree(input.projectId, tx));
+        : seedTree(await listProjectTaskStructureTree(input.projectId, caller, tx));
 
     // one read of what is already planned, so a duplicate is skipped, not caught
     const planned = new Set(
@@ -310,7 +313,7 @@ export const importProjectTaskStructure = async (
     );
 
     for (const row of input.rows) {
-      const { leaf, created } = await resolveRow(tree, tx, input.projectId, row);
+      const { leaf, created } = await resolveRow(tree, tx, input.projectId, row, caller);
       summary.nodesCreated += created;
 
       const counts = await planInspections(tx, input.projectId, planned, row, leaf);

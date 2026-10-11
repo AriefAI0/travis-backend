@@ -6,6 +6,7 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import * as schema from "../../../src/db/schema";
@@ -31,7 +32,7 @@ const CLOCK_START = new Date("2026-09-20T10:00:00.000Z");
 const quietStorage: SegmentStorage = { put: async () => {} };
 
 const seedDomain = async () => {
-  await testDb.insert(schema.project).values({ displayNumber: 9300, projectId: 9300, title: "P" });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: 9300, projectId: 9300, title: "P" });
   await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 9300, projectId: 9300, name: "S" });
   await testDb.insert(schema.taskGroup).values({
     taskGroupId: 9300,
