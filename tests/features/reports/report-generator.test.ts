@@ -35,6 +35,11 @@ afterAll(closeTestDatabase);
 const mediaEntriesIn = (buf: Buffer) =>
   Object.keys(new PizZip(buf).files).filter((name) => name.startsWith("word/media/"));
 
+// The template ships its own letterhead images, so evidence pictures are the
+// media parts the render generates. Branding must not move these counts.
+const evidencePartsIn = (buf: Buffer) =>
+  mediaEntriesIn(buf).filter((name) => name.includes("image_generated_"));
+
 const documentXmlIn = (buf: Buffer) =>
   new PizZip(buf).file("word/document.xml").asText() as string;
 
@@ -244,9 +249,9 @@ describe("generateReport", () => {
     expect(xml).not.toContain("{%image}");
 
     // Only the section that holds a picture draws one. The other item's section
-    // has none, and an empty frame there would read as a defect.
-    expect((xml.match(/<w:drawing>/g) ?? []).length).toBe(1);
-    expect(mediaEntriesIn(buf)).toHaveLength(1);
+    // has none, and an empty frame there would read as a defect. The template's
+    // own letterhead drawings are not evidence and are not counted.
+    expect(evidencePartsIn(buf)).toHaveLength(1);
 
     // the picture keeps its own size: a fixed box would stretch a photo
     expect(xml).toContain(`<wp:extent cx="${ONE_PIXEL_EMU}" cy="${ONE_PIXEL_EMU}"/>`);
@@ -266,7 +271,8 @@ describe("generateReport", () => {
 
     expect(buf.subarray(0, 2).toString()).toBe("PK");
     expect(documentXmlIn(buf)).toContain("Empty");
-    expect(mediaEntriesIn(buf)).toHaveLength(0);
+    // the letterhead ships its own image; no evidence picture is generated
+    expect(evidencePartsIn(buf)).toHaveLength(0);
   });
 
   it("renders one table per inspection type with that type's columns", async () => {
@@ -299,9 +305,9 @@ describe("generateReport", () => {
     expect(xml).not.toContain("{recorded}");
     expect(xml).not.toContain("{%image}");
 
-    // exactly one frame: the description target's GVI section holds result
-    // 5001's seeded evidence object, and no other section has a candidate
-    expect((xml.match(/<w:drawing>/g) ?? []).length).toBe(1);
+    // exactly one evidence picture: the description target's GVI section holds
+    // result 5001's seeded evidence object, and no other section has a candidate
+    expect(evidencePartsIn(buf)).toHaveLength(1);
   });
 
   it("renders a section for each newly enabled type", async () => {
@@ -456,8 +462,9 @@ describe("generateReport", () => {
     expect(xml).not.toMatch(/<\/w:tbl>(?!<w:p|<\/w:sdtContent>)/);
     // every region is followed by a paragraph the user can type into
     expect(xml).not.toMatch(/<\/w:sdt>(?!<w:p|<w:sdt)/);
-    // and the document ends with a paragraph, never a table
-    expect(xml).toMatch(/<w:p\/>\s*<w:sectPr>/);
+    // and the document ends with a paragraph, never a table. Word writes
+    // paragraphs with attributes and content, so match any paragraph shape.
+    expect(xml).toMatch(/(?:<\/w:p>|<w:p[^>]*\/>)\s*<w:sectPr/);
   }, 20_000);
 
   it("rejects an unknown project", async () => {
