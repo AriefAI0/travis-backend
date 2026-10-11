@@ -1,5 +1,6 @@
 import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail, BsiDetail, CgbDetail, RiserDetail, CiDetail, SeabedDetail, PiDetail, PiFindingDetail,
   InspectionTypeCode, ProjectResultSummaryRow, ResultEvidence, ResultMgiWithFindings, ResultSummaryDetail, SeabedFindingDetail,
+  ResultFormState,
   CpPayloadInput, CviPayloadInput, DviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput,
   CgbPayloadInput, RiserPayloadInput, CiPayloadInput, SeabedPayloadInput, PiPayloadInput } from "../../types/api";
 import { inspectionPayloadSchema, type InspectionPayload } from "../../types/api";
@@ -73,6 +74,10 @@ const normalizeResultUpdate = (
 
   if ("customValues" in data) {
     nextData.customValues = data.customValues;
+  }
+
+  if ("submittedPayload" in data) {
+    nextData.submittedPayload = data.submittedPayload;
   }
 
   // completed results re-pin to the form version live at stop time
@@ -254,12 +259,15 @@ const KIND_TO_TYPE_CODE: Record<InspectionPayload["kind"], InspectionTypeCode> =
   pipeline: "PIPELINE",
 };
 
-export const writeTypedDetail = async (
+/**
+ * Parse a stop payload and check its kind agrees with the result's inspection
+ * type. Shared by writeTypedDetail and the stop dry-run, so both fail alike.
+ */
+export const parseInspectionPayload = (
   inspectionTypeCode: InspectionTypeCode,
   payload: unknown,
   resultId: number,
-  database?: DbOrTx,
-): Promise<void> => {
+): InspectionPayload => {
   const parsed = inspectionPayloadSchema.safeParse(payload);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -279,6 +287,17 @@ export const writeTypedDetail = async (
       `result ${resultId} expects a ${inspectionTypeCode} payload, got kind "${data.kind}"`,
     );
   }
+
+  return data;
+};
+
+export const writeTypedDetail = async (
+  inspectionTypeCode: InspectionTypeCode,
+  payload: unknown,
+  resultId: number,
+  database?: DbOrTx,
+): Promise<void> => {
+  const data = parseInspectionPayload(inspectionTypeCode, payload, resultId);
 
   switch (data.kind) {
     case "mgi":
@@ -872,6 +891,26 @@ export const createResult = async (
 
 export const getResultById = async (resultId: number, database?: DbOrTx) =>
   findResultById(resultId, database);
+
+/** Form-state read for Continue; null when the result does not exist. */
+export const getResultFormState = async (
+  resultId: number,
+  database?: DbOrTx,
+): Promise<ResultFormState | null> => {
+  const row = await findResultById(resultId, database);
+  if (!row) return null;
+
+  return {
+    resultId: row.resultId,
+    remarks: row.remarks,
+    customValues: (row.customValues as Record<string, unknown> | null) ?? null,
+    layer: row.layer,
+    inspectionTypeCode: row.inspectionTypeCode,
+    sessionId: row.sessionId,
+    masterEndMs: row.masterEndMs,
+    submittedPayload: row.submittedPayload,
+  };
+};
 
 const toIsoString = (value: Date) => value.toISOString();
 

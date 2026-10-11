@@ -11,6 +11,7 @@ import {
   getGviDetailByResultId,
   getPipelineDetailByResultId,
   getResultEvidence,
+  getResultFormState,
   getResultMgiDetailByResultId,
   getRiserDetailByResultId,
   getScourDetailByResultId,
@@ -61,6 +62,10 @@ export const resultRoutes = (database?: DbOrTx) => {
     const resultId = parseId(c, "id");
     return ok(c, await getResultEvidence(resultId, database));
   });
+
+  // row-only form state for Continue — null when the result is gone
+  routes.get("/api/v1/results/:id/form-state", async (c) =>
+    ok(c, await getResultFormState(parseId(c, "id"), database)));
 
   // typed details: null when the result has no detail of that type
   routes.get("/api/v1/results/:id/mgi", async (c) =>

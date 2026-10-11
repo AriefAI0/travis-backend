@@ -694,6 +694,22 @@ export type ResultEvidence = {
   images: ItemResultSidebarImage[];
 };
 
+/**
+ * One result's form state, straight off the row — no detail-table joins.
+ * Continue uses it to prefill a new row: `submittedPayload` is the app's own
+ * stop payload, so the new tool instance seeds from the same shape it sends.
+ */
+export type ResultFormState = {
+  resultId: number;
+  remarks: string | null;
+  customValues: Record<string, unknown> | null;
+  layer: number | null;
+  inspectionTypeCode: InspectionTypeCode;
+  sessionId: number | null;
+  masterEndMs: number | null;
+  submittedPayload: unknown;
+};
+
 /* =========================================================
    playbackWorkspace (app: src/shared/playbackWorkspace.ts)
 ========================================================= */
@@ -1039,6 +1055,8 @@ export const stopInspectionSchema = z.object({
   payload: z.unknown(),
   customValues: z.record(z.string(), z.unknown()).optional(),
   masterEndMs: z.number().int().nonnegative(),
+  // validate everything a real stop would, then write nothing
+  dryRun: z.boolean().optional(),
 });
 
 // sessions — service normalize only honors name today

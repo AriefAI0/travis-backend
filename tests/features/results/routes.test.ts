@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { appFor } from "../../helpers/app";
 import {
@@ -74,6 +75,49 @@ describe("results routes", () => {
     const res = await app.request("/api/v1/results/5001/gvi");
     expect(res.status).toBe(200);
     expect(await json<unknown>(res)).toEqual({ ok: true, data: null });
+  });
+
+  it("form-state reads the row itself, and is null for a row that is gone", async () => {
+    await seedResultContext();
+
+    const open = await app.request("/api/v1/results/5001/form-state");
+    expect(open.status).toBe(200);
+    expect((await json(open)).data).toEqual({
+      resultId: 5001,
+      remarks: null,
+      customValues: null,
+      layer: 1,
+      inspectionTypeCode: "GVI",
+      sessionId: 101,
+      masterEndMs: null,
+      // an open row has not been submitted, so there is nothing to prefill from
+      submittedPayload: null,
+    });
+
+    const missing = await app.request("/api/v1/results/99999/form-state");
+    expect(missing.status).toBe(200);
+    expect(await json<unknown>(missing)).toEqual({ ok: true, data: null });
+  });
+
+  it("form-state echoes a stopped row's payload and custom values", async () => {
+    await seedResultContext();
+    const payload = { kind: "gvi", version: 1, condition: "ok", gviCP: [] };
+    await testDb
+      .update(schema.result)
+      .set({
+        masterEndMs: 4000,
+        customValues: { 7: "note" },
+        submittedPayload: payload,
+        remarks: "deck",
+      })
+      .where(eq(schema.result.resultId, 5001));
+
+    const res = await app.request("/api/v1/results/5001/form-state");
+    const data = (await json(res)).data as Record<string, unknown>;
+    expect(data.masterEndMs).toBe(4000);
+    expect(data.submittedPayload).toEqual(payload);
+    expect(data.customValues).toEqual({ 7: "note" });
+    expect(data.remarks).toBe("deck");
   });
 
   it("project recordings + summary for a seeded project", async () => {

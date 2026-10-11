@@ -17,6 +17,7 @@ import {
   deleteResult,
   getResultById,
   listResultsBySessionId,
+  parseInspectionPayload,
   updateResult,
   writeTypedDetail,
 } from "./result.service";
@@ -88,6 +89,8 @@ export type StopInspectionInput = {
   payload: unknown;
   customValues?: Record<string, unknown>;
   masterEndMs: number;
+  /** validate the whole stop, write nothing — the app's Submit gate */
+  dryRun?: boolean;
 };
 
 export type ActiveInspection = {
@@ -263,10 +266,16 @@ export const stopInspection = async (
     );
     const values = await validateCustomValues(form.inspectionFormId, input.customValues ?? {}, tx);
 
+    // Parse before any write: a dry run and a real stop must fail identically,
+    // or the app would offer a Submit that the real stop then rejects.
+    parseInspectionPayload(result.inspectionTypeCode, input.payload, resultId);
+    if (input.dryRun) return result;
+
     const update: Record<string, unknown> = {
       masterEndMs: input.masterEndMs,
       customValues: values,
       inspectionFormId: form.inspectionFormId,
+      submittedPayload: input.payload,
     };
     if (input.remarks !== undefined) update.remarks = input.remarks;
     const updated = await updateResult(resultId, update, tx);

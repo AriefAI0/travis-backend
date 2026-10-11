@@ -481,6 +481,10 @@ export const result = pgTable(
     // custom form values keyed by inspection_form_field id
     customValues: jsonb("custom_values"),
 
+    // the stop payload exactly as the app sent it; null until stopped. Prefill
+    // for Continue reads this back, so no per-type reverse mapper is needed.
+    submittedPayload: jsonb("submitted_payload"),
+
     // form version pinned at start; completed results keep their version
     inspectionFormId: integer("inspection_form_id").references(
       () => inspectionForm.inspectionFormId,

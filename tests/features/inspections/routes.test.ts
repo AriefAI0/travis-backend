@@ -209,6 +209,79 @@ describe("inspections routes", () => {
     expect(active).toHaveLength(0);
   });
 
+  it("persists the stop payload verbatim", async () => {
+    await seedWorld();
+    const started = await startInspection({});
+    const resultId = (await json(started)).data.resultId as number;
+
+    const stopped = await post(`/api/v1/inspections/${resultId}/stop`, {
+      remarks: "seen from the deck",
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 4200,
+    });
+    expect(stopped.status).toBe(200);
+
+    const row = await testDb.query.result.findFirst({
+      where: eq(schema.result.resultId, resultId),
+    });
+    expect(row?.submittedPayload).toEqual(GVI_PAYLOAD);
+    expect(row?.remarks).toBe("seen from the deck");
+  });
+
+  it("dry-run fails exactly where the real stop fails, and writes nothing", async () => {
+    await seedWorld();
+    await post("/api/v1/projects/1/inspection-forms/GVI/versions", {
+      customFields: [{ label: "Clamp note", dataType: "text", required: true, displayOrder: 0 }],
+    });
+    const form = (await json(await app.request("/api/v1/projects/1/inspection-forms/GVI")))
+      .data as Record<string, any>;
+    const clampNote = form.fields.find((f: Record<string, any>) => f.label === "Clamp note");
+
+    const started = await startInspection({});
+    const resultId = (await json(started)).data.resultId as number;
+
+    // the two drafts that failed live: a required value missing, and a null payload
+    const badValues = await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 5000,
+      dryRun: true,
+    });
+    expect(badValues.status).toBe(400);
+
+    const badPayload = await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: null,
+      customValues: { [clampNote.inspectionFormFieldId]: "note" },
+      masterEndMs: 5000,
+      dryRun: true,
+    });
+    expect(badPayload.status).toBe(400);
+    expect((await json(badPayload)).code).toBe("payload_invalid");
+
+    const pass = await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: { [clampNote.inspectionFormFieldId]: "note" },
+      masterEndMs: 5000,
+      dryRun: true,
+    });
+    expect(pass.status).toBe(200);
+
+    // a passing dry-run leaves the row open, so the real stop still works
+    const untouched = await testDb.query.result.findFirst({
+      where: eq(schema.result.resultId, resultId),
+    });
+    expect(untouched?.masterEndMs).toBeNull();
+    expect(untouched?.submittedPayload).toBeNull();
+
+    const real = await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: { [clampNote.inspectionFormFieldId]: "note" },
+      masterEndMs: 5000,
+    });
+    expect(real.status).toBe(200);
+  });
+
   it("lists active inspections with layer and target", async () => {
     await seedWorld();
     await startInspection({});
