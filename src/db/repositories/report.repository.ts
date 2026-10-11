@@ -1,4 +1,4 @@
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { report } from "../schema";
@@ -52,6 +52,31 @@ export const updateReportRecord = async (
     .update(report)
     .set({ ...values, updatedAt: new Date() })
     .where(and(eq(report.organizationId, organizationId), eq(report.reportId, reportId)))
+    .returning();
+
+  return rows[0] ?? null;
+};
+
+// Claim the document write at the version the caller loaded.
+//
+// One statement, so the compare and the bump cannot interleave: a row comes
+// back only when the version still matches, and two writers cannot both win.
+export const claimReportDocxWrite = async (
+  organizationId: number,
+  reportId: string,
+  expectedVersion: number,
+  database: DbOrTx = db,
+) => {
+  const rows = await database
+    .update(report)
+    .set({ version: sql`${report.version} + 1`, updatedAt: new Date() })
+    .where(
+      and(
+        eq(report.organizationId, organizationId),
+        eq(report.reportId, reportId),
+        eq(report.version, expectedVersion),
+      ),
+    )
     .returning();
 
   return rows[0] ?? null;

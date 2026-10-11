@@ -1342,6 +1342,11 @@ export const report = pgTable(
     status: reportStatus("status").notNull().default("generating"),
     errorDetail: text("error_detail"),
 
+    // Bumped on every write of the stored document. The editor sends the
+    // version it loaded, so a second tab or a refresh cannot be undone
+    // silently by a stale save.
+    version: integer("version").notNull().default(1),
+
     ...createdAt,
     ...updatedAt,
   },

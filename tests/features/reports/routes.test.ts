@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { createRequire } from "node:module";
 import { appFor } from "../../helpers/app";
 import {
   closeTestDatabase,
@@ -11,6 +12,9 @@ import { convertDocxToPdf } from "../../../src/lib/pdf/convert";
 import { AppError } from "../../../src/lib/error";
 import { env } from "../../../src/config/env";
 import * as schema from "../../../src/db/schema";
+
+const require = createRequire(import.meta.url);
+const PizZip = require("pizzip");
 
 const app = appFor(testDb, reportRoutes);
 
@@ -32,7 +36,54 @@ const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingm
 const seedProject = () =>
   testDb.insert(schema.project).values({ projectId: 1, displayNumber: 1, title: "Alpha" });
 
-type ReportBody = { reportId: string; name: string; status: string };
+// Project, one target, one result: enough for the render to produce a tagged
+// region a refresh can rewrite.
+const seedResult = async () => {
+  await seedProject();
+  await testDb.insert(schema.session).values({ sessionId: 101, projectId: 1, displayNumber: 1, name: "Run 1" });
+  await testDb.insert(schema.taskGroup).values({ taskGroupId: 1, projectId: 1, code: "100" });
+  await testDb.insert(schema.taskCode).values({ taskCodeId: 10, taskGroupId: 1, code: "101" });
+  await testDb.insert(schema.description).values({ descriptionId: 100, taskCodeId: 10, label: "Leg A" });
+  await testDb.insert(schema.result).values({
+    resultId: 5001,
+    displayNumber: 1,
+    projectId: 1,
+    sessionId: 101,
+    inspectionTypeCode: "GVI",
+    descriptionId: 100,
+    layer: 1,
+    masterStartMs: 0,
+    remarks: "looks fine",
+  });
+  await testDb.insert(schema.resultGvi).values({ resultId: 5001, condition: "not_ok" });
+};
+
+type ReportBody = { reportId: string; name: string; status: string; version: number };
+
+// The stored document's XML, so a test can look at what a write really kept.
+const documentXml = async (reportId: string) => {
+  const res = await app.request(`/api/v1/reports/${reportId}/docx`);
+  return new PizZip(Buffer.from(await res.arrayBuffer())).file("word/document.xml").asText() as string;
+};
+
+// A typed paragraph, added where a user would add one: outside every region.
+const withNote = (buffer: Buffer, text: string) => {
+  const zip = new PizZip(buffer);
+  const xml = zip.file("word/document.xml").asText() as string;
+  zip.file("word/document.xml", xml.replace("<w:body>", `<w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p>`));
+
+  return zip.generate({ type: "nodebuffer" }) as Buffer;
+};
+
+// The user deleting a generated region in the editor.
+const withoutRegion = (buffer: Buffer, tag: string) => {
+  const zip = new PizZip(buffer);
+  const xml = zip.file("word/document.xml").asText() as string;
+  const control = new RegExp(`<w:sdt><w:sdtPr><w:tag w:val="${tag}"/></w:sdtPr>.*?</w:sdt>`, "s");
+  zip.file("word/document.xml", xml.replace(control, ""));
+
+  return zip.generate({ type: "nodebuffer" }) as Buffer;
+};
 
 // every ok() response wraps its payload in `data`
 const readData = async <T>(res: Response): Promise<T> =>
@@ -53,7 +104,12 @@ const statusOf = async (reportId: string) => {
   const res = await app.request(`/api/v1/reports/${reportId}`);
   expect(res.status).toBe(200);
 
-  return readData<{ name: string; status: string; errorDetail: string | null }>(res);
+  return readData<{
+    name: string;
+    status: string;
+    errorDetail: string | null;
+    version: number;
+  }>(res);
 };
 
 // The render runs after the POST answers, so wait for the row to settle.
@@ -161,18 +217,66 @@ describe("stored document", () => {
     );
     // an edit must differ from the render, or the write proves nothing
     const edited = Buffer.concat([original, Buffer.from([0x00])]);
+    const { version } = await statusOf(reportId);
 
     const written = await app.request(`/api/v1/reports/${reportId}/docx`, {
       method: "PUT",
-      headers: { "content-type": DOCX_MIME },
+      headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
       body: edited,
     });
     expect(written.status).toBe(200);
+    // the write claims the next version, so the editor can keep saving
+    expect((await readData<{ version: number }>(written)).version).toBe(version + 1);
 
     const read = Buffer.from(
       await (await app.request(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
     );
     expect(read.byteLength).toBe(edited.byteLength);
+  }, 20_000);
+
+  it("refuses a save at a stale version, and writes nothing", async () => {
+    await seedProject();
+    const { reportId } = await generate();
+    await waitForRender(reportId);
+
+    const original = Buffer.from(
+      await (await app.request(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
+    );
+    const { version } = await statusOf(reportId);
+    const edited = withNote(original, "first tab");
+    const stale = withNote(original, "stale tab");
+
+    const first = await app.request(`/api/v1/reports/${reportId}/docx`, {
+      method: "PUT",
+      headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
+      body: edited,
+    });
+    expect(first.status).toBe(200);
+
+    const second = await app.request(`/api/v1/reports/${reportId}/docx`, {
+      method: "PUT",
+      headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
+      body: stale,
+    });
+
+    expect(second.status).toBe(409);
+    expect(await documentXml(reportId)).toContain("first tab");
+    expect(await documentXml(reportId)).not.toContain("stale tab");
+  }, 20_000);
+
+  it("refuses a save that carries no version", async () => {
+    await seedProject();
+    const { reportId } = await generate();
+    await waitForRender(reportId);
+
+    const res = await app.request(`/api/v1/reports/${reportId}/docx`, {
+      method: "PUT",
+      headers: { "content-type": DOCX_MIME },
+      body: Buffer.from("PK\u0003\u0004 not a real zip"),
+    });
+
+    // 428, not 400: the body is fine, the page is out of date
+    expect(res.status).toBe(428);
   }, 20_000);
 
   it("rejects a body that is not a docx", async () => {
@@ -264,6 +368,75 @@ describe("report PDF", () => {
     const res = await app.request("/api/v1/reports/not-a-uuid/pdf");
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe("region refresh", () => {
+  it("rewrites the generated regions and keeps every edit outside them", async () => {
+    await seedResult();
+    const { reportId } = await generate();
+    await waitForRender(reportId);
+
+    const original = Buffer.from(
+      await (await app.request(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
+    );
+    const { version } = await statusOf(reportId);
+
+    const written = await app.request(`/api/v1/reports/${reportId}/docx`, {
+      method: "PUT",
+      headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
+      body: withNote(original, "inspector note"),
+    });
+    expect(written.status).toBe(200);
+
+    const res = await app.request(`/api/v1/reports/${reportId}/refresh`, { method: "POST" });
+    expect(res.status).toBe(200);
+
+    const result = await readData<{ replaced: string[]; version: number }>(res);
+    expect(result.replaced).toEqual(["region:description:100:GVI"]);
+    // the refresh claims the next version, so a stale editor cannot undo it
+    expect(result.version).toBe(version + 2);
+
+    const after = await documentXml(reportId);
+    expect(after).toContain("inspector note");
+    expect(after).toContain("region:description:100:GVI");
+    expect((await statusOf(reportId)).status).toBe("ready");
+  }, 20_000);
+
+  it("names a region the user deleted, and never restores it", async () => {
+    await seedResult();
+    const { reportId } = await generate();
+    await waitForRender(reportId);
+
+    const original = Buffer.from(
+      await (await app.request(`/api/v1/reports/${reportId}/docx`)).arrayBuffer(),
+    );
+    const { version } = await statusOf(reportId);
+
+    await app.request(`/api/v1/reports/${reportId}/docx`, {
+      method: "PUT",
+      headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
+      body: withoutRegion(original, "region:description:100:GVI"),
+    });
+
+    const res = await app.request(`/api/v1/reports/${reportId}/refresh`, { method: "POST" });
+    const result = await readData<{ replaced: string[]; unplaced: string[] }>(res);
+
+    expect(result.replaced).toEqual([]);
+    expect(result.unplaced).toEqual(["region:description:100:GVI"]);
+    // the section the user removed stays removed
+    expect(await documentXml(reportId)).not.toContain("GVI Results");
+  }, 20_000);
+
+  it("answers 404 for an unknown report, and 400 for an id that is not a uuid", async () => {
+    const unknown = await app.request(
+      "/api/v1/reports/00000000-0000-4000-8000-000000000000/refresh",
+      { method: "POST" },
+    );
+    expect(unknown.status).toBe(404);
+
+    const bad = await app.request("/api/v1/reports/not-a-uuid/refresh", { method: "POST" });
+    expect(bad.status).toBe(400);
   });
 });
 

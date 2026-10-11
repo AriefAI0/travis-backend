@@ -7,6 +7,7 @@ import { log } from "../../lib/logger";
 import { minio } from "../../lib/minio_storage/clients";
 import { ensureDefaultOrganization } from "../ensure-org";
 import {
+  claimReportDocxWrite,
   deleteReportRecord,
   failStaleGeneratingReports,
   findReportRecord,
@@ -52,6 +53,7 @@ export const reportListItem = (row: ReportRow): ReportListItem => ({
   name: row.name,
   status: row.status as ReportStatus,
   errorDetail: row.errorDetail,
+  version: row.version,
   createdAt: row.createdAt.toISOString(),
   updatedAt: row.updatedAt.toISOString(),
 });
@@ -126,19 +128,54 @@ export const loadReportDocx = async (reportId: string, database?: DbOrTx): Promi
   }
 };
 
-// The browser editor's save path: the edited bytes replace the stored object.
+// What a document write did, so the caller can hand the new version back.
+export type DocxWrite = { reportId: string; version: number };
+
+// Write the stored document, but only at the version the caller loaded.
+//
+// A refresh writes this row too, so without the guard an editor tab opened
+// before a refresh would save its own copy over the refreshed one and undo the
+// refresh with no error anywhere.
+//
+// The version is claimed before the object write on purpose: a claim that
+// succeeds and an upload that fails leaves the version ahead, which the user
+// fixes by reloading. The other order would upload first and only then discover
+// the write was stale, which is the overwrite this exists to stop.
+// flow: row guard > 428 without a version > claim version > upload object
 export const saveReportDocx = async (
   reportId: string,
   bytes: Uint8Array,
+  expectedVersion: number | null,
   database?: DbOrTx,
-): Promise<void> => {
+): Promise<DocxWrite> => {
+  const organizationId = await defaultOrgId(database);
   const row = await getReport(reportId, database);
+
+  if (expectedVersion === null) {
+    throw new AppError(
+      428,
+      "version_required",
+      "This page carries no report version. Reload the report and save again",
+    );
+  }
+
+  const claimed = await claimReportDocxWrite(organizationId, reportId, expectedVersion, database);
+  if (!claimed) {
+    const current = await getReport(reportId, database);
+    throw new AppError(
+      409,
+      "report_changed",
+      `Report ${reportId} is at version ${current.version}, not ${expectedVersion}. Reload before saving`,
+    );
+  }
+
   // the minio client takes a Buffer, not a view
   const body = Buffer.from(bytes);
-
   await minio.putObject(env.BUCKET_MEDIA, row.minioKey, body, body.byteLength, {
     "Content-Type": DOCX_MIME,
   });
+
+  return { reportId, version: claimed.version };
 };
 
 export const renameReport = async (

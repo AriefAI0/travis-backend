@@ -368,6 +368,29 @@ describe("generateReport", () => {
     expect(xml).not.toContain("{pipeline_debris}");
   });
 
+  it("tags every generated section, so a refresh can find it", async () => {
+    await seedMixedTypes();
+
+    const tagsIn = (buf: Buffer) =>
+      [...documentXmlIn(buf).matchAll(/<w:tag w:val="([^"]*)"\/>/g)].map((match) => match[1]!);
+
+    const first = await generateReport(1, testDb);
+    const second = await generateReport(1, testDb);
+
+    // one region per section: GVI, CVI and MGI on the description target, and
+    // the second result's GVI on the part-code target
+    expect(tagsIn(first).sort()).toEqual([
+      "region:description:100:CVI",
+      "region:description:100:GVI",
+      "region:description:100:MGI",
+      "region:part_code:300:GVI",
+    ]);
+    // a re-render must name the same regions, or a refresh would miss them
+    expect(tagsIn(second)).toEqual(tagsIn(first));
+    // the template's placeholder never survives
+    expect(documentXmlIn(first)).not.toContain('w:val="region"');
+  }, 20_000);
+
   it("rejects an unknown project", async () => {
     await expect(generateReport(999, testDb)).rejects.toThrow();
   });

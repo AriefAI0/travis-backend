@@ -18,7 +18,9 @@ const renderInto = async (row: ReportRow, database?: DbOrTx) => {
     const { template, data } = await loadReportInputs(row.projectId, database);
     const docx = await renderReport(template, data);
 
-    await saveReportDocx(row.reportId, docx, database);
+    // the row is still `generating`, so the version it was created with is
+    // the one this write claims
+    await saveReportDocx(row.reportId, docx, row.version, database);
     await setReportStatus(row.reportId, "ready", null, database);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

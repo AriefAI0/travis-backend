@@ -17,8 +17,25 @@ import { ok } from "../../lib/response";
 import { convertDocxToPdf } from "../../lib/pdf/convert";
 import { reportNameSchema } from "../../types/api";
 import { queueReportGeneration } from "./generate";
+import { refreshReport } from "./refresh";
 
 const PDF_MIME = "application/pdf";
+
+// The version the editor loaded, sent on save.
+const VERSION_HEADER = "x-report-version";
+
+// A version is a positive integer, or absent. Anything else is not a version,
+// and the service answers 428 for absent.
+const parseVersion = (header: string | undefined): number | null => {
+  if (header === undefined || header.trim() === "") return null;
+
+  const version = Number(header);
+  if (!Number.isInteger(version) || version < 1) {
+    throw new AppError(400, "invalid_version", `${VERSION_HEADER} must be a positive integer`);
+  }
+
+  return version;
+};
 
 // A docx is a zip, and the editor refuses anything else — so does this.
 const isZip = (bytes: Uint8Array): boolean => bytes[0] === 0x50 && bytes[1] === 0x4b;
@@ -132,14 +149,24 @@ export const reportRoutes = (database?: DbOrTx) => {
     return attachmentResponse(c, pdf, attachmentFilename(status.name, reportId, "pdf"), PDF_MIME);
   });
 
-  // the browser editor's save path
+  // the browser editor's save path. The version the editor loaded travels in a
+  // header, because the body is the document itself.
   routes.put("/api/v1/reports/:reportId/docx", async (c) => {
     const reportId = parseUuid(c, "reportId");
+    const header = c.req.header(VERSION_HEADER);
     const body = await readDocxBody(c);
 
-    await saveReportDocx(reportId, body, database);
+    const written = await saveReportDocx(reportId, body, parseVersion(header), database);
 
-    return ok(c, { reportId });
+    return ok(c, written);
+  });
+
+  // Rewrite the generated regions from current data. The user's own edits sit
+  // outside every region, so they survive.
+  routes.post("/api/v1/reports/:reportId/refresh", async (c) => {
+    const reportId = parseUuid(c, "reportId");
+
+    return ok(c, await refreshReport(reportId, database));
   });
 
   routes.patch("/api/v1/reports/:reportId", async (c) => {

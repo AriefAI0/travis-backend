@@ -47,6 +47,9 @@ type SectionFlags = {
 
 export type ReportSection = SectionFlags & {
   inspection_type: string;
+  // What a refresh targets: the section's target id, then its inspection type.
+  // Stable across renders, so a refresh finds the region it rewrites.
+  region: string;
   // Object keys for the section's picture, best first: the result's own
   // evidence image, then the clip still taken while it was inspected. The
   // renderer keeps the first that loads, and draws no frame when none does.
@@ -529,11 +532,13 @@ const collectImageKeys = async (resultIds: number[], database?: DbOrTx) => {
 };
 
 // Fold one target's results into a section per inspection type, keeping the
-// order the types first appear.
+// order the types first appear. One target holds one section per type, so the
+// target id plus the type names a region exactly once.
 const buildSections = (
   results: SummaryRow[],
   rowsByResult: Map<number, ReportRow[]>,
   imageKeys: Map<number, string[]>,
+  targetKey: string,
 ): ReportSection[] => {
   const buckets = new Map<string, SummaryRow[]>();
 
@@ -546,6 +551,7 @@ const buildSections = (
   return [...buckets]
     .map(([type, bucket]) => ({
       inspection_type: type,
+      region: `region:${targetKey}:${type}`,
       // the section's picture comes from its first result that has one
       image_keys: bucket.map((row) => imageKeys.get(row.resultId)).find(Boolean) ?? [],
       ...flagsFor(type),
@@ -596,7 +602,7 @@ export const gatherReportData = async (
   const pushItem = (key: string, target: TargetLabel) => {
     const bucket = byTarget.get(key);
     if (!bucket) return;
-    items.push({ ...target, sections: buildSections(bucket, rowsByResult, imageKeys) });
+    items.push({ ...target, sections: buildSections(bucket, rowsByResult, imageKeys, key) });
   };
 
   // tree order first, so the report reads top-down like the workspace

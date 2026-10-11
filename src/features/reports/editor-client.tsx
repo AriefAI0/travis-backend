@@ -28,6 +28,8 @@ const Editor = () => {
   const [docx, setDocx] = useState<Uint8Array | null>(null);
   const [name, setName] = useState("Report");
   const [problemText, setProblemText] = useState("Loading the report…");
+  // the version this page loaded; the server refuses a save at any other one
+  const version = useRef<number | null>(null);
 
   // flow: read name and bytes together > mount
   useEffect(() => {
@@ -37,9 +39,10 @@ const Editor = () => {
         if (!meta.ok) throw new Error(await readProblem(meta));
         if (!bytes.ok) throw new Error(await readProblem(bytes));
 
-        const report = (await meta.json()) as { data: { name: string } };
+        const report = (await meta.json()) as { data: { name: string; version: number } };
         setName(report.data.name);
         document.title = report.data.name;
+        version.current = report.data.version;
 
         setDocx(new Uint8Array(await bytes.arrayBuffer()));
       } catch (error) {
@@ -50,6 +53,10 @@ const Editor = () => {
 
   // The editor's File > Save. A failed write must be loud: the alternative is
   // a user believing edits are stored when they are not.
+  //
+  // A 409 means the report moved on — a refresh landed, or another tab saved —
+  // and this copy is stale. The server writes nothing, so the user reloads
+  // instead of overwriting whatever came after them.
   const save = async () => {
     const current = await editor.current?.save();
     if (!current) return;
@@ -57,10 +64,13 @@ const Editor = () => {
     try {
       const response = await fetch(docxUrl, {
         method: "PUT",
-        headers: { "Content-Type": DOCX_MIME },
+        headers: { "Content-Type": DOCX_MIME, "x-report-version": String(version.current ?? "") },
         body: new Uint8Array(current),
       });
       if (!response.ok) throw new Error(await readProblem(response));
+
+      const written = (await response.json()) as { data: { version: number } };
+      version.current = written.data.version;
     } catch (error) {
       alert(`Could not save the report: ${problem(error)}`);
     }

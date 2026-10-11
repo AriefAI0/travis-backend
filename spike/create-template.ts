@@ -68,6 +68,19 @@ const loopTable = (cols: number, labels: string[], tags: string[], loop: string)
 
 const sectionHeading = (text: string) => para(text, { bold: true, size: 26 });
 
+// One content control per generated section, tagged from the data. A refresh
+// finds the region it rewrites by this tag, and leaves everything outside it
+// alone. The tag is a value, never a position, so a re-render names the same
+// regions. Word and the browser editor both keep it through a save.
+//
+// The tag value is the constant `region`, not data. docxtemplater substitutes
+// inside `<w:t>` text runs only, and a raw-XML tag needs a `<w:p>`, so neither
+// form reaches a `w:sdtPr` attribute. `renderReport` writes the real tag into
+// each placeholder region afterwards, in the order the sections rendered.
+const REGION_PLACEHOLDER = "region";
+const regionControl = (body: string) =>
+  `<w:sdt><w:sdtPr><w:tag w:val="${REGION_PLACEHOLDER}"/></w:sdtPr><w:sdtContent>${body}</w:sdtContent></w:sdt>`;
+
 // Wrap one type's tables in a boolean block. A false flag drops the whole box,
 // so a single template serves every inspection type.
 const conditional = (type: string, body: string) =>
@@ -237,10 +250,12 @@ const BODY =
   para("{#sections}") +
   // A section without a picture draws no frame at all: an empty box reads as a
   // defect. `has_image` is what tells the two cases apart.
-  para("{#has_image}") +
-  para("{%image}", { align: "center" }) +
-  para("{/has_image}") +
-  TYPE_ORDER.map((type) => conditional(type, BLOCKS[type])).join("") +
+  regionControl(
+    para("{#has_image}") +
+      para("{%image}", { align: "center" }) +
+      para("{/has_image}") +
+      TYPE_ORDER.map((type) => conditional(type, BLOCKS[type])).join(""),
+  ) +
   para("{/sections}") +
   para("{/items}");
 
@@ -407,6 +422,14 @@ const TABLE_COUNT: Record<InspectionType, number> = {
 const EXPECTED_ROWS =
   2 + TYPE_ORDER.reduce((total, type) => total + 2 * TABLE_COUNT[type], 0);
 
+// Region placeholders in a rendered document. The renderer replaces each with a
+// real tag, so this counts them: one region per section, or the renderer would
+// hand the wrong tag to a region.
+const assertRegions = (xml: string, expected: number) => {
+  const regions = xml.match(/<w:tag w:val="region"\/>/g) ?? [];
+  assert.equal(regions.length, expected, "wrong region count");
+};
+
 // Run the checks, then write the file.
 const main = async () => {
   const template = buildTemplate();
@@ -423,12 +446,15 @@ const main = async () => {
   assert.equal((full.match(/<w:drawing>/g) ?? []).length, TYPE_ORDER.length, "wrong image count");
   assert.ok(!full.includes("{/"), "closing tag left in output");
   assert.ok(!/\{[#/%]/.test(full), "template tag left in output");
+  assert.ok(!full.includes("{region}"), "the region tag never rendered");
+  assertRegions(full, TYPE_ORDER.length);
 
   const single = await renderWith(template, singlePayload);
   assert.ok(single.includes("MGI Results"), "MGI block dropped");
   for (const type of TYPE_ORDER.filter((t) => t !== "MGI")) {
     assert.ok(!single.includes(`${type} Results`), `${type} block not dropped`);
   }
+  assertRegions(single, 1);
 
   const multi = await renderWith(template, multiRowPayload);
   assert.equal((multi.match(/<w:tr>/g) ?? []).length, 6, "GVI row loop did not repeat");
@@ -439,6 +465,10 @@ const main = async () => {
     0,
     "a section with no picture still drew one",
   );
+  assertRegions(noImage, 1);
+
+  // A count that does not match must fail the check, not pass quietly.
+  assert.throws(() => assertRegions(full, TYPE_ORDER.length - 1), "a wrong count passed");
 
   // Word merges two tables that touch, and a caret cannot land after a table
   // that ends a block, so each table carries an empty paragraph behind it.

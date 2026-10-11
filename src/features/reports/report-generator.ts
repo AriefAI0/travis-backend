@@ -136,6 +136,41 @@ const describeTemplateError = (err: unknown): string => {
   return err instanceof Error ? err.message : String(err);
 };
 
+// The whole document owns the region order, so the caller's tag list and the
+// rendered regions line up. `ReportSection` counts regions for this reason.
+const REGION_TAG = /<w:tag w:val="region"\/>/g;
+
+// A region tag is data, but it lands in an XML attribute.
+const escapeAttribute = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+
+// Name each rendered region after the section it holds.
+//
+// The template cannot carry the tag itself: docxtemplater substitutes inside
+// `<w:t>` text runs only, and a raw-XML tag needs a `<w:p>`, so no form reaches
+// a `w:sdtPr` attribute. The template writes the placeholder `region` instead,
+// and this assigns the real tag in document order, which is the order the
+// sections rendered. A count that differs means a tag would land on the wrong
+// region, so it fails the render rather than writing a document a refresh would
+// then rewrite in the wrong place.
+// flow: count placeholders > match against sections > replace in order
+const tagRegions = (xml: string, regions: string[]): string => {
+  const found = (xml.match(REGION_TAG) ?? []).length;
+  if (found !== regions.length) {
+    throw new AppError(
+      500,
+      "region_mismatch",
+      `${found} regions rendered for ${regions.length} sections`,
+    );
+  }
+
+  let index = 0;
+  return xml.replace(REGION_TAG, () => {
+    const tag = escapeAttribute(regions[index++]!);
+    return `<w:tag w:val="${tag}"/>`;
+  });
+};
+
 // The image module stamps every drawing with the same id. OOXML wants one id
 // per drawing, and Word repairs a document that repeats them.
 const renumberDrawingIds = (xml: string): string => {
@@ -206,7 +241,11 @@ export const renderReport = async (
   const zip = doc.getZip();
   const page = zip.file("word/document.xml");
   if (page) {
-    zip.file("word/document.xml", renumberDrawingIds(page.asText() as string));
+    const regions = sections.map((section) => section.region);
+    zip.file(
+      "word/document.xml",
+      renumberDrawingIds(tagRegions(page.asText() as string, regions)),
+    );
   }
 
   return zip.generate({ type: "nodebuffer" }) as Buffer;

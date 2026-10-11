@@ -1458,6 +1458,8 @@ export type ReportListItem = {
   status: ReportStatus;
   // set only while status is "error"
   errorDetail: string | null;
+  // bumped on every write of the stored document; the editor sends it back
+  version: number;
   createdAt: string;
   updatedAt: string;
 };
