@@ -19,7 +19,7 @@ const CONTENT_CLOSE = "</w:sdtContent>";
 const TAG = /<w:tag w:val="([^"]*)"\/>/;
 
 // One tagged region: its tag, and the bounds of the content inside it.
-type Region = { tag: string; contentStart: number; contentEnd: number };
+export type Region = { tag: string; contentStart: number; contentEnd: number };
 
 // What a splice did, so the caller can say which regions it left alone.
 export type RegionSplice = {
@@ -67,7 +67,7 @@ const matching = (xml: string, from: number, open: string, close: string): numbe
 // `<w:sdt>` is matched exactly, so the sdtPr, sdtContent and sdtEndPr elements
 // beside it never confuse the scan. A content control with no tag is skipped: a
 // stray control the user added is not a region.
-const findRegions = (xml: string): Region[] => {
+export const findRegions = (xml: string): Region[] => {
   const regions: Region[] = [];
   let cursor = 0;
 
