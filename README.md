@@ -114,8 +114,31 @@ POST /api/minio_handler/sessions/:id/segments?index=N   upload one segment
 POST /api/minio_handler/sessions/:id/heartbeat
 POST /api/minio_handler/sessions/:id/stop     202 -> finalize job
 ```
-## DB CLI command 
+## Schema changes and deploys
+
+Schema changes ship as SQL files, decided at dev time. Never run
+`drizzle-kit push` against production — it prompts on live data and dies
+without a TTY.
+
+Schema change, on your dev machine:
+
+```sh
+bun run db:generate   # writes migrations/NNNN_*.sql from src/db/schema.ts
 ```
-bun run db:generate # creates ./migrations/*.sql — REVIEW the SQL
-bun run db:push # applies it to the travis database
+
+- Read the SQL before committing. When it constrains populated tables, put the
+  dedupe or backfill statements in front of the constraint, in the same file.
+- Commit `schema.ts` and the SQL together. A schema change without its SQL
+  file deploys nothing.
+- For risky changes, test on a copy first: `pg_dump` prod, restore, run
+  `bun run db:migrate` against the copy.
+
+Deploy to production — nothing else needed on the server:
+
+```sh
+docker compose up -d --build    # or update the stack in Portainer
 ```
+
+The `migrate` container applies pending SQL headless in one transaction, then
+the app boots. A failed migration rolls back fully and the container exits
+non-zero, so the app stays down instead of running on a half-applied schema.
