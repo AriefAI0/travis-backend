@@ -79,6 +79,18 @@ const Editor = () => {
       chrome
       title={name}
       onSave={save}
+      // PDF and Print route through docx-to-pdf, which is Node-only and paid,
+      // and no exporter is wired for Markdown. A row that errors is worse than
+      // an absent row, so all three come out of File.
+      menu={{
+        children: (
+          <DocxEditor.Menu.File>
+            <DocxEditor.Menu.ExportPdf hidden />
+            <DocxEditor.Menu.Print hidden />
+            <DocxEditor.Menu.ExportMarkdown hidden />
+          </DocxEditor.Menu.File>
+        ),
+      }}
       // no `fonts` config on purpose: layout uses the fixed-width measurer, so
       // the HarfBuzz wasm is never fetched
       onFontError={(error) => console.warn("report editor font error:", error)}
