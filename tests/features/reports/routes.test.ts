@@ -393,13 +393,17 @@ describe("region refresh", () => {
     expect(res.status).toBe(200);
 
     const result = await readData<{ replaced: string[]; version: number }>(res);
-    expect(result.replaced).toEqual(["region:description:100:GVI"]);
+    // the section's picture region and its one table region
+    expect(result.replaced).toEqual([
+      "region:description:100:GVI:picture",
+      "region:description:100:GVI:1",
+    ]);
     // the refresh claims the next version, so a stale editor cannot undo it
     expect(result.version).toBe(version + 2);
 
     const after = await documentXml(reportId);
     expect(after).toContain("inspector note");
-    expect(after).toContain("region:description:100:GVI");
+    expect(after).toContain("region:description:100:GVI:1");
     expect((await statusOf(reportId)).status).toBe("ready");
   }, 20_000);
 
@@ -416,14 +420,15 @@ describe("region refresh", () => {
     await app.request(`/api/v1/reports/${reportId}/docx`, {
       method: "PUT",
       headers: { "content-type": DOCX_MIME, "x-report-version": String(version) },
-      body: withoutRegion(original, "region:description:100:GVI"),
+      body: withoutRegion(original, "region:description:100:GVI:1"),
     });
 
     const res = await app.request(`/api/v1/reports/${reportId}/refresh`, { method: "POST" });
     const result = await readData<{ replaced: string[]; unplaced: string[] }>(res);
 
-    expect(result.replaced).toEqual([]);
-    expect(result.unplaced).toEqual(["region:description:100:GVI"]);
+    // the picture region still lands; the table region the user removed does not
+    expect(result.replaced).toEqual(["region:description:100:GVI:picture"]);
+    expect(result.unplaced).toEqual(["region:description:100:GVI:1"]);
     // the section the user removed stays removed
     expect(await documentXml(reportId)).not.toContain("GVI Results");
   }, 20_000);

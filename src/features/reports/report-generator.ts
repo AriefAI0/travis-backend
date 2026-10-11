@@ -10,6 +10,7 @@ import {
   type ReportSection,
   type ReportTemplateData,
 } from "../../db/services/report-data.service";
+import { sectionRegionTags } from "./report-layout";
 
 // All three ship CommonJS only, so one require form covers them. The image
 // module must be required by its installed name: the older
@@ -136,8 +137,8 @@ const describeTemplateError = (err: unknown): string => {
   return err instanceof Error ? err.message : String(err);
 };
 
-// The whole document owns the region order, so the caller's tag list and the
-// rendered regions line up. `ReportSection` counts regions for this reason.
+// The template writes this constant for every region, and the renderer replaces
+// each with the tag of the section it holds.
 const REGION_TAG = /<w:tag w:val="region"\/>/g;
 
 // A region tag is data, but it lands in an XML attribute.
@@ -170,6 +171,15 @@ const tagRegions = (xml: string, regions: string[]): string => {
     return `<w:tag w:val="${tag}"/>`;
   });
 };
+
+// docxtemplater cannot see a content control, so a table that closes a region
+// looks to it like a table ending a block, and its `joinUncorrupt` step inserts
+// a paragraph behind it — inside the region, where the next refresh would
+// overwrite whatever a user typed. The gap belongs outside the region, and
+// `regionBlock` already puts one there.
+// flow: drop the inserted paragraph > the region ends with its table
+const dropInsertedGaps = (xml: string): string =>
+  xml.replace(/<\/w:tbl><w:p\/><\/w:sdtContent>/g, "</w:tbl></w:sdtContent>");
 
 // The image module stamps every drawing with the same id. OOXML wants one id
 // per drawing, and Word repairs a document that repeats them.
@@ -241,11 +251,10 @@ export const renderReport = async (
   const zip = doc.getZip();
   const page = zip.file("word/document.xml");
   if (page) {
-    const regions = sections.map((section) => section.region);
-    zip.file(
-      "word/document.xml",
-      renumberDrawingIds(tagRegions(page.asText() as string, regions)),
-    );
+    // one tag per picture and per table, in the order the template renders them
+    const regions = sections.flatMap((section) => sectionRegionTags(section));
+    const named = tagRegions(page.asText() as string, regions);
+    zip.file("word/document.xml", renumberDrawingIds(dropInsertedGaps(named)));
   }
 
   return zip.generate({ type: "nodebuffer" }) as Buffer;

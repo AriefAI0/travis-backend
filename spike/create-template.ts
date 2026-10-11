@@ -3,6 +3,13 @@
 // flow: build parts > zip > self-check render > write file
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import {
+  sectionRegionTags,
+  TYPE_ORDER,
+  TYPE_TABLES,
+  type InspectionType,
+  type RegionSection,
+} from "../src/features/reports/report-layout";
 
 const require = createRequire(import.meta.url);
 const PizZip = require("pizzip");
@@ -52,10 +59,13 @@ const BORDERS = ["top", "left", "bottom", "right", "insideH", "insideV"]
 const EMPTY_PARA = "<w:p/>";
 
 // A bordered fixed-width table. `rows` are pre-built <w:tr> strings.
+//
+// No paragraph behind it: the gap belongs outside the region, so a user can type
+// under the table and keep that text through a refresh. `regionBlock` adds it.
 const tbl = (cols: number, rows: string[]) =>
   `<w:tbl><w:tblPr><w:tblW w:w="${TABLE_W}" w:type="dxa"/><w:tblBorders>${BORDERS}</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>` +
   `<w:tblGrid>${Array.from({ length: cols }, () => `<w:gridCol w:w="${colW(cols)}"/>`).join("")}</w:tblGrid>` +
-  `${rows.join("")}</w:tbl>${EMPTY_PARA}`;
+  `${rows.join("")}</w:tbl>`;
 
 // Header row plus one repeated data row. The loop tags sit in the outer cells
 // of that same row: docxtemplater expands the pair to <w:tr> and drops the tags.
@@ -81,157 +91,159 @@ const REGION_PLACEHOLDER = "region";
 const regionControl = (body: string) =>
   `<w:sdt><w:sdtPr><w:tag w:val="${REGION_PLACEHOLDER}"/></w:sdtPr><w:sdtContent>${body}</w:sdtContent></w:sdt>`;
 
+// One region, then the gap that follows it. The gap sits outside every region,
+// so text typed into it belongs to the user and a refresh leaves it alone.
+const regionBlock = (body: string) => `${regionControl(body)}${EMPTY_PARA}`;
+
 // Wrap one type's tables in a boolean block. A false flag drops the whole box,
 // so a single template serves every inspection type.
-const conditional = (type: string, body: string) =>
-  `${para(`{#is${type}}`)}${sectionHeading(`${type} Results`)}${body}${para(`{/is${type}}`)}`;
+//
+// Each table gets its own region. The heading rides inside the first one, so a
+// refresh restores it too.
+const conditional = (type: InspectionType) =>
+  para(`{#is${type}}`) +
+  TABLES[type]
+    .map((table, index) =>
+      regionBlock((index === 0 ? sectionHeading(`${type} Results`) : "") + table),
+    )
+    .join("") +
+  para(`{/is${type}}`);
 
 /* ---------- per-type blocks ---------- */
 
-// Emission order across the whole document.
-const TYPE_ORDER = [
-  "GVI",
-  "CVI",
-  "DVI",
-  "MGI",
-  "CP",
-  "FMD",
-  "SCOUR",
-  "BSI",
-  "CGB",
-  "RISER",
-  "CAISSON",
-  "SEABED",
-  "PIPELINE",
-] as const;
-type InspectionType = (typeof TYPE_ORDER)[number];
-
 // One row per result, except CVI/DVI and MGI which repeat the parent fields
 // down each child row. Word cannot nest a loop inside a table row.
-const BLOCKS: Record<InspectionType, string> = {
-  GVI: loopTable(
+//
+// One entry per table, in the order the type renders them. The list length must
+// equal TYPE_TABLES for that type, or the renderer would hand a tag to the wrong
+// region; the self-check asserts it.
+const TABLES: Record<InspectionType, string[]> = {
+  GVI: [loopTable(
     7,
     ["KP Range", "Depth/El", "GVI CP", "GVI UT", "Condition", "Remarks", "Recorded"],
     ["{kp_range}", "{depth_el}", "{gvi_cp}", "{gvi_ut}", "{condition}", "{remarks}", "{recorded}"],
     "rows",
-  ),
-  CP: loopTable(
+  )],
+  CP: [loopTable(
     10,
     ["Anode Type", "Voltage (mV)", "Depletion", "Width", "Height", "Length", "Widest Pit", "Deepest Pit", "Remarks", "Recorded"],
     ["{anode_type}", "{voltage_mv}", "{depletion}", "{anode_width}", "{anode_height}", "{anode_length}", "{widest_pit}", "{deepest_pit}", "{remarks}", "{recorded}"],
     "rows",
-  ),
-  FMD: loopTable(
+  )],
+  FMD: [loopTable(
     7,
     ["Depth/El", "Initial", "Add. 1", "Add. 2", "Add. 3", "Remarks", "Recorded"],
     ["{depth_el}", "{initial_attempt}", "{additional_attempt_1}", "{additional_attempt_2}", "{additional_attempt_3}", "{remarks}", "{recorded}"],
     "rows",
-  ),
-  SCOUR: loopTable(
+  )],
+  SCOUR: [loopTable(
     7,
     ["Exposed Pile", "Exposed Height", "Height Leg 1", "Height Midpoint", "Height Leg 2", "Remarks", "Recorded"],
     ["{exposed_pile}", "{exposed_pile_height}", "{height_leg1}", "{height_midpoint}", "{height_leg2}", "{remarks}", "{recorded}"],
     "rows",
-  ),
-  CVI: loopTable(
+  )],
+  CVI: [loopTable(
     6,
     ["Datum Reference", "Member Type", "CP (mV)", "Clock Position", "UT (mm)", "Findings"],
     ["{datum_reference}", "{member_type}", "{cp_potential_mv}", "{clock_position}", "{ut_mm}", "{findings}"],
     "rows",
-  ),
-  DVI: loopTable(
+  )],
+  DVI: [loopTable(
     6,
     ["Datum Reference", "Member Type", "CP (mV)", "Clock Position", "UT (mm)", "Findings"],
     ["{datum_reference}", "{member_type}", "{cp_potential_mv}", "{clock_position}", "{ut_mm}", "{findings}"],
     "rows",
-  ),
-  MGI: loopTable(
+  )],
+  MGI: [loopTable(
     7,
     ["No MG Observed", "Criteria", "Growth Type", "Species", "Coverage %", "Thickness (mm)", "Remarks"],
     ["{no_mg_observed}", "{criteria_preset}", "{growth_type}", "{species}", "{coverage_percent}", "{thickness_mm}", "{remarks}"],
     "rows",
-  ),
+  )],
 
   // BSI carries 24 columns, so it splits over four tables.
-  BSI:
-  loopTable(
-    8,
-    ["Clamp Type", "Depth/El", "Bolt/Nut Qty", "Outboard CP", "CP Anomaly Rec.", "Hinge Pin", "Hinge Bolt/Nut Qty", "Liners"],
-    ["{clamp_type}", "{depth_el}", "{clamp_bolt_nut_quantity}", "{outboard_clamp_cp}", "{cp_anomaly_recommendation}", "{hinge_pin}", "{hinge_bolt_nut_quantity}", "{liners}"],
-    "rows",
-  ) +
-  loopTable(
-    5,
-    ["Inboard Gap", "Est. Gap", "Inboard Alignment", "Misaligned Position", "Inboard Anomaly Rec."],
-    ["{inboard_gap_condition}", "{inboard_estimate_gap}", "{inboard_alignment_condition}", "{inboard_misaligned_position}", "{inboard_anomaly_recommendation}"],
-    "rows",
-  ) +
-  loopTable(
-    5,
-    ["Outboard Gap", "Est. Gap", "Outboard Alignment", "Misaligned Position", "Outboard Anomaly Rec."],
-    ["{outboard_gap_condition}", "{outboard_estimate_gap}", "{outboard_alignment_condition}", "{outboard_misaligned_position}", "{outboard_anomaly_recommendation}"],
-    "rows",
-  ) +
-  loopTable(
-    6,
-    ["Clamp Missing Bolts", "Clamp Missing Washers", "Hinge Missing Bolts", "Hinge Missing Washers", "Remarks", "Recorded"],
-    ["{clamp_missing_bolts}", "{clamp_missing_washers}", "{hinge_missing_bolts}", "{hinge_missing_washers}", "{remarks}", "{recorded}"],
-    "rows",
-  ),
+  BSI: [
+    loopTable(
+      8,
+      ["Clamp Type", "Depth/El", "Bolt/Nut Qty", "Outboard CP", "CP Anomaly Rec.", "Hinge Pin", "Hinge Bolt/Nut Qty", "Liners"],
+      ["{clamp_type}", "{depth_el}", "{clamp_bolt_nut_quantity}", "{outboard_clamp_cp}", "{cp_anomaly_recommendation}", "{hinge_pin}", "{hinge_bolt_nut_quantity}", "{liners}"],
+      "rows",
+    ),
+    loopTable(
+      5,
+      ["Inboard Gap", "Est. Gap", "Inboard Alignment", "Misaligned Position", "Inboard Anomaly Rec."],
+      ["{inboard_gap_condition}", "{inboard_estimate_gap}", "{inboard_alignment_condition}", "{inboard_misaligned_position}", "{inboard_anomaly_recommendation}"],
+      "rows",
+    ),
+    loopTable(
+      5,
+      ["Outboard Gap", "Est. Gap", "Outboard Alignment", "Misaligned Position", "Outboard Anomaly Rec."],
+      ["{outboard_gap_condition}", "{outboard_estimate_gap}", "{outboard_alignment_condition}", "{outboard_misaligned_position}", "{outboard_anomaly_recommendation}"],
+      "rows",
+    ),
+    loopTable(
+      6,
+      ["Clamp Missing Bolts", "Clamp Missing Washers", "Hinge Missing Bolts", "Hinge Missing Washers", "Remarks", "Recorded"],
+      ["{clamp_missing_bolts}", "{clamp_missing_washers}", "{hinge_missing_bolts}", "{hinge_missing_washers}", "{remarks}", "{recorded}"],
+      "rows",
+    ),
+  ],
 
   // CGB is one row per result.
-  CGB: loopTable(
+  CGB: [loopTable(
     6,
     ["Movement", "Movement Remark", "Debris", "Debris Type", "Remarks", "Recorded"],
     ["{movement}", "{movement_remark}", "{debris}", "{debris_type}", "{remarks}", "{recorded}"],
     "rows",
-  ),
+  )],
 
   // RISER splits over two tables so no row carries thirteen columns.
-  RISER:
-  loopTable(
-    5,
-    ["Touchdown Distance", "Bend to Mudbrace", "Bend Height", "Coating Status", "Coating Condition"],
-    ["{touchdown_distance}", "{mudbrace_distance}", "{bend_height}", "{coating_status}", "{coating_condition}"],
-    "rows",
-  ) +
-  loopTable(
-    8,
-    ["Knee Brace", "Debris", "Debris Type", "Anomaly", "Recommendation", "Restricted Access", "Remarks", "Recorded"],
-    ["{knee_brace}", "{debris}", "{debris_type}", "{anomaly}", "{recommendation}", "{restricted_access}", "{remarks}", "{recorded}"],
-    "rows",
-  ),
+  RISER: [
+    loopTable(
+      5,
+      ["Touchdown Distance", "Bend to Mudbrace", "Bend Height", "Coating Status", "Coating Condition"],
+      ["{touchdown_distance}", "{mudbrace_distance}", "{bend_height}", "{coating_status}", "{coating_condition}"],
+      "rows",
+    ),
+    loopTable(
+      8,
+      ["Knee Brace", "Debris", "Debris Type", "Anomaly", "Recommendation", "Restricted Access", "Remarks", "Recorded"],
+      ["{knee_brace}", "{debris}", "{debris_type}", "{anomaly}", "{recommendation}", "{restricted_access}", "{remarks}", "{recorded}"],
+      "rows",
+    ),
+  ],
 
   // CAISSON splits into the condition block and the CP/pipe block.
-  CAISSON:
-  loopTable(
-    7,
-    ["Visual Damage", "Visual Note", "Debris Present", "Debris Note", "Grating Present", "Blockage", "Grating Note"],
-    ["{visual_damage}", "{visual_damage_note}", "{debris_present}", "{debris_note}", "{grating_present}", "{grating_blockage}", "{grating_note}"],
-    "rows",
-  ) +
-  loopTable(
-    5,
-    ["Associated Pipes", "Pipes Note", "CP Readings", "Remarks", "Recorded"],
-    ["{associated_pipes}", "{associated_pipes_note}", "{cp_readings}", "{remarks}", "{recorded}"],
-    "rows",
-  ),
+  CAISSON: [
+    loopTable(
+      7,
+      ["Visual Damage", "Visual Note", "Debris Present", "Debris Note", "Grating Present", "Blockage", "Grating Note"],
+      ["{visual_damage}", "{visual_damage_note}", "{debris_present}", "{debris_note}", "{grating_present}", "{grating_blockage}", "{grating_note}"],
+      "rows",
+    ),
+    loopTable(
+      5,
+      ["Associated Pipes", "Pipes Note", "CP Readings", "Remarks", "Recorded"],
+      ["{associated_pipes}", "{associated_pipes_note}", "{cp_readings}", "{remarks}", "{recorded}"],
+      "rows",
+    ),
+  ],
 
   // SEABED is one row per survey line.
-  SEABED: loopTable(
+  SEABED: [loopTable(
     6,
     ["Range (m)", "Fixes", "Debris", "Debris Type", "Remarks", "Recorded"],
     ["{range_meters}", "{fixes}", "{debris}", "{debris_type}", "{remarks}", "{recorded}"],
     "rows",
-  ),
+  )],
 
   // PIPELINE repeats the parent fields down one row per finding.
-  PIPELINE: loopTable(
+  PIPELINE: [loopTable(
     8,
     ["Location", "Depth/El", "Orientation", "Category", "Damage Type", "Debris Type", "Remarks", "Recorded"],
     ["{location}", "{depth_el}", "{orientation}", "{pipeline_category}", "{pipeline_damage}", "{pipeline_debris}", "{remarks}", "{recorded}"],
     "rows",
-  ),
+  )],
 };
 
 /* ---------- document ---------- */
@@ -248,14 +260,21 @@ const BODY =
     dataRow(5, ["{task_group}", "{task_code}", "{description}", "{type_code}", "{part_code}"]),
   ]) +
   para("{#sections}") +
-  // A section without a picture draws no frame at all: an empty box reads as a
-  // defect. `has_image` is what tells the two cases apart.
+  // The picture is generated content, so it carries its own region and a
+  // refresh can replace a picture whose evidence changed. A section without a
+  // picture draws no frame at all: an empty box reads as a defect, which is what
+  // `has_image` tells the two cases apart.
+  //
+  // The empty paragraph sits inside this region and nowhere else. It keeps the
+  // region's content valid when there is no picture, and it doubles as the gap
+  // between the picture and the first table.
   regionControl(
     para("{#has_image}") +
       para("{%image}", { align: "center" }) +
       para("{/has_image}") +
-      TYPE_ORDER.map((type) => conditional(type, BLOCKS[type])).join(""),
+      EMPTY_PARA,
   ) +
+  TYPE_ORDER.map(conditional).join("") +
   para("{/sections}") +
   para("{/items}");
 
@@ -362,6 +381,8 @@ const ROW_FOR: Record<InspectionType, Record<string, string>> = {
 
 const section = (on: InspectionType) => ({
   inspection_type: on,
+  // the target the section hangs off; the renderer builds region tags from it
+  target_key: "description:1",
   // the tag value is the object key; the renderer reads it from MinIO
   image: `evidence/${on}.png`,
   has_image: true,
@@ -413,21 +434,25 @@ const noImagePayload = {
 };
 
 // Tables in a fully rendered document: item header (2) plus a header and one
-// data row per table in each block. BSI splits over four, RISER and CAISSON
-// over two.
-const TABLE_COUNT: Record<InspectionType, number> = {
-  GVI: 1, CVI: 1, DVI: 1, MGI: 1, CP: 1, FMD: 1, SCOUR: 1, BSI: 4,
-  CGB: 1, RISER: 2, CAISSON: 2, SEABED: 1, PIPELINE: 1,
-};
+// data row per table in each block.
 const EXPECTED_ROWS =
-  2 + TYPE_ORDER.reduce((total, type) => total + 2 * TABLE_COUNT[type], 0);
+  2 + TYPE_ORDER.reduce((total, type) => total + 2 * TYPE_TABLES[type], 0);
 
-// Region placeholders in a rendered document. The renderer replaces each with a
-// real tag, so this counts them: one region per section, or the renderer would
-// hand the wrong tag to a region.
-const assertRegions = (xml: string, expected: number) => {
+// The regions a payload renders, in document order. The renderer names each
+// placeholder after the section it holds, and it reads the same list, so this
+// is the contract between the two.
+const expectedRegions = (payload: { items: { sections: RegionSection[] }[] }) =>
+  payload.items.flatMap((item) => item.sections.flatMap((section) => sectionRegionTags(section)));
+
+// Region placeholders in a rendered document, in order. The renderer replaces
+// each with a real tag: a mismatch means a tag would land on the wrong region.
+const assertRegions = (xml: string, expected: string[]) => {
   const regions = xml.match(/<w:tag w:val="region"\/>/g) ?? [];
-  assert.equal(regions.length, expected, "wrong region count");
+  assert.equal(
+    regions.length,
+    expected.length,
+    `expected ${expected.length} regions, rendered ${regions.length}`,
+  );
 };
 
 // Run the checks, then write the file.
@@ -447,14 +472,24 @@ const main = async () => {
   assert.ok(!full.includes("{/"), "closing tag left in output");
   assert.ok(!/\{[#/%]/.test(full), "template tag left in output");
   assert.ok(!full.includes("{region}"), "the region tag never rendered");
-  assertRegions(full, TYPE_ORDER.length);
+  assertRegions(full, expectedRegions(fullPayload));
+
+  // The template's tables and the renderer's region list must agree, or a tag
+  // lands on the wrong region.
+  for (const type of TYPE_ORDER) {
+    assert.equal(
+      TABLES[type].length,
+      TYPE_TABLES[type],
+      `${type} lays out ${TABLES[type].length} tables but the layout says ${TYPE_TABLES[type]}`,
+    );
+  }
 
   const single = await renderWith(template, singlePayload);
   assert.ok(single.includes("MGI Results"), "MGI block dropped");
   for (const type of TYPE_ORDER.filter((t) => t !== "MGI")) {
     assert.ok(!single.includes(`${type} Results`), `${type} block not dropped`);
   }
-  assertRegions(single, 1);
+  assertRegions(single, expectedRegions(singlePayload));
 
   const multi = await renderWith(template, multiRowPayload);
   assert.equal((multi.match(/<w:tr>/g) ?? []).length, 6, "GVI row loop did not repeat");
@@ -465,15 +500,38 @@ const main = async () => {
     0,
     "a section with no picture still drew one",
   );
-  assertRegions(noImage, 1);
+  // the picture region is still there, and still holds something
+  assertRegions(noImage, expectedRegions(noImagePayload));
+  assert.ok(
+    !/<w:sdtContent><\/w:sdtContent>/.test(noImage),
+    "a region rendered with no content",
+  );
 
   // A count that does not match must fail the check, not pass quietly.
-  assert.throws(() => assertRegions(full, TYPE_ORDER.length - 1), "a wrong count passed");
+  assert.throws(
+    () => assertRegions(full, expectedRegions(fullPayload).slice(1)),
+    "a wrong count passed",
+  );
 
   // Word merges two tables that touch, and a caret cannot land after a table
-  // that ends a block, so each table carries an empty paragraph behind it.
+  // that ends a block. Each table therefore ends its own region, and every
+  // region is followed by a paragraph the user can type into — that paragraph
+  // sits outside the region, so a refresh leaves it alone.
+  //
+  //
+  // docxtemplater inserts its own <w:p/> behind each table, since it cannot see
+  // the content control that closes the region. `renderReport` removes it, and
+  // the generator test checks that. This render is the raw template.
   assert.ok(!/<\/w:tbl><w:tbl>/.test(full), "two tables touch: Word merges them");
-  assert.ok(!/<\/w:tbl>(?!<w:p)/.test(full), "a table has no paragraph after it");
+  assert.ok(!/<\/w:tbl>(?!<w:p)/.test(full), "a table has no paragraph behind it");
+  assert.ok(!/<\/w:sdtContent>(?!<\/w:sdt>)/.test(full), "a region ends before its content does");
+  // A region is followed by the gap paragraph, or by the next region where the
+  // gap is already inside the picture region. Never by a table.
+  assert.ok(
+    !/<\/w:sdt>(?!<w:p|<w:sdt)/.test(full),
+    "a region is followed by neither a paragraph nor another region",
+  );
+  assert.ok(/<w:p\/>\s*<w:sectPr>/.test(full), "the body does not end with a paragraph");
 
   // The image module injects <w:drawing><wp:inline> markup and expects the
   // document root to declare the drawing namespaces, the way Word's own files

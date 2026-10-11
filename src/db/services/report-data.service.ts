@@ -47,9 +47,10 @@ type SectionFlags = {
 
 export type ReportSection = SectionFlags & {
   inspection_type: string;
-  // What a refresh targets: the section's target id, then its inspection type.
-  // Stable across renders, so a refresh finds the region it rewrites.
-  region: string;
+  // The target the section hangs off: `description:100` or `part_code:300`.
+  // Stable across renders, so a refresh finds the same regions every time.
+  // The renderer turns this plus the type into region tags.
+  target_key: string;
   // Object keys for the section's picture, best first: the result's own
   // evidence image, then the clip still taken while it was inspected. The
   // renderer keeps the first that loads, and draws no frame when none does.
@@ -533,7 +534,7 @@ const collectImageKeys = async (resultIds: number[], database?: DbOrTx) => {
 
 // Fold one target's results into a section per inspection type, keeping the
 // order the types first appear. One target holds one section per type, so the
-// target id plus the type names a region exactly once.
+// target key plus the type names a region exactly once.
 const buildSections = (
   results: SummaryRow[],
   rowsByResult: Map<number, ReportRow[]>,
@@ -551,7 +552,7 @@ const buildSections = (
   return [...buckets]
     .map(([type, bucket]) => ({
       inspection_type: type,
-      region: `region:${targetKey}:${type}`,
+      target_key: targetKey,
       // the section's picture comes from its first result that has one
       image_keys: bucket.map((row) => imageKeys.get(row.resultId)).find(Boolean) ?? [],
       ...flagsFor(type),

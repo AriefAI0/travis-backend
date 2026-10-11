@@ -285,21 +285,23 @@ describe("gatherReportData", () => {
     expect(data.items[2]!.sections[0]!.rows[0]!.condition).toBe("Good Condition");
   });
 
-  it("names each section's region after its target and its type", async () => {
+  it("names each section's target key, so a refresh can find its regions", async () => {
     await seed();
     const data = await gatherReportData(1, testDb);
-    const regions = data.items.flatMap((item) => item.sections.map((section) => section.region));
+    const keys = data.items.flatMap((item) =>
+      item.sections.map((section) => `${section.target_key}:${section.inspection_type}`),
+    );
 
-    expect(regions.sort()).toEqual(
+    expect(keys.sort()).toEqual(
       [
-        "region:description:100:CVI",
-        "region:description:100:GVI",
-        "region:description:100:RA",
-        "region:part_code:300:GVI",
+        "description:100:CVI",
+        "description:100:GVI",
+        "description:100:RA",
+        "part_code:300:GVI",
       ].sort(),
     );
-    // a repeat would make a refresh rewrite one region twice
-    expect(new Set(regions).size).toBe(regions.length);
+    // a repeat would make the renderer name two regions the same
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it("throws for an unknown project", async () => {

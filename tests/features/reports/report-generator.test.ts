@@ -203,8 +203,10 @@ describe("generateReport", () => {
 
     // the picture keeps its own size: a fixed box would stretch a photo
     expect(xml).toContain(`<wp:extent cx="${ONE_PIXEL_EMU}" cy="${ONE_PIXEL_EMU}"/>`);
-    // every table carries an empty paragraph, so the caret can land after it
-    expect(xml).not.toMatch(/<\/w:tbl>(?!<w:p)/);
+    // Every table is followed by a paragraph, so the caret can land after it.
+    // Inside a region the table closes it and the paragraph behind the region
+    // serves; the item header table sits outside every region.
+    expect(xml).not.toMatch(/<\/w:tbl>(?!<w:p|<\/w:sdtContent>)/);
     expect(xml).not.toContain("</w:tbl><w:tbl>");
   });
 
@@ -368,7 +370,7 @@ describe("generateReport", () => {
     expect(xml).not.toContain("{pipeline_debris}");
   });
 
-  it("tags every generated section, so a refresh can find it", async () => {
+  it("tags one region per picture and per table, so a refresh can find them", async () => {
     await seedMixedTypes();
 
     const tagsIn = (buf: Buffer) =>
@@ -377,18 +379,38 @@ describe("generateReport", () => {
     const first = await generateReport(1, testDb);
     const second = await generateReport(1, testDb);
 
-    // one region per section: GVI, CVI and MGI on the description target, and
-    // the second result's GVI on the part-code target
+    // a picture region plus a table region per section: GVI, CVI and MGI on the
+    // description target, and the second result's GVI on the part-code target
     expect(tagsIn(first).sort()).toEqual([
-      "region:description:100:CVI",
-      "region:description:100:GVI",
-      "region:description:100:MGI",
-      "region:part_code:300:GVI",
+      "region:description:100:CVI:1",
+      "region:description:100:CVI:picture",
+      "region:description:100:GVI:1",
+      "region:description:100:GVI:picture",
+      "region:description:100:MGI:1",
+      "region:description:100:MGI:picture",
+      "region:part_code:300:GVI:1",
+      "region:part_code:300:GVI:picture",
     ]);
     // a re-render must name the same regions, or a refresh would miss them
     expect(tagsIn(second)).toEqual(tagsIn(first));
     // the template's placeholder never survives
     expect(documentXmlIn(first)).not.toContain('w:val="region"');
+  }, 20_000);
+
+  it("ends every region with its table, so the paragraph behind it is the user's", async () => {
+    await seedMixedTypes();
+
+    const xml = documentXmlIn(await generateReport(1, testDb));
+
+    // docxtemplater inserts a paragraph behind a table that closes a region,
+    // since it cannot see the content control. The render removes it, which is
+    // what leaves the paragraph after the table outside the region.
+    expect(xml).not.toContain("</w:tbl><w:p/></w:sdtContent>");
+    expect(xml).not.toMatch(/<\/w:tbl>(?!<w:p|<\/w:sdtContent>)/);
+    // every region is followed by a paragraph the user can type into
+    expect(xml).not.toMatch(/<\/w:sdt>(?!<w:p|<w:sdt)/);
+    // and the document ends with a paragraph, never a table
+    expect(xml).toMatch(/<w:p\/>\s*<w:sectPr>/);
   }, 20_000);
 
   it("rejects an unknown project", async () => {
