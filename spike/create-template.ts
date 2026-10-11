@@ -342,7 +342,9 @@ const TRANSPARENT_PNG = Buffer.from(
 );
 
 // Fill the template with a payload and return word/document.xml.
-// renderAsync mirrors production, where getImage is async.
+// renderAsync mirrors production, where getImage is async, and so does the
+// nullGetter: a tag the payload misses stays visible rather than reading
+// "undefined", which is what lets the checks below catch one.
 const renderWith = async (buffer: Buffer, data: unknown): Promise<string> => {
   const imageModule = new ImageModule({
     centered: false,
@@ -353,6 +355,7 @@ const renderWith = async (buffer: Buffer, data: unknown): Promise<string> => {
   const doc = new Docxtemplater(new PizZip(buffer), {
     paragraphLoop: true,
     linebreaks: true,
+    nullGetter: (part: { value?: string }) => (part?.value ? `{${part.value}}` : ""),
     modules: [imageModule],
   });
   await doc.renderAsync(data);
@@ -472,6 +475,10 @@ const main = async () => {
   assert.ok(!full.includes("{/"), "closing tag left in output");
   assert.ok(!/\{[#/%]/.test(full), "template tag left in output");
   assert.ok(!full.includes("{region}"), "the region tag never rendered");
+  // A placeholder the payload does not supply stays visible rather than reading
+  // "undefined", so this catches a template tag the payload has outgrown.
+  const unsupplied = full.match(/\{[A-Za-z_][A-Za-z0-9_]*\}/g) ?? [];
+  assert.equal(unsupplied.length, 0, `values the payload never fills: ${unsupplied.join(", ")}`);
   assertRegions(full, expectedRegions(fullPayload));
 
   // The template's tables and the renderer's region list must agree, or a tag

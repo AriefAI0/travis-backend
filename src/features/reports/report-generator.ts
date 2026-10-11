@@ -128,14 +128,34 @@ const resolvePictures = async (sections: ReportSection[]) => {
   return { pictures, chosen };
 };
 
-// Pull docxtemplater's real error list out of its wrapper error.
+// Pull docxtemplater's real error list out of its wrapper error. Its
+// `explanation` names the exact tag, which is what a user needs to fix the
+// template; `message` alone says only "Unclosed loop".
 const describeTemplateError = (err: unknown): string => {
-  const errors = (err as { properties?: { errors?: { message?: string }[] } }).properties?.errors;
+  const errors = (
+    err as {
+      properties?: {
+        errors?: { message?: string; properties?: { explanation?: string } }[];
+      };
+    }
+  ).properties?.errors;
   if (errors?.length) {
-    return errors.map((entry) => entry.message ?? String(entry)).join("; ");
+    return errors
+      .map((entry) => entry.properties?.explanation ?? entry.message ?? String(entry))
+      .join("; ");
   }
   return err instanceof Error ? err.message : String(err);
 };
+
+// A value the data never supplies keeps its placeholder in the page, so a user
+// who opens the report sees which one is missing and can fix the template.
+// docxtemplater's own fallback writes the word "undefined" there instead, which
+// reads as a rendering fault rather than a gap in the template.
+//
+// A block tag is a different matter: `{#x}` with no `{/x}` cannot produce a
+// document at all, so that still fails the render.
+const keepMissingPlaceholder = (part: { value?: string }) =>
+  part?.value ? `{${part.value}}` : "";
 
 // The template writes this constant for every region, and the renderer replaces
 // each with the tag of the section it holds.
@@ -233,19 +253,29 @@ export const renderReport = async (
     },
   });
 
-  const doc = new Docxtemplater(new PizZip(template), {
-    paragraphLoop: true,
-    linebreaks: true,
-    // the v4 constructor takes modules here; attachModule() throws on it
-    modules: [imageModule],
-  });
-
+  // The constructor is inside the try because docxtemplater pairs its block tags
+  // when it is built, not when it renders: an unclosed `{#x}` throws there, and
+  // a raw throw would reach the client as a bare 500 with no reason in it.
+  let doc: any;
   try {
+    doc = new Docxtemplater(new PizZip(template), {
+      paragraphLoop: true,
+      linebreaks: true,
+      // a tag the data never fills stays visible, never "undefined"
+      nullGetter: keepMissingPlaceholder,
+      // the v4 constructor takes modules here; attachModule() throws on it
+      modules: [imageModule],
+    });
+
     // renderAsync, not render: the image module resolves tag values through a
     // promise path, and the sync one hands a promise straight to PizZip.
     await doc.renderAsync(filled);
   } catch (err) {
-    throw new AppError(500, "template_error", describeTemplateError(err));
+    throw new AppError(
+      500,
+      "template_error",
+      `The report template cannot be rendered: ${describeTemplateError(err)}`,
+    );
   }
 
   const zip = doc.getZip();

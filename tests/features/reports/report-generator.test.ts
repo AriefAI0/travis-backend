@@ -6,7 +6,11 @@ import {
   testDb,
   truncateTestDatabase,
 } from "../../helpers/db";
-import { generateReport } from "../../../src/features/reports/report-generator";
+import {
+  generateReport,
+  loadReportInputs,
+  renderReport,
+} from "../../../src/features/reports/report-generator";
 import { env } from "../../../src/config/env";
 import { minio } from "../../../src/lib/minio_storage/clients";
 import * as schema from "../../../src/db/schema";
@@ -168,6 +172,49 @@ const seedMixedTypes = async () => {
     sortOrder: 0,
   });
 };
+
+// The bundled template with one paragraph added at the top, the way an uploaded
+// template carries a tag of its own.
+const patchedTemplate = (template: Buffer, paragraph: string) => {
+  const zip = new PizZip(template);
+  const xml = zip.file("word/document.xml").asText() as string;
+  zip.file("word/document.xml", xml.replace("<w:body>", `<w:body>${paragraph}`));
+
+  return zip.generate({ type: "nodebuffer" }) as Buffer;
+};
+
+const run = (text: string) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`;
+
+describe("template faults", () => {
+  it("keeps a placeholder the data never fills, instead of writing undefined", async () => {
+    await seed();
+    const { template, data } = await loadReportInputs(1, testDb);
+    const patched = patchedTemplate(template, run("ID: {no_such_value}"));
+
+    const xml = documentXmlIn(await renderReport(patched, data));
+
+    // the user sees which placeholder is missing and fixes their template
+    expect(xml).toContain("{no_such_value}");
+    expect(xml).not.toContain("undefined");
+  }, 20_000);
+
+  it("fails a template whose block tag is never closed", async () => {
+    await seed();
+    const { template, data } = await loadReportInputs(1, testDb);
+    // a report cannot be built without its openers and closers, so this throws
+    const patched = patchedTemplate(template, run("{#never_closed}"));
+
+    await expect(renderReport(patched, data)).rejects.toThrow(/never_closed/);
+  }, 20_000);
+
+  it("names the tag when a block is closed but never opened", async () => {
+    await seed();
+    const { template, data } = await loadReportInputs(1, testDb);
+    const patched = patchedTemplate(template, run("{/never_opened}"));
+
+    await expect(renderReport(patched, data)).rejects.toThrow(/never_opened/);
+  }, 20_000);
+});
 
 describe("generateReport", () => {
   it("renders the bundled template with data and one embedded image", async () => {
