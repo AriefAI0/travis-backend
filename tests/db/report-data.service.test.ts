@@ -5,7 +5,7 @@ import {
   testDb,
   truncateTestDatabase,
 } from "../helpers/db";
-import { gatherReportData, NO_IMAGE } from "../../src/db/services/report-data.service";
+import { gatherReportData } from "../../src/db/services/report-data.service";
 import * as schema from "../../src/db/schema";
 
 beforeAll(ensureTestDatabase);
@@ -112,6 +112,25 @@ const seed = async () => {
     contentType: "image/png",
     hasAnnotated: false,
   });
+
+  // Clip stills: the fallback picture for a result whose evidence is missing.
+  // One result carries both, so the order of the candidates shows.
+  await testDb.insert(schema.videoClip).values([
+    {
+      clipId: 7001,
+      resultId: 5002,
+      sessionId: 101,
+      startOffsetMs: 0,
+      thumbnailKey: "1-alpha/session-1/clips/2-leg-a-gvi/thumbnail.jpg",
+    },
+    {
+      clipId: 7002,
+      resultId: 5003,
+      sessionId: 101,
+      startOffsetMs: 2000,
+      thumbnailKey: "1-alpha/session-1/clips/3-leg-a-cvi/thumbnail.jpg",
+    },
+  ]);
 };
 
 describe("gatherReportData", () => {
@@ -202,13 +221,21 @@ describe("gatherReportData", () => {
     }
   });
 
-  it("resolves the section image and blanks it when absent", async () => {
+  it("offers the evidence image first and the clip still second", async () => {
     await seed();
 
     const description = (await gatherReportData(1, testDb)).items[0]!;
 
-    expect(description.sections[0]!.image).toBe("1-alpha/session-1/evidence-img/9001.png");
-    expect(description.sections[1]!.image).toBe(NO_IMAGE);
+    expect(description.sections[0]!.image_keys).toEqual([
+      "1-alpha/session-1/evidence-img/9001.png",
+      "1-alpha/session-1/clips/2-leg-a-gvi/thumbnail.jpg",
+    ]);
+    // a type whose result has no evidence image offers the still alone
+    expect(description.sections[1]!.image_keys).toEqual([
+      "1-alpha/session-1/clips/3-leg-a-cvi/thumbnail.jpg",
+    ]);
+    // a type with no picture at all offers none
+    expect(description.sections[2]!.image_keys).toEqual([]);
   });
 
   it("prefers the annotated twin when the column says it exists", async () => {
@@ -217,7 +244,7 @@ describe("gatherReportData", () => {
 
     const description = (await gatherReportData(1, testDb)).items[0]!;
 
-    expect(description.sections[0]!.image).toBe(
+    expect(description.sections[0]!.image_keys[0]).toBe(
       "1-alpha/session-1/evidence-img/9001-annotated.png",
     );
   });

@@ -46,11 +46,16 @@ const BORDERS = ["top", "left", "bottom", "right", "insideH", "insideV"]
   .map((side) => `<w:${side} w:val="single" w:sz="4" w:space="0" w:color="808080"/>`)
   .join("");
 
+// A table must not touch the next table or end a block. Word merges two tables
+// that touch, and a caret cannot land after a table that ends one, so every
+// table carries this empty paragraph behind it.
+const EMPTY_PARA = "<w:p/>";
+
 // A bordered fixed-width table. `rows` are pre-built <w:tr> strings.
 const tbl = (cols: number, rows: string[]) =>
   `<w:tbl><w:tblPr><w:tblW w:w="${TABLE_W}" w:type="dxa"/><w:tblBorders>${BORDERS}</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>` +
   `<w:tblGrid>${Array.from({ length: cols }, () => `<w:gridCol w:w="${colW(cols)}"/>`).join("")}</w:tblGrid>` +
-  `${rows.join("")}</w:tbl>`;
+  `${rows.join("")}</w:tbl>${EMPTY_PARA}`;
 
 // Header row plus one repeated data row. The loop tags sit in the outer cells
 // of that same row: docxtemplater expands the pair to <w:tr> and drops the tags.
@@ -230,7 +235,11 @@ const BODY =
     dataRow(5, ["{task_group}", "{task_code}", "{description}", "{type_code}", "{part_code}"]),
   ]) +
   para("{#sections}") +
+  // A section without a picture draws no frame at all: an empty box reads as a
+  // defect. `has_image` is what tells the two cases apart.
+  para("{#has_image}") +
   para("{%image}", { align: "center" }) +
+  para("{/has_image}") +
   TYPE_ORDER.map((type) => conditional(type, BLOCKS[type])).join("") +
   para("{/sections}") +
   para("{/items}");
@@ -338,7 +347,9 @@ const ROW_FOR: Record<InspectionType, Record<string, string>> = {
 
 const section = (on: InspectionType) => ({
   inspection_type: on,
-  image: "none",
+  // the tag value is the object key; the renderer reads it from MinIO
+  image: `evidence/${on}.png`,
+  has_image: true,
   ...flags(on),
   rows: [ROW_FOR[on]],
 });
@@ -377,6 +388,15 @@ const multiRowPayload = {
   }],
 };
 
+// No picture anywhere: proves a section draws no frame when it has none.
+const noImagePayload = {
+  ...base,
+  items: [{
+    task_group: "G1", task_code: "T1", description: "Desc", type_code: "TC", part_code: "PC",
+    sections: [{ ...section("MGI"), image: null, has_image: false }],
+  }],
+};
+
 // Tables in a fully rendered document: item header (2) plus a header and one
 // data row per table in each block. BSI splits over four, RISER and CAISSON
 // over two.
@@ -412,6 +432,18 @@ const main = async () => {
 
   const multi = await renderWith(template, multiRowPayload);
   assert.equal((multi.match(/<w:tr>/g) ?? []).length, 6, "GVI row loop did not repeat");
+
+  const noImage = await renderWith(template, noImagePayload);
+  assert.equal(
+    (noImage.match(/<w:drawing>/g) ?? []).length,
+    0,
+    "a section with no picture still drew one",
+  );
+
+  // Word merges two tables that touch, and a caret cannot land after a table
+  // that ends a block, so each table carries an empty paragraph behind it.
+  assert.ok(!/<\/w:tbl><w:tbl>/.test(full), "two tables touch: Word merges them");
+  assert.ok(!/<\/w:tbl>(?!<w:p)/.test(full), "a table has no paragraph after it");
 
   // The image module injects <w:drawing><wp:inline> markup and expects the
   // document root to declare the drawing namespaces, the way Word's own files

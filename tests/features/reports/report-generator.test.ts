@@ -7,10 +7,22 @@ import {
   truncateTestDatabase,
 } from "../../helpers/db";
 import { generateReport } from "../../../src/features/reports/report-generator";
+import { env } from "../../../src/config/env";
+import { minio } from "../../../src/lib/minio_storage/clients";
 import * as schema from "../../../src/db/schema";
 
 const require = createRequire(import.meta.url);
 const PizZip = require("pizzip");
+
+// 1x1 PNG. The render re-encodes whatever it reads, so this is enough to prove
+// the picture reaches the page with its own size.
+const EVIDENCE_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+// One pixel is 9525 EMU, so a 1x1 picture proves the size came from the image.
+const ONE_PIXEL_EMU = "9525";
 
 beforeAll(ensureTestDatabase);
 beforeEach(truncateTestDatabase);
@@ -63,6 +75,15 @@ const seed = async () => {
     contentType: "image/png",
     hasAnnotated: false,
   });
+
+  // the object behind that row, so the picture path actually runs
+  await minio.putObject(
+    env.BUCKET_MEDIA,
+    "1-alpha/session-1/evidence-img/9001.png",
+    EVIDENCE_PNG,
+    EVIDENCE_PNG.byteLength,
+    { "Content-Type": "image/png" },
+  );
 
   // second result with NO image row: exercises the empty image-tag path
   await testDb.insert(schema.result).values({
@@ -175,9 +196,16 @@ describe("generateReport", () => {
     expect(xml).not.toContain("{#sections}");
     expect(xml).not.toContain("{%image}");
 
-    // every section embeds one picture: the real image when the row has one,
-    // the transparent placeholder when it does not
-    expect(mediaEntriesIn(buf)).toHaveLength(2);
+    // Only the section that holds a picture draws one. The other item's section
+    // has none, and an empty frame there would read as a defect.
+    expect((xml.match(/<w:drawing>/g) ?? []).length).toBe(1);
+    expect(mediaEntriesIn(buf)).toHaveLength(1);
+
+    // the picture keeps its own size: a fixed box would stretch a photo
+    expect(xml).toContain(`<wp:extent cx="${ONE_PIXEL_EMU}" cy="${ONE_PIXEL_EMU}"/>`);
+    // every table carries an empty paragraph, so the caret can land after it
+    expect(xml).not.toMatch(/<\/w:tbl>(?!<w:p)/);
+    expect(xml).not.toContain("</w:tbl><w:tbl>");
   });
 
   it("renders a project that has no results and embeds no image", async () => {
@@ -221,6 +249,10 @@ describe("generateReport", () => {
     expect(xml).not.toContain("{#isCVI}");
     expect(xml).not.toContain("{recorded}");
     expect(xml).not.toContain("{%image}");
+
+    // exactly one frame: the description target's GVI section holds result
+    // 5001's seeded evidence object, and no other section has a candidate
+    expect((xml.match(/<w:drawing>/g) ?? []).length).toBe(1);
   });
 
   it("renders a section for each newly enabled type", async () => {

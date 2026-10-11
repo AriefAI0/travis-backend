@@ -3,6 +3,7 @@ import { AppError } from "../../lib/error";
 import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
 import { getProjectById } from "./project.service";
 import { listResultImageSummariesByResultIds } from "./result-media.service";
+import { listVideoClipPlaybackRowsByResultIds } from "../repositories/video-clip.repository";
 import {
   getBsiDetailByResultId,
   getCgbDetailByResultId,
@@ -26,11 +27,6 @@ import { listProjectTaskStructureTree } from "./task-structure.service";
 // One row of a type table. Keys match the template tags per type.
 export type ReportRow = Record<string, string>;
 
-// The image module breaks on a falsy tag value under renderAsync, so a section
-// without a picture carries this sentinel instead of "".
-// ponytail: back to "" once the module handles empty values.
-export const NO_IMAGE = "none";
-
 // Flags the template reads. Exactly one is true, or none for a type with no
 // result table yet (RA) — that section then renders nothing.
 type SectionFlags = {
@@ -51,7 +47,10 @@ type SectionFlags = {
 
 export type ReportSection = SectionFlags & {
   inspection_type: string;
-  image: string;
+  // Object keys for the section's picture, best first: the result's own
+  // evidence image, then the clip still taken while it was inspected. The
+  // renderer keeps the first that loads, and draws no frame when none does.
+  image_keys: string[];
   rows: ReportRow[];
 };
 
@@ -492,17 +491,38 @@ const groupResultsByTarget = (summary: SummaryRow[]) => {
   return byTarget;
 };
 
-// First image per result, resolved to its stored object key.
-// An annotated twin wins when the column says it exists — same rule as the UI.
+// Picture candidates per result, best first. The evidence image is the one the
+// inspector annotated; the clip still is what the recording captured, and it
+// exists for every inspected result. An annotated twin wins over the raw shot —
+// same rule as the UI.
+// flow: evidence leaves + clip stills > candidates per result
 const collectImageKeys = async (resultIds: number[], database?: DbOrTx) => {
-  const keys = new Map<number, string>();
-  const imagesByResult = await listResultImageSummariesByResultIds(resultIds, database);
+  const [imagesByResult, clips] = await Promise.all([
+    listResultImageSummariesByResultIds(resultIds, database),
+    listVideoClipPlaybackRowsByResultIds(resultIds, database),
+  ]);
 
-  for (const [resultId, images] of imagesByResult) {
-    const first = images[0];
-    if (!first) continue;
-    const leaves = imageEvidenceLeaves(first.storageStem, first.imageId, first.contentType);
-    keys.set(resultId, first.hasAnnotated ? leaves.annotated.key : leaves.raw.key);
+  const stillByResult = new Map<number, string>();
+  for (const clip of clips) {
+    if (clip.thumbnailKey && !stillByResult.has(clip.resultId)) {
+      stillByResult.set(clip.resultId, clip.thumbnailKey);
+    }
+  }
+
+  const keys = new Map<number, string[]>();
+  for (const resultId of resultIds) {
+    const candidates: string[] = [];
+    const first = imagesByResult.get(resultId)?.[0];
+
+    if (first) {
+      const leaves = imageEvidenceLeaves(first.storageStem, first.imageId, first.contentType);
+      candidates.push(first.hasAnnotated ? leaves.annotated.key : leaves.raw.key);
+    }
+
+    const still = stillByResult.get(resultId);
+    if (still) candidates.push(still);
+
+    if (candidates.length) keys.set(resultId, candidates);
   }
 
   return keys;
@@ -513,7 +533,7 @@ const collectImageKeys = async (resultIds: number[], database?: DbOrTx) => {
 const buildSections = (
   results: SummaryRow[],
   rowsByResult: Map<number, ReportRow[]>,
-  imageKeys: Map<number, string>,
+  imageKeys: Map<number, string[]>,
 ): ReportSection[] => {
   const buckets = new Map<string, SummaryRow[]>();
 
@@ -526,8 +546,8 @@ const buildSections = (
   return [...buckets]
     .map(([type, bucket]) => ({
       inspection_type: type,
-      // the section's picture is its first result that has one
-      image: bucket.map((row) => imageKeys.get(row.resultId)).find(Boolean) ?? NO_IMAGE,
+      // the section's picture comes from its first result that has one
+      image_keys: bucket.map((row) => imageKeys.get(row.resultId)).find(Boolean) ?? [],
       ...flagsFor(type),
       rows: bucket.flatMap((row) => rowsByResult.get(row.resultId) ?? []),
     }))

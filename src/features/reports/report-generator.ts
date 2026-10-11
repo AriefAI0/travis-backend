@@ -2,10 +2,12 @@ import { createRequire } from "node:module";
 import type { DbOrTx } from "../../db/client";
 import { env } from "../../config/env";
 import { AppError } from "../../lib/error";
+import { log } from "../../lib/logger";
 import { minio } from "../../lib/minio_storage/clients";
 import {
   gatherReportData,
-  NO_IMAGE,
+  type ReportItem,
+  type ReportSection,
   type ReportTemplateData,
 } from "../../db/services/report-data.service";
 
@@ -17,16 +19,26 @@ const PizZip = require("pizzip");
 const Docxtemplater = require("docxtemplater");
 const ImageModule = require("docxtemplater-image-module-free");
 
-// 1x1 transparent PNG. A result with no image still gets a valid picture, so
-// the image module never throws on an empty tag value.
-const TRANSPARENT_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-  "base64",
-);
+// The box one picture fits inside, in pixels: the module sizes in pixels and
+// takes no other unit. A smaller picture keeps its own size.
+const MAX_WIDTH_PX = 480;
+const MAX_HEIGHT_PX = 360;
 
-// Fixed cell size in pixels; the module takes no other unit.
-const IMAGE_SIZE_PX = 200;
-const IMAGE_HEIGHT_PX = 150;
+// Candidates per section: the evidence image, then the clip still.
+const MAX_CANDIDATES = 2;
+
+// One picture, ready for the page.
+type ReportPicture = { data: Buffer; width: number; height: number };
+
+// What the template reads for a section's picture.
+type RenderSection = Omit<ReportSection, "image_keys"> & {
+  image: string | null;
+  has_image: boolean;
+};
+
+type RenderData = Omit<ReportTemplateData, "items"> & {
+  items: (Omit<ReportItem, "sections"> & { sections: RenderSection[] })[];
+};
 
 // Object key of a project's uploaded template.
 export const reportTemplateKey = (projectId: number) => `reports/templates/${projectId}.docx`;
@@ -50,40 +62,69 @@ export const loadTemplate = async (projectId: number): Promise<Buffer> => {
   }
 };
 
-// One evidence image by object key. A miss is not fatal: a report with one
-// blank picture beats no report at all.
-const loadImage = async (objectKey: string): Promise<Buffer> => {
-  if (!objectKey) {
-    return TRANSPARENT_PNG;
-  }
-
+// Read one picture and fit it to the box, keeping its shape.
+//
+// Every picture is encoded back to PNG on purpose: the image module names each
+// part `image_generated_N.png` and declares `image/png` whatever the bytes are,
+// so a JPEG or WebP still would arrive mislabelled. Evidence comes from the
+// app as PNG, JPEG or WebP.
+//
+// A miss returns null, and the caller tries the section's next candidate.
+// flow: object > decode > scale to fit > PNG
+const loadPicture = async (objectKey: string): Promise<ReportPicture | null> => {
   try {
-    const stream = await minio.getObject(env.BUCKET_MEDIA, objectKey);
-    return await drainStream(stream);
-  } catch {
-    return TRANSPARENT_PNG;
+    const bytes = await drainStream(await minio.getObject(env.BUCKET_MEDIA, objectKey));
+    const meta = await new Bun.Image(bytes).metadata();
+
+    // never enlarge: a 320-wide still stays 320 wide
+    const scale = Math.min(MAX_WIDTH_PX / meta.width, MAX_HEIGHT_PX / meta.height, 1);
+    const width = Math.max(1, Math.round(meta.width * scale));
+    const height = Math.max(1, Math.round(meta.height * scale));
+
+    return { data: await new Bun.Image(bytes).resize(width, height).png().toBuffer(), width, height };
+  } catch (err) {
+    log.warn("report picture unavailable", { objectKey, err: String(err) });
+    return null;
   }
 };
 
-// Every distinct image key the template will ask for.
-const collectImageKeys = (data: ReportTemplateData) => {
-  const keys = new Set<string>();
-  for (const item of data.items) {
-    for (const section of item.sections) {
-      // the sentinel is not a real object and never gets fetched
-      if (section.image && section.image !== NO_IMAGE) keys.add(section.image);
+// Pair every section with the first candidate picture that loads.
+//
+// One batch per candidate position, so a section whose own evidence image is
+// there costs a single read, and the clip still is only fetched when that
+// misses.
+// flow: first candidates in parallel > misses try their next
+const resolvePictures = async (sections: ReportSection[]) => {
+  const pictures = new Map<string, ReportPicture>();
+  const chosen = new Map<ReportSection, string | null>();
+
+  for (let depth = 0; depth < MAX_CANDIDATES; depth++) {
+    const pending = sections.filter(
+      (section) => !chosen.has(section) && section.image_keys.length > depth,
+    );
+    if (pending.length === 0) break;
+
+    const keys = [
+      ...new Set(pending.map((section) => section.image_keys[depth]!).filter((key) => !pictures.has(key))),
+    ];
+    const loaded = await Promise.all(
+      keys.map(async (key) => [key, await loadPicture(key)] as const),
+    );
+    for (const [key, picture] of loaded) {
+      if (picture) pictures.set(key, picture);
+    }
+
+    for (const section of pending) {
+      const key = section.image_keys[depth]!;
+      if (pictures.has(key)) chosen.set(section, key);
     }
   }
-  return keys;
-};
 
-// Fetch every image once, in parallel, so rendering never waits on MinIO.
-// flow: keys > parallel gets > key map
-const prefetchImages = async (keys: Iterable<string>) => {
-  const entries = await Promise.all(
-    [...keys].map(async (key) => [key, await loadImage(key)] as const),
-  );
-  return new Map(entries);
+  for (const section of sections) {
+    if (!chosen.has(section)) chosen.set(section, null);
+  }
+
+  return { pictures, chosen };
 };
 
 // Pull docxtemplater's real error list out of its wrapper error.
@@ -95,22 +136,56 @@ const describeTemplateError = (err: unknown): string => {
   return err instanceof Error ? err.message : String(err);
 };
 
+// The image module stamps every drawing with the same id. OOXML wants one id
+// per drawing, and Word repairs a document that repeats them.
+const renumberDrawingIds = (xml: string): string => {
+  let next = 1;
+  return xml
+    .replace(/<wp:docPr id="\d+"/g, () => `<wp:docPr id="${next++}"`)
+    .replace(/<pic:cNvPr id="\d+"/g, () => `<pic:cNvPr id="${next++}"`);
+};
+
+
 // Fill a template with gathered data and return the finished .docx.
-// flow: prefetch images > wire image module > render
+// flow: load pictures > wire image module > render > renumber drawings
 export const renderReport = async (
   template: Buffer,
   data: ReportTemplateData,
 ): Promise<Buffer> => {
-  // one parallel MinIO batch replaces a round-trip per image tag
-  const imageMap = await prefetchImages(collectImageKeys(data));
+  const sections = data.items.flatMap((item) => item.sections);
+  const { pictures, chosen } = await resolvePictures(sections);
+
+  // the template reads `image` and `has_image`, not the candidate list
+  const filled: RenderData = {
+    ...data,
+    items: data.items.map((item) => ({
+      ...item,
+      sections: item.sections.map((section): RenderSection => {
+        const { image_keys, ...rest } = section;
+        const image = chosen.get(section) ?? null;
+        return { ...rest, image, has_image: image !== null };
+      }),
+    })),
+  };
 
   const imageModule = new ImageModule({
     centered: false,
     fileType: "docx",
     // async to match what the module resolves under renderAsync; the map is
     // already in memory, so this never touches the network
-    getImage: async (key: string) => imageMap.get(key) ?? TRANSPARENT_PNG,
-    getSize: () => [IMAGE_SIZE_PX, IMAGE_HEIGHT_PX],
+    getImage: async (key: string) => {
+      const picture = pictures.get(key);
+      if (!picture) {
+        // unreachable: a tag only renders when resolvePictures chose a key
+        throw new Error(`no picture loaded for ${key}`);
+      }
+      return picture.data;
+    },
+    // the module hands the tag value back, which is the object key
+    getSize: (_image: Buffer, key: string) => {
+      const picture = pictures.get(key);
+      return picture ? [picture.width, picture.height] : [1, 1];
+    },
   });
 
   const doc = new Docxtemplater(new PizZip(template), {
@@ -123,12 +198,18 @@ export const renderReport = async (
   try {
     // renderAsync, not render: the image module resolves tag values through a
     // promise path, and the sync one hands a promise straight to PizZip.
-    await doc.renderAsync(data);
+    await doc.renderAsync(filled);
   } catch (err) {
     throw new AppError(500, "template_error", describeTemplateError(err));
   }
 
-  return doc.getZip().generate({ type: "nodebuffer" }) as Buffer;
+  const zip = doc.getZip();
+  const page = zip.file("word/document.xml");
+  if (page) {
+    zip.file("word/document.xml", renumberDrawingIds(page.asText() as string));
+  }
+
+  return zip.generate({ type: "nodebuffer" }) as Buffer;
 };
 
 // A project's template and data. Both report paths start here, so the template
