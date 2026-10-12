@@ -45,8 +45,9 @@ export type ArchiveResource = (typeof ARCHIVE_RESOURCES)[number];
 export const isArchiveResource = (value: string): value is ArchiveResource =>
   (ARCHIVE_RESOURCES as readonly string[]).includes(value);
 
-// A session may carry no name, so a label can be null.
-type Labelled = { label: string | null };
+// An archived row as the page reads it: the id it acts on, and a label. A
+// session may carry no name, so a label can be null.
+type Labelled = { id: number; label: string | null };
 
 type Resource = {
   subject: Subject;
@@ -69,7 +70,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
     projectIdOf: async (id) => id,
     list: async (needle, limit, offset, database) =>
       database
-        .select({ label: project.title })
+        .select({ id: project.projectId, label: project.title })
         .from(project)
         .where(and(isNotNull(project.archivedAt), ilike(project.title, like(needle))))
         .orderBy(asc(project.projectId))
@@ -78,7 +79,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
     count: async (database) =>
       total(await database.select().from(project).where(isNotNull(project.archivedAt))),
     rowsOf: async (ids, database) =>
-      database.select({ label: project.title }).from(project).where(inArray(project.projectId, ids)),
+      database.select({ id: project.projectId, label: project.title }).from(project).where(inArray(project.projectId, ids)),
     stamp: async (ids, value, database) => {
       await database.update(project).set({ archivedAt: value }).where(inArray(project.projectId, ids));
     },
@@ -88,7 +89,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
     projectIdOf: async (id, database) => (await findSessionById(id, database))?.projectId ?? null,
     list: async (needle, limit, offset, database) =>
       database
-        .select({ label: session.name })
+        .select({ id: session.sessionId, label: session.name })
         .from(session)
         .where(and(isNotNull(session.archivedAt), ilike(session.name, like(needle))))
         .orderBy(asc(session.sessionId))
@@ -97,7 +98,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
     count: async (database) =>
       total(await database.select().from(session).where(isNotNull(session.archivedAt))),
     rowsOf: async (ids, database) =>
-      database.select({ label: session.name }).from(session).where(inArray(session.sessionId, ids)),
+      database.select({ id: session.sessionId, label: session.name }).from(session).where(inArray(session.sessionId, ids)),
     stamp: async (ids, value, database) => {
       await database.update(session).set({ archivedAt: value }).where(inArray(session.sessionId, ids));
     },
@@ -107,7 +108,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
     projectIdOf: async (id, database) => (await findTaskGroupById(id, database))?.projectId ?? null,
     list: async (needle, limit, offset, database) =>
       database
-        .select({ label: taskGroup.code })
+        .select({ id: taskGroup.taskGroupId, label: taskGroup.code })
         .from(taskGroup)
         .where(and(isNotNull(taskGroup.archivedAt), ilike(taskGroup.code, like(needle))))
         .orderBy(asc(taskGroup.taskGroupId))
@@ -117,7 +118,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
       total(await database.select().from(taskGroup).where(isNotNull(taskGroup.archivedAt))),
     rowsOf: async (ids, database) =>
       database
-        .select({ label: taskGroup.code })
+        .select({ id: taskGroup.taskGroupId, label: taskGroup.code })
         .from(taskGroup)
         .where(inArray(taskGroup.taskGroupId, ids)),
     stamp: async (ids, value, database) => {
@@ -135,7 +136,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
     },
     list: async (needle, limit, offset, database) =>
       database
-        .select({ label: taskCode.code })
+        .select({ id: taskCode.taskCodeId, label: taskCode.code })
         .from(taskCode)
         .where(and(isNotNull(taskCode.archivedAt), ilike(taskCode.code, like(needle))))
         .orderBy(asc(taskCode.taskCodeId))
@@ -145,7 +146,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
       total(await database.select().from(taskCode).where(isNotNull(taskCode.archivedAt))),
     rowsOf: async (ids, database) =>
       database
-        .select({ label: taskCode.code })
+        .select({ id: taskCode.taskCodeId, label: taskCode.code })
         .from(taskCode)
         .where(inArray(taskCode.taskCodeId, ids)),
     stamp: async (ids, value, database) => {
@@ -163,7 +164,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
     },
     list: async (needle, limit, offset, database) =>
       database
-        .select({ label: description.label })
+        .select({ id: description.descriptionId, label: description.label })
         .from(description)
         .where(and(isNotNull(description.archivedAt), ilike(description.label, like(needle))))
         .orderBy(asc(description.descriptionId))
@@ -173,7 +174,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
       total(await database.select().from(description).where(isNotNull(description.archivedAt))),
     rowsOf: async (ids, database) =>
       database
-        .select({ label: description.label })
+        .select({ id: description.descriptionId, label: description.label })
         .from(description)
         .where(inArray(description.descriptionId, ids)),
     stamp: async (ids, value, database) => {
@@ -193,7 +194,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
     },
     list: async (needle, limit, offset, database) =>
       database
-        .select({ label: type.code })
+        .select({ id: type.typeId, label: type.code })
         .from(type)
         .where(and(isNotNull(type.archivedAt), ilike(type.code, like(needle))))
         .orderBy(asc(type.typeId))
@@ -202,7 +203,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
     count: async (database) =>
       total(await database.select().from(type).where(isNotNull(type.archivedAt))),
     rowsOf: async (ids, database) =>
-      database.select({ label: type.code }).from(type).where(inArray(type.typeId, ids)),
+      database.select({ id: type.typeId, label: type.code }).from(type).where(inArray(type.typeId, ids)),
     stamp: async (ids, value, database) => {
       await database.update(type).set({ archivedAt: value }).where(inArray(type.typeId, ids));
     },
@@ -219,7 +220,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
     },
     list: async (needle, limit, offset, database) =>
       database
-        .select({ label: partCode.code })
+        .select({ id: partCode.partCodeId, label: partCode.code })
         .from(partCode)
         .where(and(isNotNull(partCode.archivedAt), ilike(partCode.code, like(needle))))
         .orderBy(asc(partCode.partCodeId))
@@ -229,7 +230,7 @@ export const ARCHIVE: Record<ArchiveResource, Resource> = {
       total(await database.select().from(partCode).where(isNotNull(partCode.archivedAt))),
     rowsOf: async (ids, database) =>
       database
-        .select({ label: partCode.code })
+        .select({ id: partCode.partCodeId, label: partCode.code })
         .from(partCode)
         .where(inArray(partCode.partCodeId, ids)),
     stamp: async (ids, value, database) => {

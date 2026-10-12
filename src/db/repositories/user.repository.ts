@@ -1,6 +1,6 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, not } from "drizzle-orm";
 
-import { authSession, authUser } from "../../lib/auth/schema";
+import { authAccount, authSession, authUser } from "../../lib/auth/schema";
 import { db, type DbOrTx } from "../client";
 
 export type UserRow = typeof authUser.$inferSelect;
@@ -35,6 +35,29 @@ export const updateUserById = async (
       .returning()
   )[0] ?? null;
 
+// The newest sign-in per account: a session row is created when one signs in,
+// so the latest one is the last time that happened. One query for the whole
+// list, not one per row.
+export const latestSignInByUserIds = async (
+  userIds: string[],
+  database: DbOrTx = db,
+): Promise<Map<string, Date>> => {
+  if (userIds.length === 0) return new Map();
+
+  const rows = await database
+    .select({ userId: authSession.userId, createdAt: authSession.createdAt })
+    .from(authSession)
+    .where(inArray(authSession.userId, userIds))
+    .orderBy(desc(authSession.createdAt));
+
+  const latest = new Map<string, Date>();
+  for (const row of rows) {
+    if (!latest.has(row.userId)) latest.set(row.userId, row.createdAt);
+  }
+
+  return latest;
+};
+
 // Every live sign-in for one account. A password reset drops them all, so a
 // stolen token stops working the moment the password changes.
 export const deleteAuthSessionsForUser = async (
@@ -48,3 +71,34 @@ export const deleteAuthSessionsForUser = async (
 
   return removed.length;
 };
+
+// Every session but the caller's. A self-service password change cuts off the
+// other machines without signing the person out of the one they are on.
+export const deleteOtherAuthSessionsForUser = async (
+  userId: string,
+  keepSessionId: string,
+  database: DbOrTx = db,
+): Promise<number> => {
+  const removed = await database
+    .delete(authSession)
+    .where(
+      and(eq(authSession.userId, userId), not(eq(authSession.id, keepSessionId))),
+    )
+    .returning({ id: authSession.id });
+
+  return removed.length;
+};
+
+// The credential row holding the password hash. Null on an account with no
+// password provider, which cannot pass a current-password check.
+export const findCredentialAccount = async (
+  userId: string,
+  database: DbOrTx = db,
+): Promise<typeof authAccount.$inferSelect | null> =>
+  (
+    await database
+      .select()
+      .from(authAccount)
+      .where(and(eq(authAccount.userId, userId), eq(authAccount.providerId, "credential")))
+      .limit(1)
+  )[0] ?? null;

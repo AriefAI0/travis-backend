@@ -14,6 +14,9 @@ import type { Action, Subject } from "./permissions";
 // here, so no handler can leak it.
 export type AuthUser = {
   userId: string;
+  // The session row this request came in on. A password change drops every
+  // other session and keeps this one, so the caller stays signed in.
+  sessionId: string;
   name: string;
   email: string;
   organizationId: number;
@@ -53,6 +56,7 @@ export const requireUser = (database?: DbOrTx) =>
 
     const user: AuthUser = {
       userId: resolved.id,
+      sessionId: session?.session?.id ?? "",
       name: resolved.name ?? "",
       email: resolved.email ?? "",
       organizationId: resolved.organizationId,

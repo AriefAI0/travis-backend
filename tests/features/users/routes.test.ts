@@ -10,11 +10,13 @@ import {
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
+import { createAuth } from "../../../src/lib/auth/auth";
 import { authRoutes } from "../../../src/features/auth/routes";
+import { permissionRoutes } from "../../../src/features/permissions/routes";
 import { userRoutes } from "../../../src/features/users/routes";
 import { organization } from "../../../src/db/schema";
 
-const app = appFor(testDb, userRoutes, authRoutes);
+const app = appFor(testDb, userRoutes, authRoutes, permissionRoutes);
 
 beforeAll(ensureTestDatabase);
 beforeEach(truncateTestDatabase);
@@ -75,6 +77,130 @@ describe("GET /api/v1/users", () => {
 
   it("refuses a caller with no token", async () => {
     expect((await app.request("/api/v1/users")).status).toBe(401);
+  });
+});
+
+describe("lastSignInAt", () => {
+  // The list carries one stamp per account: the newest session row. An account
+  // an admin just created has never signed in, and must read as null rather
+  // than as the creation time.
+  it("is null for an account that never signed in", async () => {
+    const boss = await admin();
+
+    await call("/api/v1/users", boss.token, {
+      method: "POST",
+      body: { email: "fresh@example.local", name: "Fresh", preset: "Viewer" },
+    });
+
+    const body = await json<{ data: Array<{ email: string; lastSignInAt: string | null }> }>(
+      await call("/api/v1/users", boss.token),
+    );
+    const fresh = body.data.find((row) => row.email === "fresh@example.local");
+    expect(fresh?.lastSignInAt).toBeNull();
+  });
+
+  it("reads the newest session once the account signs in", async () => {
+    const boss = await admin();
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    const body = await json<{ data: Array<{ userId: string; lastSignInAt: string | null }> }>(
+      await call("/api/v1/users", boss.token),
+    );
+    const row = body.data.find((entry) => entry.userId === worker.userId);
+
+    expect(row?.lastSignInAt).not.toBeNull();
+    expect(Number.isNaN(Date.parse(row!.lastSignInAt!))).toBe(false);
+  });
+});
+
+describe("GET /api/v1/users/:id/permissions", () => {
+  it("returns the rows behind the tick sheet", async () => {
+    const boss = await admin();
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    const res = await call(`/api/v1/users/${worker.userId}/permissions`, boss.token);
+
+    expect(res.status).toBe(200);
+    const body = await json<{ data: Array<{ action: string; subject: string }> }>(res);
+    const holds = body.data.some((row) => row.action === "read" && row.subject === "Recording");
+    expect(holds).toBe(true);
+  });
+
+  it("answers 404 on another org's user", async () => {
+    const boss = await admin();
+    const other = await testDb
+      .insert(organization)
+      .values({ name: `other-${crypto.randomUUID()}` })
+      .returning()
+      .then((rows) => rows[0]!.organizationId);
+    const stranger = await createTestUser({ organizationId: other, preset: "Viewer" });
+
+    const res = await call(`/api/v1/users/${stranger.userId}/permissions`, boss.token);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses a caller without manage Permission", async () => {
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    const res = await call(`/api/v1/users/${worker.userId}/permissions`, worker.token);
+
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("GET /api/v1/permissions/catalog", () => {
+  it("serves the vocabulary the grid renders", async () => {
+    const boss = await admin();
+
+    const res = await call("/api/v1/permissions/catalog", boss.token);
+
+    expect(res.status).toBe(200);
+    const body = await json<{
+      data: {
+        actions: string[];
+        subjects: string[];
+        structureLevels: string[];
+        grantable: Record<string, string[]>;
+        presets: Record<string, Array<{ action: string; subject: string }>>;
+      };
+    }>(res);
+
+    expect(body.data.actions).toContain("manage");
+    expect(body.data.subjects).toContain("Permission");
+    expect(body.data.structureLevels[0]).toBe("project");
+    expect(body.data.grantable.read).toContain("Project");
+    expect(body.data.presets.Viewer).toContainEqual({ action: "read", subject: "Recording" });
+  });
+
+  it("offers only pairs the backend accepts", async () => {
+    const boss = await admin();
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    const body = await json<{ data: { grantable: Record<string, string[]> } }>(
+      await call("/api/v1/permissions/catalog", boss.token),
+    );
+    // every pair the catalog offers saves without a 400
+    const permissions = Object.entries(body.data.grantable).flatMap(([action, subjects]) =>
+      subjects.map((subject) => ({ action, subject })),
+    );
+
+    const res = await call(`/api/v1/users/${worker.userId}/permissions`, boss.token, {
+      method: "PUT",
+      body: { permissions },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses a caller without manage Permission", async () => {
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    expect((await call("/api/v1/permissions/catalog", worker.token)).status).toBe(403);
+  });
+
+  it("refuses a caller with no token", async () => {
+    expect((await app.request("/api/v1/permissions/catalog")).status).toBe(401);
   });
 });
 
@@ -367,6 +493,135 @@ describe("POST /api/v1/users/:id/reset-password", () => {
     });
 
     expect(res.status).toBe(403);
+  });
+});
+
+describe("PATCH /api/v1/users/me", () => {
+  const patch = (token: string, body: unknown) =>
+    call("/api/v1/users/me", token, { method: "PATCH", body });
+
+  it("renames the caller with the right current password", async () => {
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    const res = await patch(worker.token, {
+      name: "Renamed Myself",
+      currentPassword: TEST_PASSWORD,
+    });
+
+    expect(res.status).toBe(200);
+    const body = await json<{ data: { name: string } }>(res);
+    expect(body.data.name).toBe("Renamed Myself");
+  });
+
+  // No admin right is involved: a Viewer edits their own row.
+  it("needs no right beyond being signed in", async () => {
+    const viewer = await createTestUser({ preset: "Viewer" });
+
+    const res = await patch(viewer.token, {
+      name: "Still A Viewer",
+      currentPassword: TEST_PASSWORD,
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses a wrong current password and writes nothing", async () => {
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    const res = await patch(worker.token, {
+      name: "Hijacked",
+      currentPassword: "not-the-password",
+    });
+
+    expect(res.status).toBe(400);
+    expect((await json<{ code: string }>(res)).code).toBe("wrong_password");
+
+    const listed = await json<{ data: Array<{ userId: string; name: string }> }>(
+      await call("/api/v1/users", (await admin()).token),
+    );
+    expect(listed.data.find((row) => row.userId === worker.userId)?.name).toBe(worker.name);
+  });
+
+  it("changes the password and clears the first-sign-in flag", async () => {
+    const worker = await createTestUser({ preset: "Viewer" });
+    const next = "a-new-password-42";
+
+    const res = await patch(worker.token, {
+      currentPassword: TEST_PASSWORD,
+      newPassword: next,
+    });
+    expect(res.status).toBe(200);
+    expect((await json<{ data: { mustChangePassword: boolean } }>(res)).data.mustChangePassword).toBe(
+      false,
+    );
+
+    const signIn = (password: string) =>
+      app.request("/api/v1/auth/sign-in/email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: worker.email, password }),
+      });
+
+    expect((await signIn(next)).status).toBe(200);
+    expect((await signIn(TEST_PASSWORD)).status).toBe(401);
+  });
+
+  it("keeps the caller signed in while dropping other machines", async () => {
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    // a second sign-in, the way another machine would leave one behind
+    const context = await createAuth(testDb).$context;
+    const elsewhere = await context.internalAdapter.createSession(worker.userId);
+    expect(elsewhere.token).not.toBe(worker.token);
+
+    const res = await patch(worker.token, {
+      currentPassword: TEST_PASSWORD,
+      newPassword: "another-password-43",
+    });
+    expect(res.status).toBe(200);
+
+    expect((await call("/api/v1/users/me/permissions", worker.token)).status).toBe(200);
+    expect(
+      (await call("/api/v1/users/me/permissions", elsewhere.token)).status,
+    ).toBe(401);
+  });
+
+  it("refuses a new password under the policy", async () => {
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    const short = await patch(worker.token, {
+      currentPassword: TEST_PASSWORD,
+      newPassword: "abc1",
+    });
+    expect(short.status).toBe(400);
+
+    // 12 characters, but no letter
+    const digits = await patch(worker.token, {
+      currentPassword: TEST_PASSWORD,
+      newPassword: "123456789012",
+    });
+    expect(digits.status).toBe(400);
+  });
+
+  it("refuses an empty body and a caller with no token", async () => {
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    expect((await patch(worker.token, {})).status).toBe(400);
+    expect(
+      (await app.request("/api/v1/users/me", { method: "PATCH" })).status,
+    ).toBe(401);
+  });
+
+  // The route is registered before `/users/:id`, so "me" is never an id.
+  it("is not shadowed by the /users/:id route", async () => {
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    const res = await patch(worker.token, {
+      name: worker.name,
+      currentPassword: TEST_PASSWORD,
+    });
+
+    expect(res.status).toBe(200);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   mintPassword,
   replaceUserPermissions,
   resetUserPassword,
+  updateOwnAccount,
   updateUser,
 } from "../../db/services/user.service";
 import { requireCan, requireUser, type AuthVariables } from "../../lib/auth/middleware";
@@ -18,6 +19,7 @@ import { ok } from "../../lib/response";
 import {
   createUserSchema,
   replacePermissionsSchema,
+  updateOwnAccountSchema,
   updateUserSchema,
 } from "../../types/api";
 
@@ -42,9 +44,41 @@ export const userRoutes = (database?: DbOrTx) => {
     ok(c, await listOwnPermissions(c.get("user").userId, database)),
   );
 
+  // Self-service: the caller edits their own display name and password. No
+  // right is needed beyond being signed in, and no admin can read the result.
+  // Registered before `/users/:id` so "me" is never read as a user id.
+  routes.patch("/api/v1/users/me", async (c) => {
+    const input = await parseBody(c, updateOwnAccountSchema);
+    const user = await updateOwnAccount(
+      c.get("user").userId,
+      c.get("user").sessionId,
+      input,
+      database,
+    );
+
+    return ok(c, {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      organizationId: user.organizationId,
+      mustChangePassword: user.mustChangePassword,
+      disabled: user.disabled,
+    });
+  });
+
   routes.get("/api/v1/users", requireCan("read", "User"), async (c) =>
     ok(c, await listUsers(c.get("organizationId"), database)),
   );
+
+  // The rows behind the tick sheet: what the account holds right now, so the
+  // grid opens on the truth rather than on the preset label.
+  routes.get("/api/v1/users/:id/permissions", requireCan("manage", "Permission"), async (c) => {
+    const userId = c.req.param("id");
+    const target = await getOrgUser(userId, c.get("organizationId"), database);
+    if (!target) throw notFound("User");
+
+    return ok(c, await listOwnPermissions(userId, database));
+  });
 
   // The backend mints the first password and returns it once. Nothing stores
   // the plaintext, and the account must change it at first sign-in.

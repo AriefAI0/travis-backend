@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
-import { hashPassword } from "better-auth/crypto";
+import { hashPassword, verifyPassword } from "better-auth/crypto";
 
-import { AppError } from "../../lib/error";
+import { AppError, notFound } from "../../lib/error";
 import { MIN_PASSWORD_LENGTH } from "../../lib/auth/auth";
 import { presetLabelFor, presetRows, type PresetName } from "../../lib/auth/presets";
 import { authAccount, authUser } from "../../lib/auth/schema";
@@ -15,7 +15,10 @@ import {
 } from "../repositories/user-permission.repository";
 import {
   deleteAuthSessionsForUser,
+  deleteOtherAuthSessionsForUser,
+  findCredentialAccount,
   findUserById,
+  latestSignInByUserIds,
   listUsersByOrg,
   updateUserById,
 } from "../repositories/user.repository";
@@ -181,19 +184,22 @@ export type UserListItem = {
   preset: PresetName | "Custom";
   disabled: boolean;
   mustChangePassword: boolean;
+  // The newest session row for the account, or null when it never signed in.
+  lastSignInAt: string | null;
 };
 
-// flow: org's users > their rows in one query > label each by preset
-// Two queries, not one per user.
+// flow: org's users > their rows + newest sign-in in one query each > label
+// Three queries, not one per user.
 export const listUsers = async (
   organizationId: number,
   database: DbOrTx = db,
 ): Promise<UserListItem[]> => {
   const users = await listUsersByOrg(organizationId, database);
-  const rows = await listPermissionsForUsers(
-    users.map((user) => user.id),
-    database,
-  );
+  const userIds = users.map((user) => user.id);
+  const [rows, lastSignIn] = await Promise.all([
+    listPermissionsForUsers(userIds, database),
+    latestSignInByUserIds(userIds, database),
+  ]);
 
   const byUser = new Map<string, Array<{ action: string; subject: string }>>();
   for (const row of rows) {
@@ -209,6 +215,7 @@ export const listUsers = async (
     preset: presetLabelFor(byUser.get(user.id) ?? []),
     disabled: user.disabled,
     mustChangePassword: user.mustChangePassword,
+    lastSignInAt: lastSignIn.get(user.id)?.toISOString() ?? null,
   }));
 };
 
@@ -284,3 +291,73 @@ export const resetUserPassword = async (
 // The caller's own rows, read-only. Any signed-in user may ask.
 export const listOwnPermissions = async (userId: string, database: DbOrTx = db) =>
   listPermissionsByUser(userId, database);
+
+/* =========================================================
+   SELF-SERVICE
+========================================================= */
+
+export type UpdateOwnAccountInput = {
+  name?: string;
+  // Always required: this write is what changes an identity field.
+  currentPassword: string;
+  newPassword?: string;
+};
+
+// The person edits their own display name and password. Email, preset and org
+// stay with an admin: they are identity fields.
+//
+// flow: current password > name and/or hash > other sessions dropped
+export const updateOwnAccount = async (
+  userId: string,
+  sessionId: string,
+  input: UpdateOwnAccountInput,
+  database?: DbOrTx,
+): Promise<UserRow> => {
+  const run = async (tx: DbOrTx): Promise<UserRow> => {
+    const existing = await findUserById(userId, tx);
+    if (!existing) throw notFound("User");
+
+    const account = await findCredentialAccount(userId, tx);
+    const matches = account?.password
+      ? await verifyPassword({ hash: account.password, password: input.currentPassword })
+      : false;
+    if (!matches) {
+      throw new AppError(400, "wrong_password", "Current password is incorrect");
+    }
+
+    const data: Partial<typeof authUser.$inferInsert> = {};
+
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) throw new AppError(400, "validation_error", "Name is required");
+      data.name = name;
+    }
+
+    if (input.newPassword !== undefined) {
+      if (input.newPassword.length < MIN_PASSWORD_LENGTH) {
+        throw new AppError(
+          400,
+          "validation_error",
+          `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+        );
+      }
+      await setUserPassword(userId, input.newPassword, tx);
+      // the first sign-in flag clears with the password it asked for
+      data.mustChangePassword = false;
+    }
+
+    const updated =
+      Object.keys(data).length > 0 ? await updateUserById(userId, data, tx) : existing;
+    if (!updated) throw notFound("User");
+
+    // A new password cuts every other machine off. This session survives, so
+    // the person is not signed out of the window they are looking at.
+    if (input.newPassword !== undefined) {
+      await deleteOtherAuthSessionsForUser(userId, sessionId, tx);
+    }
+
+    return updated;
+  };
+
+  return database ? run(database) : db.transaction(run);
+};

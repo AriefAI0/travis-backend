@@ -22,6 +22,7 @@ import { archiveRoutes } from "./features/archive/routes";
 import { auditRoutes } from "./features/audit/routes";
 import { authRoutes } from "./features/auth/routes";
 import { userRoutes } from "./features/users/routes";
+import { permissionRoutes } from "./features/permissions/routes";
 import { corsAllowedOrigins, env } from "./config/env";
 import { pingDb } from "./db/client";
 import { onError } from "./lib/error";
@@ -57,6 +58,7 @@ app.use(
 app.route("/", authRoutes());
 app.route("/", healthRoutesFor(minio, [{ name: "db", check: pingDb }]));
 app.route("/", userRoutes());
+app.route("/", permissionRoutes());
 app.route("/", auditRoutes());
 app.route("/", projectRoutes());
 app.route("/", taskStructureRoutes());

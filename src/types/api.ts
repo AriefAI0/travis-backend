@@ -4,6 +4,7 @@
 // the SAME shapes at the REST boundary.
 import { z } from "zod";
 import { ACTIONS, isGrantable, SUBJECTS } from "../lib/auth/permissions";
+import { MIN_PASSWORD_LENGTH } from "../lib/auth/auth";
 
 /* =========================================================
    structure (app: src/shared/structure.ts)
@@ -1539,6 +1540,21 @@ export const createUserSchema = z.object({
 export const updateUserSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   disabled: z.boolean().optional(),
+});
+
+// Self-service: a person edits their own name and password. The current
+// password is always required, and an empty body is refused.
+export const updateOwnAccountSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  currentPassword: z.string().min(1),
+  // The spec's policy for a password a person chooses: 12 characters, letters
+  // and digits. A minted one is strong by construction and skips this.
+  newPassword: z
+    .string()
+    .min(MIN_PASSWORD_LENGTH)
+    .regex(/[A-Za-z]/, "Password must contain a letter")
+    .regex(/[0-9]/, "Password must contain a digit")
+    .optional(),
 });
 
 // One row per tick box. A pair the grid cannot grant is refused here rather

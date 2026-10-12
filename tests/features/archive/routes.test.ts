@@ -167,6 +167,8 @@ describe("archive routes", () => {
     expect(listed.data[0].resource).toBe("project");
     expect(listed.data[0].total).toBe(1);
     expect(listed.data[0].rows[0].label).toBe("Alpha");
+    // The page acts on the id, so the list must carry it, not just the label.
+    expect(listed.data[0].rows[0].id).toBe(1);
 
     const miss = await json(await asAdmin("/api/v1/archive?resource=project&search=zzz"));
     expect(miss.data[0].rows).toHaveLength(0);
