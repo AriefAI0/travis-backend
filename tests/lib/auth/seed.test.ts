@@ -21,14 +21,20 @@ afterAll(closeTestDatabase);
 
 // The seed reads its credentials from env; tests set them for the file.
 const withAdminEnv = <T>(run: () => Promise<T>): Promise<T> => {
-  const before = { email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD };
+  const before = {
+    email: env.ADMIN_EMAIL,
+    password: env.ADMIN_PASSWORD,
+    username: env.ADMIN_USERNAME,
+  };
   env.ADMIN_EMAIL = "seed-admin@example.local";
   env.ADMIN_PASSWORD = "seed-admin-password";
   env.ADMIN_NAME = "Seeded Admin";
+  env.ADMIN_USERNAME = "admin";
 
   return run().finally(() => {
     env.ADMIN_EMAIL = before.email;
     env.ADMIN_PASSWORD = before.password;
+    env.ADMIN_USERNAME = before.username;
   });
 };
 
@@ -41,6 +47,45 @@ describe("seedFirstAdmin", () => {
 
     const rows = await listPermissionsByUser(seeded!.id, testDb);
     expect(rows).toHaveLength(presetRows("Admin").length);
+  });
+
+  it("seeds the login handle from ADMIN_USERNAME", async () => {
+    const seeded = await withAdminEnv(() => seedFirstAdmin(testDb));
+
+    expect(seeded!.username).toBe("admin");
+  });
+
+  it("backfills a missing username on the existing admin, without a password reset", async () => {
+    await withAdminEnv(() => seedFirstAdmin(testDb));
+    const seeded = (await testDb.select().from(authUser))[0]!;
+
+    // the operator changed the password after the first deploy
+    await setUserPassword(seeded.id, "a-brand-new-password", testDb);
+    const hashAfterChange = (
+      await testDb
+        .select({ password: authAccount.password })
+        .from(authAccount)
+        .where(eq(authAccount.providerId, "credential"))
+    )[0]!.password;
+
+    // a later deploy sets ADMIN_USERNAME for the first time
+    const second = await withAdminEnv(async () => {
+      env.ADMIN_USERNAME = "admin";
+      return seedFirstAdmin(testDb);
+    });
+
+    expect(second).toBeNull();
+    const rows = await testDb.select().from(authUser);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.username).toBe("admin");
+    expect(
+      (
+        await testDb
+          .select({ password: authAccount.password })
+          .from(authAccount)
+          .where(eq(authAccount.providerId, "credential"))
+      )[0]!.password,
+    ).toBe(hashAfterChange);
   });
 
   it("does nothing when an account already exists", async () => {

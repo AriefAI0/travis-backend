@@ -51,6 +51,8 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:?set the first admin email}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set the first admin password}
       ADMIN_NAME: ${ADMIN_NAME:-Administrator}
+      # The admin's login handle. Optional: unset arrives as "", read as absent.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       # browser origins allowed to fetch HLS; defaults to the dev renderer
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,null}
     volumes:

@@ -15,6 +15,12 @@ const schema = z.object({
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(12).optional(),
   ADMIN_NAME: z.string().min(1).optional(),
+  // The admin's login handle. Sign-in accepts this or the email. An unset var
+  // arrives from compose as "", which reads as absent.
+  ADMIN_USERNAME: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
   DATABASE_URL: z
     .string()
     .min(1)

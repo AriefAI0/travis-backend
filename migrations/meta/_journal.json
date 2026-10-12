@@ -29,6 +29,13 @@
       "when": 1791747791024,
       "tag": "0003_next_silverclaw",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791780856430,
+      "tag": "0004_auth_user_username",
+      "breakpoints": true
     }
   ]
 }

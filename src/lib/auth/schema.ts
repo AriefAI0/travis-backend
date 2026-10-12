@@ -38,6 +38,8 @@ export const authUser = pgTable("auth_user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  // login handle beside the email: the seed writes one, sign-in accepts either
+  username: text("username").unique(),
 
   // every account belongs to one org; the seeded default fills this until
   // multi-org lands

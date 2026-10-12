@@ -31,6 +31,8 @@ export type CreateUserInput = {
   password: string;
   preset: PresetName;
   organizationId: number;
+  // login handle beside the email; only the seed sets one today
+  username?: string;
   // set on an admin-created account and on a password reset
   mustChangePassword?: boolean;
 };
@@ -52,6 +54,8 @@ export const createUser = async (
   const email = input.email.trim().toLowerCase();
   if (!email) throw new AppError(400, "validation_error", "Email is required");
   if (!input.name.trim()) throw new AppError(400, "validation_error", "Name is required");
+  // stored lowercase, so a typed handle matches whatever case it was given in
+  const username = input.username?.trim().toLowerCase() || undefined;
   // the floor lives here, not only at the route: the seed creates accounts too
   if (input.password.length < MIN_PASSWORD_LENGTH) {
     throw new AppError(
@@ -71,6 +75,17 @@ export const createUser = async (
       throw new AppError(409, "wrong_state", "An account with that email already exists");
     }
 
+    if (username) {
+      const taken = await tx
+        .select({ id: authUser.id })
+        .from(authUser)
+        .where(eq(authUser.username, username))
+        .limit(1);
+      if (taken.length > 0) {
+        throw new AppError(409, "wrong_state", "That username is already taken");
+      }
+    }
+
     // an id the app owns: better-auth accepts any text id, and the account row
     // needs it before the user is returned
     const userId = crypto.randomUUID();
@@ -81,6 +96,7 @@ export const createUser = async (
         id: userId,
         name: input.name.trim(),
         email,
+        username,
         emailVerified: true,
         organizationId: input.organizationId,
         mustChangePassword: input.mustChangePassword ?? true,

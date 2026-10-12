@@ -26,6 +26,8 @@ export const createTestUser = async (
     password?: string;
     organizationId?: number;
     disabled?: boolean;
+    // login handle beside the email
+    username?: string;
     // pre-tick the boxes a preset grants, the way an admin would on creation
     preset?: PresetName;
   } = {},
@@ -47,6 +49,7 @@ export const createTestUser = async (
       // runs in beforeAll before it calls this
       organizationId: options.organizationId ?? testOrgId,
       disabled: options.disabled ?? false,
+      username: options.username,
     })
     .returning();
 

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, not } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, not, sql } from "drizzle-orm";
 
 import { authAccount, authSession, authUser } from "../../lib/auth/schema";
 import { db, type DbOrTx } from "../client";
@@ -88,6 +88,20 @@ export const deleteOtherAuthSessionsForUser = async (
 
   return removed.length;
 };
+
+// flow: login handle > the account's email, matching whatever case was typed
+// Null when no account holds the handle, so the caller can fall through.
+export const emailByUsername = async (
+  username: string,
+  database: DbOrTx = db,
+): Promise<string | null> =>
+  (
+    await database
+      .select({ email: authUser.email })
+      .from(authUser)
+      .where(sql`lower(${authUser.username}) = ${username.toLowerCase()}`)
+      .limit(1)
+  )[0]?.email ?? null;
 
 // The credential row holding the password hash. Null on an account with no
 // password provider, which cannot pass a current-password check.
