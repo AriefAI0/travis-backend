@@ -10,7 +10,10 @@ import {
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
+import { desc } from "drizzle-orm";
+
 import { createAuth } from "../../../src/lib/auth/auth";
+import { auditLog } from "../../../src/lib/auth/schema";
 import { authRoutes } from "../../../src/features/auth/routes";
 import { permissionRoutes } from "../../../src/features/permissions/routes";
 import { userRoutes } from "../../../src/features/users/routes";
@@ -622,6 +625,100 @@ describe("PATCH /api/v1/users/me", () => {
     });
 
     expect(res.status).toBe(200);
+  });
+});
+
+describe("the account writes are audited", () => {
+  // The audit rows the account surface writes, newest first.
+  const auditRows = () =>
+    testDb.select().from(auditLog).orderBy(desc(auditLog.auditLogId));
+
+  it("records the create, and never the minted password", async () => {
+    const boss = await admin();
+
+    const created = await json<{ data: { userId: string; password: string } }>(
+      await call("/api/v1/users", boss.token, {
+        method: "POST",
+        body: { email: "audited@example.local", name: "Audited", preset: "Viewer" },
+      }),
+    );
+
+    const rows = await auditRows();
+    const row = rows.find((entry) => entry.action === "create");
+    expect(row).toMatchObject({
+      resourceType: "User",
+      resourceId: created.data.userId,
+      userId: boss.userId,
+    });
+
+    // the way in is not history: the minted password appears nowhere
+    expect(JSON.stringify(row?.after)).not.toContain(created.data.password);
+  });
+
+  it("records a disable with both sides of the flag", async () => {
+    const boss = await admin();
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    await call(`/api/v1/users/${worker.userId}`, boss.token, {
+      method: "PATCH",
+      body: { disabled: true },
+    });
+
+    const row = (await auditRows()).find((entry) => entry.action === "user_disable");
+    expect(row).toMatchObject({ resourceType: "User", resourceId: worker.userId });
+    expect(row?.before).toMatchObject({ disabled: false });
+    expect(row?.after).toMatchObject({ disabled: true });
+  });
+
+  it("records a permission change against the account whose rights moved", async () => {
+    const boss = await admin();
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    await call(`/api/v1/users/${worker.userId}/permissions`, boss.token, {
+      method: "PUT",
+      body: { permissions: [{ action: "read", subject: "Report" }] },
+    });
+
+    const row = (await auditRows()).find((entry) => entry.action === "permission_change");
+    // the target, not the admin who made the change
+    expect(row).toMatchObject({ resourceType: "Permission", resourceId: worker.userId });
+    expect(row?.after).toMatchObject([{ action: "read", subject: "Report" }]);
+    expect(Array.isArray(row?.before)).toBe(true);
+  });
+
+  it("records a reset without the new password, and a self-service change as the actor", async () => {
+    const boss = await admin();
+    const worker = await createTestUser({ preset: "Viewer" });
+
+    const reset = await json<{ data: { password: string } }>(
+      await call(`/api/v1/users/${worker.userId}/reset-password`, boss.token, { method: "POST" }),
+    );
+
+    const rows = await auditRows();
+    const resetRow = rows.find((entry) => entry.action === "password_reset");
+    expect(resetRow).toMatchObject({ resourceId: worker.userId, userId: boss.userId });
+    expect(JSON.stringify(resetRow?.after)).not.toContain(reset.data.password);
+
+    // The reset killed the worker's sessions, so they sign in with the password
+    // they were just issued — the token rides a response header, not the body.
+    const signIn = await app.request("/api/v1/auth/sign-in/email", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: worker.email, password: reset.data.password }),
+    });
+    const freshToken = signIn.headers.get("set-auth-token");
+    expect(freshToken).not.toBeNull();
+
+    // the account editing itself is its own actor
+    await call("/api/v1/users/me", freshToken!, {
+      method: "PATCH",
+      body: { name: "Renamed Myself", currentPassword: reset.data.password },
+    });
+
+    const own = (await auditRows()).find(
+      (entry) => entry.action === "modify" && entry.resourceId === worker.userId,
+    );
+    expect(own).toMatchObject({ userId: worker.userId, resourceType: "User" });
   });
 });
 

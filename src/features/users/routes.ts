@@ -12,7 +12,12 @@ import {
   updateOwnAccount,
   updateUser,
 } from "../../db/services/user.service";
-import { requireCan, requireUser, type AuthVariables } from "../../lib/auth/middleware";
+import {
+  callerOf,
+  requireCan,
+  requireUser,
+  type AuthVariables,
+} from "../../lib/auth/middleware";
 import { notFound } from "../../lib/error";
 import { compactUpdate, parseBody } from "../../lib/parse";
 import { ok } from "../../lib/response";
@@ -95,6 +100,7 @@ export const userRoutes = (database?: DbOrTx) => {
         organizationId: c.get("organizationId"),
         mustChangePassword: true,
       },
+      callerOf(c),
       database,
     );
 
@@ -103,7 +109,7 @@ export const userRoutes = (database?: DbOrTx) => {
 
   routes.patch("/api/v1/users/:id", requireCan("manage", "User"), async (c) => {
     const input = compactUpdate(await parseBody(c, updateUserSchema));
-    const user = await updateUser(c.req.param("id"), c.get("organizationId"), input, database);
+    const user = await updateUser(c.req.param("id"), callerOf(c), input, database);
     if (!user) throw notFound("User");
 
     return ok(c, {
@@ -125,7 +131,7 @@ export const userRoutes = (database?: DbOrTx) => {
     const { permissions } = await parseBody(c, replacePermissionsSchema);
     await replaceUserPermissions(
       userId,
-      organizationId,
+      callerOf(c),
       permissions.map((tick) => ({
         action: tick.action,
         subject: tick.subject,
@@ -139,11 +145,7 @@ export const userRoutes = (database?: DbOrTx) => {
 
   // Returns the new password once and kills every live session for the user.
   routes.post("/api/v1/users/:id/reset-password", requireCan("manage", "User"), async (c) => {
-    const result = await resetUserPassword(
-      c.req.param("id"),
-      c.get("organizationId"),
-      database,
-    );
+    const result = await resetUserPassword(c.req.param("id"), callerOf(c), database);
     if (!result) throw notFound("User");
 
     return ok(c, result);

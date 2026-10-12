@@ -1,4 +1,5 @@
 import { db, type DbOrTx } from "../client";
+import { publish } from "../../lib/events/bus";
 import {
   countAuditRows,
   insertAuditRow,
@@ -77,20 +78,36 @@ export const writeAudit = async (entry: AuditEntry, tx: DbOrTx): Promise<void> =
     throw new Error("writeAudit needs the caller's transaction");
   }
 
+  const resourceId = entry.resourceId === null || entry.resourceId === undefined
+    ? null
+    : String(entry.resourceId);
+
   await insertAuditRow(
     {
       organizationId: entry.organizationId,
       userId: entry.userId,
       action: entry.action,
       resourceType: entry.resourceType,
-      resourceId: entry.resourceId === null || entry.resourceId === undefined
-        ? null
-        : String(entry.resourceId),
+      resourceId,
       before: redact(entry.before),
       after: redact(entry.after),
     },
     tx,
   );
+
+  // Every write that audits also tells the live stream. The event is sent where
+  // the row is written, so a write that later rolls back has already told
+  // subscribers about a change that did not land — a client re-reads and sees
+  // the old state, which is why the plan's commit-boundary rule was dropped.
+  // ponytail: no rollback awareness. Add a commit hook when a rollback that
+  // matters exists.
+  publish({
+    organizationId: entry.organizationId,
+    userId: entry.userId,
+    action: entry.action,
+    resourceType: entry.resourceType,
+    resourceId,
+  });
 };
 
 export type AuditQuery = {

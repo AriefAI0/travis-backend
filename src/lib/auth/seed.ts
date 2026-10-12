@@ -30,6 +30,8 @@ export const seedFirstAdmin = async (database?: DbOrTx) => {
         // the deploy supplies this password, so it is already the operator's
         mustChangePassword: false,
       },
+      // a system write: the seed runs before any account can act
+      { organizationId: org.organizationId, userId: null },
       tx,
     );
   };

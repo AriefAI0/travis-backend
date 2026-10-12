@@ -20,6 +20,7 @@ import { reportRoutes } from "./features/reports/routes";
 import { editorRoutes } from "./features/reports/editor-page";
 import { archiveRoutes } from "./features/archive/routes";
 import { auditRoutes } from "./features/audit/routes";
+import { eventRoutes } from "./features/events/routes";
 import { authRoutes } from "./features/auth/routes";
 import { userRoutes } from "./features/users/routes";
 import { permissionRoutes } from "./features/permissions/routes";
@@ -60,6 +61,9 @@ app.route("/", healthRoutesFor(minio, [{ name: "db", check: pingDb }]));
 app.route("/", userRoutes());
 app.route("/", permissionRoutes());
 app.route("/", auditRoutes());
+// The change stream. A long-lived response, so it is mounted last of the
+// guarded features and never sits in front of another route.
+app.route("/", eventRoutes());
 app.route("/", projectRoutes());
 app.route("/", taskStructureRoutes());
 app.route("/", plannedInspectionRoutes());

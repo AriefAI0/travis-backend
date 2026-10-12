@@ -1,7 +1,9 @@
 import { eq } from "drizzle-orm";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 
+import type { Caller } from "../../lib/caller";
 import { AppError, notFound } from "../../lib/error";
+import { writeAudit } from "./audit.service";
 import { MIN_PASSWORD_LENGTH } from "../../lib/auth/auth";
 import { presetLabelFor, presetRows, type PresetName } from "../../lib/auth/presets";
 import { authAccount, authUser } from "../../lib/auth/schema";
@@ -33,6 +35,10 @@ export type CreateUserInput = {
   mustChangePassword?: boolean;
 };
 
+// Who did it. The audit row carries the actor, and every write below lands one.
+// A null actor is a system write, which the seed is.
+// flow: actor > audit row beside the change > event on the stream
+
 export type UserRow = typeof authUser.$inferSelect;
 
 // flow: user row > credential account > preset rows
@@ -40,6 +46,7 @@ export type UserRow = typeof authUser.$inferSelect;
 // or one who can but holds no rights.
 export const createUser = async (
   input: CreateUserInput,
+  actor: Caller,
   database?: DbOrTx,
 ): Promise<UserRow> => {
   const email = input.email.trim().toLowerCase();
@@ -100,6 +107,20 @@ export const createUser = async (
       tx,
     );
 
+    // The password is minted for this account and never written to the row's
+    // history: the audit trail records the account, not its way in.
+    await writeAudit(
+      {
+        organizationId: input.organizationId,
+        userId: actor.userId,
+        action: "create",
+        resourceType: "User",
+        resourceId: user.id,
+        after: { name: user.name, email: user.email, preset: input.preset },
+      },
+      tx,
+    );
+
     return user;
   };
 
@@ -149,14 +170,18 @@ const assertKeepsAManager = async (
 // window where a user holds no rights is never visible.
 export const replaceUserPermissions = async (
   userId: string,
-  organizationId: number,
+  caller: Caller,
   rows: Array<{ action: string; subject: string; conditions?: unknown }>,
   database?: DbOrTx,
 ): Promise<void> => {
   const keepsManager = rows.some((row) => row.action === "manage" && row.subject === "User");
 
   const run = async (tx: DbOrTx) => {
-    await assertKeepsAManager(userId, organizationId, keepsManager, tx);
+    await assertKeepsAManager(userId, caller.organizationId, keepsManager, tx);
+
+    // what the account held, for the audit row's before
+    const held = await listPermissionsByUser(userId, tx);
+    const before = held.map((row) => ({ action: row.action, subject: row.subject }));
 
     await deletePermissionsForUser(userId, tx);
     await insertPermissions(
@@ -166,6 +191,21 @@ export const replaceUserPermissions = async (
         subject: row.subject,
         conditions: row.conditions ?? null,
       })),
+      tx,
+    );
+
+    // The row's target is the account whose rights moved, so the person learns
+    // about it even without a right to read permissions.
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "permission_change",
+        resourceType: "Permission",
+        resourceId: userId,
+        before,
+        after: rows.map((row) => ({ action: row.action, subject: row.subject })),
+      },
       tx,
     );
   };
@@ -235,23 +275,40 @@ export const getOrgUser = async (
 // refused for the same reason removing their right is.
 export const updateUser = async (
   userId: string,
-  organizationId: number,
+  caller: Caller,
   patch: { name?: string; disabled?: boolean },
   database?: DbOrTx,
 ): Promise<UserRow | null> => {
   const run = async (tx: DbOrTx) => {
-    const existing = await getOrgUser(userId, organizationId, tx);
+    const existing = await getOrgUser(userId, caller.organizationId, tx);
     if (!existing) return null;
 
     if (patch.disabled === true && !existing.disabled) {
-      await assertKeepsAManager(userId, organizationId, false, tx);
+      await assertKeepsAManager(userId, caller.organizationId, false, tx);
     }
 
     const data: Partial<typeof authUser.$inferInsert> = {};
     if (patch.name !== undefined) data.name = patch.name.trim();
     if (patch.disabled !== undefined) data.disabled = patch.disabled;
 
-    return updateUserById(userId, data, tx);
+    const updated = await updateUserById(userId, data, tx);
+    if (!updated) return null;
+
+    // The flag flip has its own action, so a disable is findable on its own.
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: patch.disabled === undefined ? "modify" : "user_disable",
+        resourceType: "User",
+        resourceId: userId,
+        before: { name: existing.name, disabled: existing.disabled },
+        after: { name: updated.name, disabled: updated.disabled },
+      },
+      tx,
+    );
+
+    return updated;
   };
 
   return database ? run(database) : db.transaction(run);
@@ -269,11 +326,11 @@ export const mintPassword = (): string => {
 // reset again.
 export const resetUserPassword = async (
   userId: string,
-  organizationId: number,
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<{ password: string; revokedSessions: number } | null> => {
   const run = async (tx: DbOrTx) => {
-    const existing = await getOrgUser(userId, organizationId, tx);
+    const existing = await getOrgUser(userId, caller.organizationId, tx);
     if (!existing) return null;
 
     const password = mintPassword();
@@ -281,6 +338,20 @@ export const resetUserPassword = async (
     await updateUserById(userId, { mustChangePassword: true }, tx);
     // a stolen token must die with the old password
     const revokedSessions = await deleteAuthSessionsForUser(userId, tx);
+
+    // The minted password never reaches the row: the audit records that it
+    // happened, and how many sessions it cut off.
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "password_reset",
+        resourceType: "User",
+        resourceId: userId,
+        after: { revokedSessions },
+      },
+      tx,
+    );
 
     return { password, revokedSessions };
   };
@@ -355,6 +426,20 @@ export const updateOwnAccount = async (
     if (input.newPassword !== undefined) {
       await deleteOtherAuthSessionsForUser(userId, sessionId, tx);
     }
+
+    // Self-service: the actor is the account itself.
+    await writeAudit(
+      {
+        organizationId: existing.organizationId,
+        userId,
+        action: input.newPassword === undefined ? "modify" : "password_reset",
+        resourceType: "User",
+        resourceId: userId,
+        before: { name: existing.name },
+        after: { name: updated.name },
+      },
+      tx,
+    );
 
     return updated;
   };
