@@ -24,6 +24,7 @@ import {
   INGEST_SWEEP_INTERVAL_MS,
   sweepInactiveIngests,
 } from "../../../src/features/recording/ingest-sweep";
+import { INGEST_RECOVERY_GRACE_MS } from "../../../src/lib/ingest_lease";
 
 const START_EPOCH = Math.floor(Date.parse("2026-09-20T10:00:00.000Z") / 1000);
 const CLOCK_START = new Date("2026-09-20T10:00:00.000Z");
@@ -144,21 +145,29 @@ describe("direct ingest lifecycle", () => {
     expect(ingest!.durationMs).toBe(0);
   });
 
-  test("a segment keeps the ingest open until 15 seconds after it lands", async () => {
+  // A segment-bearing ingest gets the recovery grace, so a restarted app can
+  // rebind and drain before the sweep ends it.
+  test("a segment-bearing ingest survives the idle window and closes at the grace", async () => {
     const admission = await admitMaster();
     await storeSegment(admission.ingestId, admission.ticket, 0);
-    await pinIngestClock(admission.ingestId, CLOCK_START, new Date(CLOCK_START.getTime() + 60_000));
+    const lastSegmentAt = new Date(CLOCK_START.getTime() + 60_000);
+    await pinIngestClock(admission.ingestId, CLOCK_START, lastSegmentAt);
 
-    // 15 s after opening the ingest is stale by openedAt, but fresh by its segment
-    expect(
-      await sweepInactiveIngests(new Date(CLOCK_START.getTime() + 60_000), testDb),
-    ).toEqual([]);
-
-    expect(
-      await sweepInactiveIngests(new Date(CLOCK_START.getTime() + 74_999), testDb),
-    ).toEqual([]);
+    // Well past the 15 s idle window the footage still buys recovery time.
     expect(
       await sweepInactiveIngests(new Date(CLOCK_START.getTime() + 75_000), testDb),
+    ).toEqual([]);
+    expect(
+      await sweepInactiveIngests(
+        new Date(lastSegmentAt.getTime() + INGEST_RECOVERY_GRACE_MS - 1),
+        testDb,
+      ),
+    ).toEqual([]);
+    expect(
+      await sweepInactiveIngests(
+        new Date(lastSegmentAt.getTime() + INGEST_RECOVERY_GRACE_MS),
+        testDb,
+      ),
     ).toEqual([admission.ingestId]);
   });
 
@@ -326,13 +335,33 @@ describe("direct ingest lifecycle", () => {
       new Date(CLOCK_START.getTime() + 20_000),
     );
 
-    // the lease is the newest stamp, so the segment cannot age it out
+    // the lease is the newest stamp, so the segment cannot age it out; the
+    // grace is measured from the lease, not the segment
     expect(
-      await sweepInactiveIngests(new Date(CLOCK_START.getTime() + 30_000), testDb),
+      await sweepInactiveIngests(new Date(CLOCK_START.getTime() + 315_000), testDb),
     ).toEqual([]);
     expect(
-      await sweepInactiveIngests(new Date(CLOCK_START.getTime() + 35_000), testDb),
+      await sweepInactiveIngests(new Date(CLOCK_START.getTime() + 320_000), testDb),
     ).toEqual([admission.ingestId]);
+  });
+
+  // Both tiers in one pass: an empty ingest dies in seconds while a
+  // segment-bearing one keeps its recovery window.
+  test("one sweep closes the empty ingest and keeps the footage-bearing one", async () => {
+    const empty = await admitMaster();
+    const loaded = await admitMaster();
+    await pinIngestClock(empty.ingestId, CLOCK_START, null);
+    await pinIngestClock(loaded.ingestId, CLOCK_START, CLOCK_START);
+
+    expect(
+      await sweepInactiveIngests(new Date(CLOCK_START.getTime() + INGEST_IDLE_CLOSE_MS), testDb),
+    ).toEqual([empty.ingestId]);
+    expect(
+      await sweepInactiveIngests(
+        new Date(CLOCK_START.getTime() + INGEST_RECOVERY_GRACE_MS),
+        testDb,
+      ),
+    ).toEqual([loaded.ingestId]);
   });
 
   test("a heartbeat without the matching ticket is refused", async () => {

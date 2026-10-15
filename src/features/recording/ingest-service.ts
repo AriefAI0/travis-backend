@@ -281,7 +281,7 @@ export const admitIngest = async (
    The lease rule itself lives in lib/ingest_lease.
 ========================================================= */
 
-export { INGEST_IDLE_CLOSE_MS } from "../../lib/ingest_lease";
+export { INGEST_IDLE_CLOSE_MS, INGEST_RECOVERY_GRACE_MS } from "../../lib/ingest_lease";
 
 export type IngestCloseResult = {
   ingestId: number;

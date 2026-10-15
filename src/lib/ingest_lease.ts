@@ -8,6 +8,12 @@ import type { recordingIngest } from "../db/schema";
 // No activity for this long and the sweep closes the ingest.
 export const INGEST_IDLE_CLOSE_MS = 15_000;
 
+// Idle window for an ingest that has committed footage: a crashed app needs
+// to restart, rebind, and drain before the sweep ends its ingest, and 15 s
+// cannot cover a restart. Empty ingests keep the short close above, so a
+// crashed capture with no footage still dies in seconds.
+export const INGEST_RECOVERY_GRACE_MS = 300_000;
+
 // The lease a reader checks instead of a write: wider than the idle close, so
 // an ingest the sweep is about to close is never mistaken for an orphan.
 export const INGEST_LEASE_FRESH_MS = 20_000;
