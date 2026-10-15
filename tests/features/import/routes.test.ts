@@ -10,6 +10,7 @@ import {
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
 import { importRoutes } from "../../../src/features/import/routes";
+import { auditLog } from "../../../src/lib/auth/schema";
 import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, importRoutes);
@@ -117,6 +118,28 @@ describe("task structure import", () => {
 
     const real = await json(await importRows(rows));
     expect(preview.data).toEqual(real.data);
+  });
+
+  // Every node the import creates tells the stream, because the import writes
+  // through the same services its own routes call. A preview writes nothing, so
+  // it must report nothing.
+  it("audits the nodes it creates, and nothing for a preview", async () => {
+    await seedProject();
+    const rows = [row({ type: "GVI", partCode: "P1", preAssigned: ["GVI"] })];
+
+    await importRows(rows, { dryRun: true });
+    expect(await testDb.select().from(auditLog)).toHaveLength(0);
+
+    await importRows(rows);
+
+    const written = await testDb.select().from(auditLog);
+    expect(written.map((one) => one.resourceType).sort()).toEqual([
+      "Description",
+      "PartCode",
+      "TaskCode",
+      "TaskGroup",
+      "Type",
+    ]);
   });
 
   it("creates a task code alone when the row names no description", async () => {

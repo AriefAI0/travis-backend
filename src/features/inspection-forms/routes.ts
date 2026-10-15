@@ -65,7 +65,14 @@ export const inspectionFormRoutes = (database?: DbOrTx) => {
       const projectId = await scopedProjectId(parseId(c, "projectId"), callerOf(c).organizationId);
       const inspectionType = parseInspectionType(c.req.param("inspectionType"));
       const input = await parseBody(c, saveInspectionFormSchema);
-      return ok(c, await saveInspectionFormVersion(projectId, inspectionType, input.customFields, database), 201);
+      const saved = await saveInspectionFormVersion(
+        projectId,
+        inspectionType,
+        input.customFields,
+        callerOf(c),
+        database,
+      );
+      return ok(c, saved, 201);
     },
   );
 

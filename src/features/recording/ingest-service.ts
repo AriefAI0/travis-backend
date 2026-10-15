@@ -25,6 +25,7 @@ import { findOpenClipIngestByResultId } from "../../db/repositories/recording-in
 import { ingestIdleSince } from "../../lib/ingest_lease";
 import { resolveTargetLabel } from "../../db/services/task-structure.service";
 import { createSession } from "../../db/services/session.service";
+import { writeAudit } from "../../db/services/audit.service";
 import { enqueueClipStill, enqueueThumbnails } from "./jobs/thumbnails";
 
 // native splitmuxsink target the client aims for; measured durations arrive per segment
@@ -178,6 +179,20 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
     tx,
   ))!;
 
+  // The clip row is what a media view lists, and the deployment token carries no
+  // user, so this audits as a system write under the project's org.
+  await writeAudit(
+    {
+      organizationId: project.organizationId,
+      userId: null,
+      action: "create",
+      resourceType: "Recording",
+      resourceId: clip.clipId,
+      after: clip,
+    },
+    tx,
+  );
+
   // frozen here, from the master's start: never the clip's own wall clock
   const keyPrefix = buildClipKeyPrefix({
     projectNumber: project.displayNumber,
@@ -292,6 +307,31 @@ export type IngestCloseResult = {
   replayed: boolean;
 };
 
+// The deployment token carries no user, so an ingest audits as a system write
+// under the org of the project its domain row belongs to.
+// flow: ingest row > domain > project org > audit
+const auditIngestDomain = async (
+  ingest: typeof recordingIngest.$inferSelect,
+  action: "create" | "modify",
+  tx: DbOrTx,
+): Promise<void> => {
+  const domain = await loadDomain(ingest, tx);
+  const project = await findProjectByIdInternal(domain.projectId, tx);
+  if (!project) return;
+
+  await writeAudit(
+    {
+      organizationId: project.organizationId,
+      userId: null,
+      action,
+      resourceType: "Recording",
+      resourceId: domain.kind === "master" ? domain.sessionId : domain.clipId,
+      after: domain,
+    },
+    tx,
+  );
+};
+
 // stamp the domain row with the facts the recording ended with
 const stampDomainClose = async (
   ingest: typeof recordingIngest.$inferSelect,
@@ -366,6 +406,8 @@ const runClose = async (
     })
     .where(eq(recordingIngest.ingestId, ingestId));
   await stampDomainClose(ingest, summary, tx);
+  // A close freezes the duration and the end anchor, which a media view shows.
+  await auditIngestDomain(ingest, "modify", tx);
 
   return {
     result: {

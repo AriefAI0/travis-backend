@@ -941,14 +941,49 @@ export const deleteTaskStructureSelection = async (
     throw new AppError(409, "orphan_confirm_required", orphanReason(facts.preview.orphans));
   }
 
+  // Each removed node writes its own audit row, the one its single delete would
+  // have written, so the change stream names what went.
+  // flow: delete > audit on the same transaction
+  const removeNode = async (
+    tx: DbOrTx,
+    resourceType: string,
+    nodeId: number,
+    remove: (id: number, tx: DbOrTx) => Promise<unknown>,
+  ): Promise<void> => {
+    const before = await remove(nodeId, tx);
+    if (!before) return;
+
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "remove",
+        resourceType,
+        resourceId: nodeId,
+        before,
+      },
+      tx,
+    );
+  };
+
   // Deepest level first: deleting a parent cascades the rows below it, and a
   // later delete of those rows would find nothing left to return.
   const run = async (tx: DbOrTx) => {
-    for (const id of resolved.selected.partCodeIds) await deletePartCodeById(id, tx);
-    for (const id of resolved.selected.typeIds) await deleteTypeById(id, tx);
-    for (const id of resolved.selected.descriptionIds) await deleteDescriptionById(id, tx);
-    for (const id of resolved.selected.taskCodeIds) await deleteTaskCodeById(id, tx);
-    for (const id of resolved.selected.taskGroupIds) await deleteTaskGroupById(id, tx);
+    for (const id of resolved.selected.partCodeIds) {
+      await removeNode(tx, "PartCode", id, deletePartCodeById);
+    }
+    for (const id of resolved.selected.typeIds) {
+      await removeNode(tx, "Type", id, deleteTypeById);
+    }
+    for (const id of resolved.selected.descriptionIds) {
+      await removeNode(tx, "Description", id, deleteDescriptionById);
+    }
+    for (const id of resolved.selected.taskCodeIds) {
+      await removeNode(tx, "TaskCode", id, deleteTaskCodeById);
+    }
+    for (const id of resolved.selected.taskGroupIds) {
+      await removeNode(tx, "TaskGroup", id, deleteTaskGroupById);
+    }
   };
 
   await (database ? run(database) : db.transaction(run));

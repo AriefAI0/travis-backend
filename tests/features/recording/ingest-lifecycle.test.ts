@@ -25,6 +25,7 @@ import {
   sweepInactiveIngests,
 } from "../../../src/features/recording/ingest-sweep";
 import { INGEST_RECOVERY_GRACE_MS } from "../../../src/lib/ingest_lease";
+import { auditLog } from "../../../src/lib/auth/schema";
 
 const START_EPOCH = Math.floor(Date.parse("2026-09-20T10:00:00.000Z") / 1000);
 const CLOCK_START = new Date("2026-09-20T10:00:00.000Z");
@@ -270,6 +271,33 @@ describe("direct ingest lifecycle", () => {
       .from(schema.videoClip)
       .where(eq(schema.videoClip.clipId, clip.domain.clipId));
     expect(row!.endOffsetMs).toBe(33_500);
+  });
+
+  // The clip appearing and the clip finishing are both things a media view draws,
+  // so both tell the change stream. The deployment token carries no user, so the
+  // rows are system writes.
+  test("a clip admit and its close each tell the change stream", async () => {
+    const master = await admitMaster();
+    const clip = await admitIngest(
+      {
+        kind: "clip",
+        resultId: 9300,
+        sessionId: master.domain.sessionId,
+        startOffsetMs: 30_000,
+      },
+      testDb,
+    );
+
+    await storeSegment(clip.ingestId, clip.ticket, 0, 2000);
+    await closeIngest(
+      { ingestId: clip.ingestId, ticket: clip.ticket, dispatch: noThumbnails }, testDb);
+
+    const rows = (await testDb.select().from(auditLog).orderBy(auditLog.auditLogId))
+      .filter((one) => one.resourceType === "Recording");
+
+    expect(rows.map((one) => one.action)).toEqual(["create", "modify"]);
+    expect(rows.every((one) => one.userId === null)).toBe(true);
+    expect(rows.every((one) => one.organizationId === testOrgId)).toBe(true);
   });
 
   test("the sweep leaves a healthy capture alone and closes a silent one", async () => {

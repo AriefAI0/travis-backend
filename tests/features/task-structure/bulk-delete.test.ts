@@ -12,6 +12,7 @@ import {
 import { json } from "../../helpers/json";
 import { taskStructureRoutes } from "../../../src/features/task-structure/routes";
 import { deleteTaskStructureSelection } from "../../../src/db/services/task-structure.service";
+import { auditLog } from "../../../src/lib/auth/schema";
 import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, taskStructureRoutes);
@@ -209,6 +210,21 @@ describe("bulk delete", () => {
     expect(parts).toHaveLength(0);
     expect(descriptions).toHaveLength(1);
     expect((await remaining()).results).toBe(1);
+  });
+
+  // Each removed node writes the audit row its single delete would have, so a
+  // window showing the tree hears about the removal.
+  it("audits every node it removes", async () => {
+    await seedTree();
+
+    await remove([{ kind: "part_code", id: 300 }]);
+    await remove([{ kind: "description", id: 100 }], true);
+
+    const rows = await testDb.select().from(auditLog).orderBy(auditLog.auditLogId);
+    expect(rows.map((row) => [row.resourceType, row.resourceId, row.action])).toEqual([
+      ["PartCode", "300", "remove"],
+      ["Description", "100", "remove"],
+    ]);
   });
 
   // An open inspection whose capture is gone: unfinished work that nothing will

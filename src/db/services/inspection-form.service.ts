@@ -1,4 +1,5 @@
 import { AppError } from "../../lib/error";
+import type { Caller } from "../../lib/caller";
 import { db, type DbOrTx } from "../client";
 import {
   createInspectionFormFieldRecords,
@@ -6,6 +7,7 @@ import {
   findCurrentInspectionForm,
   listInspectionFormFieldRecordsByFormId,
 } from "../repositories/inspection-form.repository";
+import { writeAudit } from "./audit.service";
 
 export type FormDataType = "integer" | "decimal" | "text" | "boolean";
 
@@ -176,6 +178,7 @@ export const saveInspectionFormVersion = async (
   projectId: number,
   inspectionTypeCode: string,
   customFields: CustomFieldInput[],
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<InspectionFormView> => {
   const builtins = BUILTIN_FIELDS[inspectionTypeCode] ?? [];
@@ -196,25 +199,45 @@ export const saveInspectionFormVersion = async (
 
   const current = await getCurrentInspectionForm(projectId, inspectionTypeCode, database);
   const normalized = customFields.map((field) => ({ ...field, label: field.label.trim() }));
-  const form = await createFormVersion(
-    projectId,
-    inspectionTypeCode,
-    current.version + 1,
-    normalized,
-    database,
-  );
-  const fields = await listInspectionFormFieldRecordsByFormId(form.inspectionFormId, database);
-  return {
-    inspectionFormId: form.inspectionFormId,
-    inspectionTypeCode: form.inspectionTypeCode,
-    version: form.version,
-    fields: fields.map((row) => ({
-      inspectionFormFieldId: row.inspectionFormFieldId,
-      label: row.label,
-      dataType: row.dataType,
-      required: row.required,
-      isBuiltin: row.isBuiltin,
-      displayOrder: row.displayOrder,
-    })),
+
+  // flow: insert the version and its fields > audit, one transaction
+  const work = async (tx: DbOrTx): Promise<InspectionFormView> => {
+    const form = await createFormVersion(
+      projectId,
+      inspectionTypeCode,
+      current.version + 1,
+      normalized,
+      tx,
+    );
+    const fields = await listInspectionFormFieldRecordsByFormId(form.inspectionFormId, tx);
+
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "modify",
+        resourceType: "InspectionForm",
+        resourceId: form.inspectionFormId,
+        after: { inspectionTypeCode, version: form.version, fields: normalized },
+      },
+      tx,
+    );
+
+    return {
+      inspectionFormId: form.inspectionFormId,
+      inspectionTypeCode: form.inspectionTypeCode,
+      version: form.version,
+      fields: fields.map((row) => ({
+        inspectionFormFieldId: row.inspectionFormFieldId,
+        label: row.label,
+        dataType: row.dataType,
+        required: row.required,
+        isBuiltin: row.isBuiltin,
+        displayOrder: row.displayOrder,
+      })),
+    };
   };
+
+  // A caller-supplied transaction gets a single attempt.
+  return database ? work(database) : db.transaction(work);
 };

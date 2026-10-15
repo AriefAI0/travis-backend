@@ -11,13 +11,28 @@ import {
   truncateTestDatabase,
 } from "../../helpers/db";
 import { eventRoutes } from "../../../src/features/events/routes";
+import { inspectionFormRoutes } from "../../../src/features/inspection-forms/routes";
+import { plannedInspectionRoutes } from "../../../src/features/planned-inspections/routes";
 import { projectRoutes } from "../../../src/features/projects/routes";
+import { restrictedAccessRoutes } from "../../../src/features/restricted-access/routes";
 import { userRoutes } from "../../../src/features/users/routes";
 import { publish, subscriberCount, type ChangeEvent } from "../../../src/lib/events/bus";
 import { userPermission } from "../../../src/lib/auth/schema";
 import { organization } from "../../../src/db/schema";
+import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, eventRoutes);
+
+// one chain: project > group > task code > description > type > part code.
+// The three writes below all land on partCodeId 300 of project 1.
+const seedTree = async () => {
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: 1, projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.taskGroup).values({ taskGroupId: 1, projectId: 1, code: "100" });
+  await testDb.insert(schema.taskCode).values({ taskCodeId: 10, taskGroupId: 1, code: "101" });
+  await testDb.insert(schema.description).values({ descriptionId: 100, taskCodeId: 10, label: "I" });
+  await testDb.insert(schema.type).values({ typeId: 200, descriptionId: 100, code: "T1" });
+  await testDb.insert(schema.partCode).values({ partCodeId: 300, typeId: 200, code: "P1" });
+};
 
 beforeAll(ensureTestDatabase);
 beforeEach(truncateTestDatabase);
@@ -341,5 +356,79 @@ describe("GET /api/v1/events", () => {
     await new Promise((resolve) => setTimeout(resolve, 1_200));
 
     expect(subscriberCount()).toBe(before);
+  });
+
+  // The three writes that used to reach no client at all. Each one is a surface
+  // another window draws, so a missing event leaves that window stale.
+  describe("a write that bypassed the audit trail", () => {
+    it("carries a restricted-access mark", async () => {
+      const operator = await createTestUser({ preset: "Operator" });
+      const app = appFor(testDb, restrictedAccessRoutes, eventRoutes);
+      await seedTree();
+      const stream = await openStream(operator.token);
+
+      const marked = await app.request("/api/v1/restricted-access", {
+        method: "POST",
+        headers: { ...bearer(operator.token), "content-type": "application/json" },
+        body: JSON.stringify({ projectId: 1, partCodeId: 300 }),
+      });
+      expect(marked.status).toBe(201);
+
+      expect(await stream.next()).toMatchObject({
+        organizationId: testOrgId,
+        action: "create",
+        resourceType: "RestrictedAccess",
+        userId: operator.userId,
+      });
+
+      await stream.close();
+    });
+
+    it("carries a planned inspection", async () => {
+      // an operator holds no create Structure, so planning is an admin's write
+      const admin = await createTestUser({ preset: "Admin" });
+      const app = appFor(testDb, plannedInspectionRoutes, eventRoutes);
+      await seedTree();
+      const stream = await openStream(admin.token);
+
+      const planned = await app.request("/api/v1/planned-inspections", {
+        method: "POST",
+        headers: { ...bearer(admin.token), "content-type": "application/json" },
+        body: JSON.stringify({ projectId: 1, inspectionTypeCode: "GVI", partCodeId: 300 }),
+      });
+      expect(planned.status).toBe(201);
+
+      expect(await stream.next()).toMatchObject({
+        organizationId: testOrgId,
+        action: "create",
+        resourceType: "PlannedInspection",
+        userId: admin.userId,
+      });
+
+      await stream.close();
+    });
+
+    it("carries a saved inspection form version", async () => {
+      const operator = await createTestUser({ preset: "Operator" });
+      const app = appFor(testDb, inspectionFormRoutes, eventRoutes);
+      await seedTree();
+      const stream = await openStream(operator.token);
+
+      const saved = await app.request("/api/v1/projects/1/inspection-forms/GVI/versions", {
+        method: "POST",
+        headers: { ...bearer(operator.token), "content-type": "application/json" },
+        body: JSON.stringify({ customFields: [{ label: "Pit depth", dataType: "integer", displayOrder: 1 }] }),
+      });
+      expect(saved.status).toBe(201);
+
+      expect(await stream.next()).toMatchObject({
+        organizationId: testOrgId,
+        action: "modify",
+        resourceType: "InspectionForm",
+        userId: operator.userId,
+      });
+
+      await stream.close();
+    });
   });
 });
