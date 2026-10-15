@@ -5,6 +5,7 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import * as schema from "../../../src/db/schema";
@@ -164,7 +165,7 @@ describe("playlist snapshot", () => {
 
   beforeEach(async () => {
     await truncateTestDatabase();
-    await testDb.insert(schema.project).values({ displayNumber: PROJECT_ID, projectId: PROJECT_ID, title: "P" });
+    await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: PROJECT_ID, projectId: PROJECT_ID, title: "P" });
     await testDb
       .insert(schema.session)
       .values({ displayNumber: 1, sessionId: PROJECT_ID, projectId: PROJECT_ID, name: "S" });
@@ -178,7 +179,7 @@ describe("playlist snapshot", () => {
   }) => {
     const [project] = await testDb
       .insert(schema.project)
-      .values({ displayNumber: 1, title: "HLS fixture" })
+      .values({ organizationId: testOrgId, displayNumber: 1, title: "HLS fixture" })
       .returning({ projectId: schema.project.projectId });
 
     const [master] = await testDb
@@ -257,7 +258,7 @@ describe("playlist snapshot", () => {
   test("a recording with no ingest at all is 404", async () => {
     const [project] = await testDb
       .insert(schema.project)
-      .values({ displayNumber: 1, title: "HLS fixture" })
+      .values({ organizationId: testOrgId, displayNumber: 1, title: "HLS fixture" })
       .returning({ projectId: schema.project.projectId });
     await testDb
       .insert(schema.session)

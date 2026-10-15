@@ -6,8 +6,10 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
+import { bearer, createTestUser } from "../../helpers/auth";
 import { json } from "../../helpers/json";
 import { inspectionRoutes } from "../../../src/features/inspections/routes";
 import { inspectionFormRoutes } from "../../../src/features/inspection-forms/routes";
@@ -23,8 +25,11 @@ const app = appFor(
   resultRoutes,
 );
 
+// minted per test in beforeEach; a result detail read now carries it
+let resultToken = "";
+
 const post = async (path: string, body: unknown) =>
-  app.request(path, {
+  authRequest(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -44,7 +49,7 @@ const GVI_PAYLOAD = {
 // project > task group > task code > main component > branch > component code
 // plus session and a capturing master, all with fixed ids
 const seedWorld = async (withMaster = true) => {
-  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.taskGroup).values({ taskGroupId: 10, projectId: 1, code: "100" });
   await testDb.insert(schema.taskCode).values({ taskCodeId: 20, taskGroupId: 10, code: "101" });
   await testDb.insert(schema.description).values({ descriptionId: 30, taskCodeId: 20, label: "Row A" });
@@ -79,7 +84,10 @@ const startInspection = (extra: Record<string, unknown>) =>
 describe("inspections routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
-  beforeEach(truncateTestDatabase);
+  beforeEach(async () => {
+    await truncateTestDatabase();
+    resultToken = (await createTestUser({ preset: "Operator" })).token;
+  });
 
   it("starts an inspection with a target and pins the current form version", async () => {
     await seedWorld();
@@ -157,7 +165,7 @@ describe("inspections routes", () => {
     await post("/api/v1/projects/1/inspection-forms/GVI/versions", {
       customFields: [{ label: "Clamp note", dataType: "text", required: true, displayOrder: 0 }],
     });
-    const form = (await json(await app.request("/api/v1/projects/1/inspection-forms/GVI")))
+    const form = (await json(await authRequest("/api/v1/projects/1/inspection-forms/GVI")))
       .data as Record<string, any>;
     const clampNote = form.fields.find((f: Record<string, any>) => f.label === "Clamp note");
 
@@ -211,7 +219,7 @@ describe("inspections routes", () => {
     const cancel = await post(`/api/v1/inspections/${resultId}/cancel`, {});
     expect(cancel.status).toBe(200);
 
-    const active = (await json(await app.request("/api/v1/sessions/101/inspections/active")))
+    const active = (await json(await authRequest("/api/v1/sessions/101/inspections/active")))
       .data as unknown[];
     expect(active).toHaveLength(0);
   });
@@ -326,7 +334,7 @@ describe("inspections routes", () => {
       resultClass: "anomaly",
     });
 
-    const res = await app.request(`/api/v1/results/${resultId}/form-state`);
+    const res = await authRequest(`/api/v1/results/${resultId}/form-state`);
     expect(res.status).toBe(200);
     const state = (await json(res)).data as Record<string, any>;
     expect(state.resultClass).toBe("anomaly");
@@ -337,7 +345,7 @@ describe("inspections routes", () => {
     await post("/api/v1/projects/1/inspection-forms/GVI/versions", {
       customFields: [{ label: "Clamp note", dataType: "text", required: true, displayOrder: 0 }],
     });
-    const form = (await json(await app.request("/api/v1/projects/1/inspection-forms/GVI")))
+    const form = (await json(await authRequest("/api/v1/projects/1/inspection-forms/GVI")))
       .data as Record<string, any>;
     const clampNote = form.fields.find((f: Record<string, any>) => f.label === "Clamp note");
 
@@ -390,7 +398,7 @@ describe("inspections routes", () => {
     await startInspection({});
     await startInspection({ layer: 2, descriptionId: undefined, partCodeId: 60 });
 
-    const active = (await json(await app.request("/api/v1/sessions/101/inspections/active")))
+    const active = (await json(await authRequest("/api/v1/sessions/101/inspections/active")))
       .data as Array<Record<string, any>>;
     expect(active).toHaveLength(2);
     expect(active.map((row) => row.layer).sort()).toEqual([1, 2]);
@@ -424,7 +432,7 @@ describe("inspections routes", () => {
     await seedTake(700, 1000, false);
     await seedTake(701, 90_000, true);
 
-    const active = (await json(await app.request("/api/v1/sessions/101/inspections/active")))
+    const active = (await json(await authRequest("/api/v1/sessions/101/inspections/active")))
       .data as Array<Record<string, any>>;
     expect(active[0]!.clip).toEqual({ clipId: 701, capturing: true });
   });
@@ -455,7 +463,7 @@ describe("inspections routes", () => {
       });
     }
 
-    const active = (await json(await app.request("/api/v1/sessions/101/inspections/active")))
+    const active = (await json(await authRequest("/api/v1/sessions/101/inspections/active")))
       .data as Array<Record<string, any>>;
     expect(active[0]!.clip).toEqual({ clipId: 701, capturing: false });
   });
@@ -503,7 +511,13 @@ describe("inspections routes", () => {
       .set({ closedAt: new Date() })
       .where(eq(schema.recordingIngest.sessionId, 101));
 
-    const deleted = await app.request("/api/v1/projects/1", { method: "DELETE" });
+    // The suite's own token is an Operator, which holds no `remove Project`,
+    // so this delete carries an Admin's bearer instead.
+    const admin = await createTestUser({ preset: "Admin" });
+    const deleted = await app.request("/api/v1/projects/1", {
+      method: "DELETE",
+      headers: bearer(admin.token),
+    });
     expect(deleted.status).toBe(200);
 
     const remaining = await testDb.query.result.findMany({ where: undefined });
@@ -512,3 +526,13 @@ describe("inspections routes", () => {
     expect(remainingGroups).toHaveLength(0);
   });
 });
+
+// every request carries the Admin token minted in beforeEach
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${resultToken}`,
+    },
+  });

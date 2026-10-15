@@ -4,6 +4,7 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import {
@@ -46,6 +47,7 @@ const documentXmlIn = (buf: Buffer) =>
 // project > session > group > code > description > type > part code > result
 const seed = async () => {
   await testDb.insert(schema.project).values({
+    organizationId: testOrgId,
     projectId: 1,
     displayNumber: 1,
     title: "Alpha",
@@ -230,7 +232,7 @@ const run = (text: string) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`;
 describe("template faults", () => {
   it("keeps a placeholder the data never fills, instead of writing undefined", async () => {
     await seed();
-    const { template, data } = await loadReportInputs(1, "all", testDb);
+    const { template, data } = await loadReportInputs(1, "all", testOrgId, testDb);
     const patched = patchedTemplate(template, run("ID: {no_such_value}"));
 
     const xml = documentXmlIn(await renderReport(patched, data));
@@ -242,7 +244,7 @@ describe("template faults", () => {
 
   it("fails a template whose block tag is never closed", async () => {
     await seed();
-    const { template, data } = await loadReportInputs(1, "all", testDb);
+    const { template, data } = await loadReportInputs(1, "all", testOrgId, testDb);
     // a report cannot be built without its openers and closers, so this throws
     const patched = patchedTemplate(template, run("{#never_closed}"));
 
@@ -251,7 +253,7 @@ describe("template faults", () => {
 
   it("names the tag when a block is closed but never opened", async () => {
     await seed();
-    const { template, data } = await loadReportInputs(1, "all", testDb);
+    const { template, data } = await loadReportInputs(1, "all", testOrgId, testDb);
     const patched = patchedTemplate(template, run("{/never_opened}"));
 
     await expect(renderReport(patched, data)).rejects.toThrow(/never_opened/);
@@ -259,7 +261,7 @@ describe("template faults", () => {
 
   it("rejects a template whose picture block moved under a type's name", async () => {
     await seed();
-    const { template, data } = await loadReportInputs(1, "all", testDb);
+    const { template, data } = await loadReportInputs(1, "all", testOrgId, testDb);
 
     // the rendered document would look right, and a refresh would then write
     // the wrong content into the region the picture's name points at
@@ -270,7 +272,7 @@ describe("template faults", () => {
 
   it("rejects a template whose type heading was renamed", async () => {
     await seed();
-    const { template, data } = await loadReportInputs(1, "all", testDb);
+    const { template, data } = await loadReportInputs(1, "all", testOrgId, testDb);
     const renamed = mapTemplate(template, (xml) => xml.replace("GVI Results", "GVI Summary"));
 
     await expect(renderReport(renamed, data)).rejects.toThrow(/GVI Results/);
@@ -281,7 +283,7 @@ describe("generateReport", () => {
   it("renders the bundled template with data and one embedded image", async () => {
     await seed();
 
-    const buf = await generateReport(1, "all", testDb);
+    const buf = await generateReport(1, "all", testOrgId, testDb);
 
     // a docx is a zip, so the first two bytes are the zip magic
     expect(buf.subarray(0, 2).toString()).toBe("PK");
@@ -321,7 +323,7 @@ describe("generateReport", () => {
   it("opens with a title page: the counts, the contents, then a page break", async () => {
     await seed();
 
-    const xml = documentXmlIn(await generateReport(1, "all", testDb));
+    const xml = documentXmlIn(await generateReport(1, "all", testOrgId, testDb));
 
     // the counts state the report's own size: two targets, two results
     expect(xml).toContain("Targets inspected: 2");
@@ -345,9 +347,9 @@ describe("generateReport", () => {
   it("renders a project that has no results and embeds no image", async () => {
     await testDb
       .insert(schema.project)
-      .values({ projectId: 2, displayNumber: 2, title: "Empty" });
+      .values({ organizationId: testOrgId, projectId: 2, displayNumber: 2, title: "Empty" });
 
-    const buf = await generateReport(2, "all", testDb);
+    const buf = await generateReport(2, "all", testOrgId, testDb);
 
     expect(buf.subarray(0, 2).toString()).toBe("PK");
     const xml = documentXmlIn(buf);
@@ -364,7 +366,7 @@ describe("generateReport", () => {
   it("renders one table per inspection type with that type's columns", async () => {
     await seedMixedTypes();
 
-    const buf = await generateReport(1, "all", testDb);
+    const buf = await generateReport(1, "all", testOrgId, testDb);
     const xml = documentXmlIn(buf);
 
     // one block per type on the target, each with its own heading
@@ -483,7 +485,7 @@ describe("generateReport", () => {
       remarks: "pi-remark",
     });
 
-    const xml = documentXmlIn(await generateReport(1, "all", testDb));
+    const xml = documentXmlIn(await generateReport(1, "all", testOrgId, testDb));
 
     for (const type of ["CGB", "RISER", "CAISSON", "SEABED", "PIPELINE"]) {
       expect(xml).toContain(`${type} Results`);
@@ -515,8 +517,8 @@ describe("generateReport", () => {
     const tagsIn = (buf: Buffer) =>
       [...documentXmlIn(buf).matchAll(/<w:tag w:val="([^"]*)"\/>/g)].map((match) => match[1]!);
 
-    const first = await generateReport(1, "all", testDb);
-    const second = await generateReport(1, "all", testDb);
+    const first = await generateReport(1, "all", testOrgId, testDb);
+    const second = await generateReport(1, "all", testOrgId, testDb);
 
     // a picture region plus a table region per section: GVI, CVI and MGI on the
     // description target, and the second result's GVI on the part-code target
@@ -539,7 +541,7 @@ describe("generateReport", () => {
   it("ends every region with its table, so the paragraph behind it is the user's", async () => {
     await seedMixedTypes();
 
-    const xml = documentXmlIn(await generateReport(1, "all", testDb));
+    const xml = documentXmlIn(await generateReport(1, "all", testOrgId, testDb));
 
     // docxtemplater inserts a paragraph behind a table that closes a region,
     // since it cannot see the content control. The render removes it, which is
@@ -554,6 +556,6 @@ describe("generateReport", () => {
   }, 20_000);
 
   it("rejects an unknown project", async () => {
-    await expect(generateReport(999, "all", testDb)).rejects.toThrow();
+    await expect(generateReport(999, "all", testOrgId, testDb)).rejects.toThrow();
   });
 });

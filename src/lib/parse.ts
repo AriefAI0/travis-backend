@@ -45,6 +45,9 @@ export function parseUuid(c: Context, name: string): string {
   return parsed.data;
 }
 
+// A uuid test with no request behind it, for a path param a page serve reads.
+export const isUuid = (value: string): boolean => uuidSchema.safeParse(value).success;
+
 // query object via schema (validation_error otherwise)
 export function parseQuery<S extends z.ZodType>(c: Context, schema: S): z.output<S> {
   const parsed = schema.safeParse(c.req.query());

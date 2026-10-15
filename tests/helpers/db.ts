@@ -5,8 +5,11 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { env } from "../../src/config/env";
 import * as schema from "../../src/db/schema";
+import { authTables } from "../../src/lib/auth/schema";
 
-export type TestDb = NodePgDatabase<typeof schema>;
+const fullSchema = { ...schema, ...authTables };
+
+export type TestDb = NodePgDatabase<typeof fullSchema>;
 
 const TEST_DB_NAME = "travis_test";
 
@@ -19,6 +22,11 @@ const withDbName = (name: string) => {
 
 // connection string for the test DB (counting client opens its own)
 export const testDatabaseUrl = withDbName(TEST_DB_NAME);
+
+// The seeded default org. project.organization_id is NOT NULL, so every test
+// that inserts a project hangs off this. Set in ensureTestDatabase, which each
+// file runs in beforeAll — callers only read it inside a hook or a test.
+export let testOrgId = 0;
 
 // create travis_test if missing + apply committed migrations (idempotent)
 export const ensureTestDatabase = async () => {
@@ -34,17 +42,23 @@ export const ensureTestDatabase = async () => {
   await admin.end();
 
   const bootPool = new pg.Pool({ connectionString: withDbName(TEST_DB_NAME), max: 1 });
-  await migrate(drizzle(bootPool, { schema }), {
+  await migrate(drizzle(bootPool, { schema: fullSchema }), {
     migrationsFolder: new URL("../../migrations", import.meta.url).pathname,
   });
+  // 0003 seeds 'default'; read it back rather than assume an id
+  const seeded = await bootPool.query<{ organization_id: number }>(
+    `SELECT organization_id FROM organization WHERE name = 'default' LIMIT 1`,
+  );
+  testOrgId = seeded.rows[0]?.organization_id ?? 0;
   await bootPool.end();
 };
 
 // shared pool for the suite; max 1 keeps query counting deterministic
 const pool = new pg.Pool({ connectionString: withDbName(TEST_DB_NAME), max: 1 });
-export const testDb: TestDb = drizzle(pool, { schema });
+export const testDb: TestDb = drizzle(pool, { schema: fullSchema });
 
-// FK dependency order: children first (app deleteOrder + typed details)
+// FK dependency order: children first (app deleteOrder + typed details).
+// The auth block leads: every one of those rows hangs off auth_user.
 const deleteOrder = [
   schema.recordingIngestSegment,
   schema.recordingIngest,
@@ -90,6 +104,15 @@ const deleteOrder = [
   schema.session,
   schema.report,
   schema.project,
+
+  // auth block: last, and children first — auth_user goes after everything
+  // that references it
+  authTables.auditLog,
+  authTables.userPermission,
+  authTables.authSession,
+  authTables.authAccount,
+  authTables.authVerification,
+  authTables.authUser,
 ] as const;
 
 // wipe all rows between tests, FK-safe order

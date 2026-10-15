@@ -26,8 +26,10 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@casl/ability": "^7.0.1",
     "@docx-editor.dev/core": "2.27.0",
     "@docx-editor.dev/react": "2.27.0",
+    "better-auth": "1.7.7",
     "docxtemplater": "^3.71.0",
     "docxtemplater-image-module-free": "^1.1.1",
     "drizzle-orm": "^0.45.2",

@@ -85,7 +85,9 @@ describe("playback tokens", () => {
   });
 });
 
-// the secret is not optional: boot must fail without it
+// the secret is not optional: boot must fail without it.
+// This is the only test that boots src/config/env.ts on its own, so the whole
+// minimal-valid-environment fixture lives here.
 describe("PLAYBACK_TOKEN_SECRET boot gate", () => {
   const bootEnv = {
     PATH: process.env.PATH ?? "",
@@ -93,6 +95,7 @@ describe("PLAYBACK_TOKEN_SECRET boot gate", () => {
     MINIO_ENDPOINT: "http://localhost:9000",
     MINIO_ACCESS_KEY: "access",
     MINIO_SECRET_KEY: "secret",
+    BETTER_AUTH_SECRET: "b".repeat(48),
   };
 
   const bootEnvModule = async (extra: Record<string, string>) => {
@@ -129,5 +132,24 @@ describe("PLAYBACK_TOKEN_SECRET boot gate", () => {
     const { code, stderr } = await bootEnvModule({ PLAYBACK_TOKEN_SECRET: "too-short" });
     expect(code).toBe(1);
     expect(stderr).toContain("PLAYBACK_TOKEN_SECRET");
+  });
+
+  // BETTER_AUTH_SECRET gates the same way: an absent or short one stops boot
+  test("boot fails without the better-auth secret and names it", async () => {
+    const { code, stderr } = await bootEnvModule({
+      PLAYBACK_TOKEN_SECRET: "s".repeat(48),
+      BETTER_AUTH_SECRET: "",
+    });
+    expect(code).toBe(1);
+    expect(stderr).toContain("BETTER_AUTH_SECRET");
+  });
+
+  test("a short better-auth secret is refused", async () => {
+    const { code, stderr } = await bootEnvModule({
+      PLAYBACK_TOKEN_SECRET: "s".repeat(48),
+      BETTER_AUTH_SECRET: "too-short",
+    });
+    expect(code).toBe(1);
+    expect(stderr).toContain("BETTER_AUTH_SECRET");
   });
 });

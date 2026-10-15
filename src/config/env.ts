@@ -2,6 +2,25 @@ import { z } from "zod";
 
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(8788),
+  // Signs every session token and cookie better-auth issues. Rotating it
+  // invalidates every live session, so it is never a throwaway value.
+  BETTER_AUTH_SECRET: z
+    .string()
+    .min(32, { message: "must be at least 32 characters" }),
+  // Base URL better-auth builds its own links from, and the origin it treats
+  // as its own when checking a request.
+  BETTER_AUTH_URL: z.string().url().default("http://localhost:8788"),
+  // The first admin. Seeds the account only when the table is empty, so a
+  // restart never resets a password. Absent here, both are ignored.
+  ADMIN_EMAIL: z.string().email().optional(),
+  ADMIN_PASSWORD: z.string().min(12).optional(),
+  ADMIN_NAME: z.string().min(1).optional(),
+  // The admin's login handle. Sign-in accepts this or the email. An unset var
+  // arrives from compose as "", which reads as absent.
+  ADMIN_USERNAME: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim() || undefined),
   DATABASE_URL: z
     .string()
     .min(1)

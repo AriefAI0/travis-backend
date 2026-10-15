@@ -15,7 +15,7 @@ import {
 import { recordingIngest, recordingIngestSegment, session as sessionTable, videoClip } from "../../db/schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { findSessionById, updateSessionById } from "../../db/repositories/session.repository";
-import { findProjectById } from "../../db/repositories/project.repository";
+import { findProjectByIdInternal } from "../../db/repositories/project.repository";
 import {
   createVideoClipRecord,
   findVideoClipById,
@@ -99,10 +99,15 @@ const admitMaster = async (
   }
 
   // the title is part of the frozen prefix, so the project loads first
-  const project = await findProjectById(input.projectId, tx);
+  const project = await findProjectByIdInternal(input.projectId, tx);
   if (!project) throw notFound("Project");
 
-  const session = (await createSession({ projectId: input.projectId }, tx))!;
+  // The ingest carries a deployment token, not a user, so the session lands
+  // under the project's own org and the audit row records a system write.
+  const session = (await createSession({ projectId: input.projectId }, {
+    organizationId: project.organizationId,
+    userId: null,
+  }, tx))!;
   // the session row carries the master anchors: start stamped at admission
   await updateSessionById(
     session.sessionId,
@@ -150,7 +155,7 @@ const admitClip = async (input: AdmitClipInput, tx: DbOrTx): Promise<IngestAdmis
   if (!session) throw notFound("Session");
 
   // the clip folder carries the item label and the inspection type
-  const project = await findProjectById(session.projectId, tx);
+  const project = await findProjectByIdInternal(session.projectId, tx);
   if (!project) throw notFound("Project");
   // the target label names the clip folder
   const targetLabel = await resolveTargetLabel(result, tx);

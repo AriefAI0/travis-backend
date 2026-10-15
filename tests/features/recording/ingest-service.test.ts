@@ -6,6 +6,7 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import * as schema from "../../../src/db/schema";
@@ -23,7 +24,7 @@ import {
 
 // project > session, plus the chain a result needs
 const seedDomain = async () => {
-  await testDb.insert(schema.project).values({ displayNumber: 9200, projectId: 9200, title: "P" });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: 9200, projectId: 9200, title: "P" });
   await testDb.insert(schema.session).values({ displayNumber: 1, sessionId: 9200, projectId: 9200, name: "S" });
   await testDb.insert(schema.taskGroup).values({
     taskGroupId: 9200,

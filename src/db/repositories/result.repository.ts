@@ -1,7 +1,18 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, type SQL } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
-import { result } from "../schema";
+import { project, result } from "../schema";
+
+// Org filter as a subquery, so a check and its write stay one statement.
+// A result in another org reads as absent, never as forbidden.
+const resultProjectInOrg = (database: DbOrTx, organizationId: number) =>
+  inArray(
+    result.projectId,
+    database
+      .select({ projectId: project.projectId })
+      .from(project)
+      .where(eq(project.organizationId, organizationId)),
+  );
 
 export const createResultRecord = async (
   data: typeof result.$inferInsert,
@@ -199,11 +210,18 @@ export const listRestrictedAccessRecordsByProjectId = async (
 /** Unmark restricted access: deletes only is_ra rows, never a real result. */
 export const deleteRestrictedAccessById = async (
   resultId: number,
+  organizationId: number,
   database: DbOrTx = db,
 ) => {
   const deletedResults = await database
     .delete(result)
-    .where(and(eq(result.resultId, resultId), eq(result.isRa, true)))
+    .where(
+      and(
+        eq(result.resultId, resultId),
+        eq(result.isRa, true),
+        resultProjectInOrg(database, organizationId),
+      ),
+    )
     .returning();
 
   return deletedResults[0] ?? null;
@@ -213,12 +231,19 @@ export const deleteRestrictedAccessById = async (
 export const updateRestrictedAccessRemarks = async (
   resultId: number,
   remarks: string | null,
+  organizationId: number,
   database: DbOrTx = db,
 ) => {
   const updatedResults = await database
     .update(result)
     .set({ remarks, updatedAt: new Date() })
-    .where(and(eq(result.resultId, resultId), eq(result.isRa, true)))
+    .where(
+      and(
+        eq(result.resultId, resultId),
+        eq(result.isRa, true),
+        resultProjectInOrg(database, organizationId),
+      ),
+    )
     .returning();
 
   return updatedResults[0] ?? null;

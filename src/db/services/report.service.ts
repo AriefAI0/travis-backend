@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import type { DbOrTx } from "../client";
+import { db, type DbOrTx } from "../client";
 import { env } from "../../config/env";
+import type { Caller } from "../../lib/caller";
 import { AppError } from "../../lib/error";
 import { log } from "../../lib/logger";
 import { minio } from "../../lib/minio_storage/clients";
 import { ensureDefaultOrganization } from "../ensure-org";
+import { writeAudit } from "./audit.service";
 import {
   claimReportDocxWrite,
   deleteReportRecord,
@@ -18,6 +20,38 @@ import {
 } from "../repositories/report.repository";
 import type { ReportListItem, ReportScope, ReportStatus } from "../../types/api";
 
+// A write with no actor: the background render, which the user's own create
+// already recorded. Only a human action writes an audit row.
+export const systemCaller = (organizationId: number): Caller => ({
+  userId: null,
+  organizationId,
+});
+
+// The audit row for a report write. A background write has no actor, so it
+// writes none — the create that started the render is already on the record.
+const auditReport = async (
+  caller: Caller,
+  action: "create" | "modify" | "remove",
+  row: ReportRow,
+  before: unknown,
+  tx: DbOrTx,
+) => {
+  if (caller.userId === null) return;
+
+  await writeAudit(
+    {
+      organizationId: caller.organizationId,
+      userId: caller.userId,
+      action,
+      resourceType: "Report",
+      resourceId: row.reportId,
+      before,
+      after: action === "remove" ? undefined : row,
+    },
+    tx,
+  );
+};
+
 export const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -29,9 +63,9 @@ export const reportDocxKey = (reportId: string) => `reports/${reportId}.docx`;
 // dialog polls that row until it changes.
 const STUCK_AFTER_MS = 10 * 60_000;
 
-// Every row belongs to the seeded default org until auth lands. Memoized: the
-// boot seed makes it stable for the process.
-// ponytail: drop the memo when requireOrg() replaces it.
+// Every row belongs to the seeded default org until the report routes take the
+// caller's org instead. Memoized: the boot seed makes it stable.
+// ponytail: drop the memo once the routes pass their own organizationId.
 let cachedOrgId: number | null = null;
 
 export const defaultOrgId = async (database?: DbOrTx): Promise<number> => {
@@ -74,45 +108,53 @@ export const createReport = async (
   projectId: number,
   name: string,
   scope: ReportScope = "all",
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<ReportRow> => {
-  const organizationId = await defaultOrgId(database);
   const reportId = randomUUID();
 
-  const row = await insertReportRecord(
-    {
-      reportId,
-      organizationId,
-      projectId,
-      name: name.trim(),
-      scope,
-      minioKey: reportDocxKey(reportId),
-    },
-    database,
-  );
+  const insert = async (tx: DbOrTx) => {
+    const row = await insertReportRecord(
+      {
+        reportId,
+        organizationId: caller.organizationId,
+        projectId,
+        name: name.trim(),
+        scope,
+        minioKey: reportDocxKey(reportId),
+      },
+      tx,
+    );
 
-  if (!row) {
-    throw new AppError(500, "report_create_failed", "Report insert returned no row");
-  }
+    if (!row) {
+      throw new AppError(500, "report_create_failed", "Report insert returned no row");
+    }
 
-  return row;
+    await auditReport(caller, "create", row, undefined, tx);
+    return row;
+  };
+
+  return database ? insert(database) : db.transaction(insert);
 };
 
-// flow: resolve org > list rows > app shape
+// flow: caller's org > list rows > app shape
 export const listProjectReports = async (
   projectId: number,
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<ReportListItem[]> => {
-  const organizationId = await defaultOrgId(database);
-  const rows = await listReportRecords(organizationId, projectId, database);
+  const rows = await listReportRecords(caller.organizationId, projectId, database);
 
   return rows.map(reportListItem);
 };
 
 // The row, org-checked. Callers that only need existence use it as the guard.
-export const getReport = async (reportId: string, database?: DbOrTx): Promise<ReportRow> => {
-  const organizationId = await defaultOrgId(database);
-  const row = await findReportRecord(organizationId, reportId, database);
+export const getReport = async (
+  reportId: string,
+  caller: Caller,
+  database?: DbOrTx,
+): Promise<ReportRow> => {
+  const row = await findReportRecord(caller.organizationId, reportId, database);
 
   if (!row) {
     throw new AppError(404, "report_not_found", `No report with id ${reportId}`);
@@ -123,13 +165,18 @@ export const getReport = async (reportId: string, database?: DbOrTx): Promise<Re
 
 export const getReportStatus = async (
   reportId: string,
+  caller: Caller,
   database?: DbOrTx,
-): Promise<ReportListItem> => reportListItem(await getReport(reportId, database));
+): Promise<ReportListItem> => reportListItem(await getReport(reportId, caller, database));
 
 // The stored document. The row decides the key, so a moved object still loads.
 // flow: row guard > object read > 404 on a miss
-export const loadReportDocx = async (reportId: string, database?: DbOrTx): Promise<Buffer> => {
-  const row = await getReport(reportId, database);
+export const loadReportDocx = async (
+  reportId: string,
+  caller: Caller,
+  database?: DbOrTx,
+): Promise<Buffer> => {
+  const row = await getReport(reportId, caller, database);
 
   try {
     return await drainStream(await minio.getObject(env.BUCKET_MEDIA, row.minioKey));
@@ -156,10 +203,10 @@ export const saveReportDocx = async (
   reportId: string,
   bytes: Uint8Array,
   expectedVersion: number | null,
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<DocxWrite> => {
-  const organizationId = await defaultOrgId(database);
-  const row = await getReport(reportId, database);
+  const row = await getReport(reportId, caller, database);
 
   if (expectedVersion === null) {
     throw new AppError(
@@ -169,9 +216,25 @@ export const saveReportDocx = async (
     );
   }
 
-  const claimed = await claimReportDocxWrite(organizationId, reportId, expectedVersion, database);
+  // The claim and its audit row land together, the object write after: a claim
+  // that commits and an upload that fails leaves the version ahead, which the
+  // user fixes by reloading.
+  const claim = async (tx: DbOrTx) => {
+    const claimed = await claimReportDocxWrite(
+      caller.organizationId,
+      reportId,
+      expectedVersion,
+      tx,
+    );
+    if (!claimed) return null;
+
+    await auditReport(caller, "modify", { ...row, version: claimed.version }, row, tx);
+    return claimed;
+  };
+
+  const claimed = database ? await claim(database) : await db.transaction(claim);
   if (!claimed) {
-    const current = await getReport(reportId, database);
+    const current = await getReport(reportId, caller, database);
     throw new AppError(
       409,
       "report_changed",
@@ -191,33 +254,51 @@ export const saveReportDocx = async (
 export const renameReport = async (
   reportId: string,
   name: string,
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<ReportListItem> => {
-  const organizationId = await defaultOrgId(database);
-  const row = await updateReportRecord(
-    organizationId,
-    reportId,
-    { name: name.trim() },
-    database,
-  );
+  const before = await getReport(reportId, caller, database);
 
-  if (!row) {
-    throw new AppError(404, "report_not_found", `No report with id ${reportId}`);
-  }
+  const rename = async (tx: DbOrTx) => {
+    const row = await updateReportRecord(
+      caller.organizationId,
+      reportId,
+      { name: name.trim() },
+      tx,
+    );
 
-  return reportListItem(row);
+    if (!row) {
+      throw new AppError(404, "report_not_found", `No report with id ${reportId}`);
+    }
+
+    await auditReport(caller, "modify", row, before, tx);
+    return row;
+  };
+
+  return reportListItem(database ? await rename(database) : await db.transaction(rename));
 };
 
-// flow: drop the row first > best-effort object removal. A row without its
-// object is invisible; an orphan object costs storage only.
-export const removeReport = async (reportId: string, database?: DbOrTx): Promise<void> => {
-  const organizationId = await defaultOrgId(database);
-  const row = await deleteReportRecord(organizationId, reportId, database);
+// flow: drop the row and audit it > best-effort object removal. A row without
+// its object is invisible; an orphan object costs storage only.
+export const removeReport = async (
+  reportId: string,
+  caller: Caller,
+  database?: DbOrTx,
+): Promise<void> => {
+  const remove = async (tx: DbOrTx) => {
+    const row = await deleteReportRecord(caller.organizationId, reportId, tx);
 
-  if (!row) {
-    throw new AppError(404, "report_not_found", `No report with id ${reportId}`);
-  }
+    if (!row) {
+      throw new AppError(404, "report_not_found", `No report with id ${reportId}`);
+    }
 
+    await auditReport(caller, "remove", row, row, tx);
+    return row;
+  };
+
+  const row = database ? await remove(database) : await db.transaction(remove);
+
+  // the sweep stays outside the transaction
   try {
     await minio.removeObject(env.BUCKET_MEDIA, row.minioKey);
   } catch {
@@ -225,7 +306,8 @@ export const removeReport = async (reportId: string, database?: DbOrTx): Promise
   }
 };
 
-// Status is the only field the background render writes.
+// Status is the only field the background render writes. It has no actor, so
+// it writes no audit row — the create that queued it is already recorded.
 export const setReportStatus = async (
   reportId: string,
   status: ReportStatus,

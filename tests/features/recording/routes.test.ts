@@ -1,10 +1,12 @@
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { appFor } from "../../helpers/app";
+import { createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
@@ -14,12 +16,15 @@ import { createVideoClip, updateVideoClip } from "../../../src/db/services/video
 
 const app = appFor(testDb, recordingRoutes);
 
+// minted per test in beforeEach; every request below carries it
+let adminToken = "";
+
 // frozen key prefix every ingest fixture carries; these routes read object_key
 const KEY_PREFIX = "1/1/214/2026/09/20/master/1";
 
 // json request shorthand
 const req = (path: string, method: string, body?: unknown) =>
-  app.request(path, {
+  authRequest(path, {
     method,
     headers: { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -34,7 +39,7 @@ const seedContext = async (p: {
   item: number;
   sessionItem: number;
 }) => {
-  await testDb.insert(schema.project).values({ displayNumber: p.project, projectId: p.project, title: `P${p.project}` });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: p.project, projectId: p.project, title: `P${p.project}` });
   await testDb.insert(schema.session).values({
     displayNumber: 1,
     sessionId: p.session,
@@ -83,7 +88,10 @@ const baseContext = {
 describe("recordings routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
-  beforeEach(truncateTestDatabase);
+  beforeEach(async () => {
+    await truncateTestDatabase();
+    adminToken = (await createTestUser({ preset: "Admin" })).token;
+  });
 
   it("master visibility: unfinished follows the open ingest, not a status", async () => {
     await seedContext(baseContext);
@@ -98,7 +106,7 @@ describe("recordings routes", () => {
     const sessionId = master!.sessionId;
 
     // no ingest yet: nothing to sweep
-    const idle = await app.request("/api/v1/recordings/unfinished");
+    const idle = await authRequest("/api/v1/recordings/unfinished");
     expect((await json(idle)).data).toHaveLength(0);
 
     // an open ingest makes the master unfinished, whatever its other columns say
@@ -113,11 +121,11 @@ describe("recordings routes", () => {
       })
       .returning({ ingestId: schema.recordingIngest.ingestId });
 
-    const unfinished = await app.request("/api/v1/recordings/unfinished");
+    const unfinished = await authRequest("/api/v1/recordings/unfinished");
     expect((await json(unfinished)).data).toHaveLength(1);
 
     // playback answers before any segment lands; an empty master has no HLS URL
-    const empty = await app.request(
+    const empty = await authRequest(
       `/api/v1/recordings/${sessionId}/playback?projectId=1`,
     );
     expect(empty.status).toBe(200);
@@ -129,7 +137,7 @@ describe("recordings routes", () => {
       .set({ closedAt: new Date(), finalSequence: -1 })
       .where(eq(schema.recordingIngest.ingestId, ingest!.ingestId));
 
-    const sweep = await app.request("/api/v1/recordings/unfinished");
+    const sweep = await authRequest("/api/v1/recordings/unfinished");
     expect((await json(sweep)).data).toHaveLength(0);
   });
 
@@ -166,7 +174,7 @@ describe("recordings routes", () => {
     });
 
     const open = await json<{ data: { hlsUrl: string } }>(
-      await app.request(`/api/v1/recordings/${sessionId}/playback?projectId=1`),
+      await authRequest(`/api/v1/recordings/${sessionId}/playback?projectId=1`),
     );
     expect(open.data.hlsUrl).toMatch(
       new RegExp(`^/api/v2/hls/master/${sessionId}/index[.]m3u8[?]t=[^&]+$`),
@@ -180,7 +188,7 @@ describe("recordings routes", () => {
       .where(eq(schema.recordingIngest.ingestId, ingest!.ingestId));
 
     const closed = await json<{ data: { hlsUrl: string } }>(
-      await app.request(`/api/v1/recordings/${sessionId}/playback?projectId=1`),
+      await authRequest(`/api/v1/recordings/${sessionId}/playback?projectId=1`),
     );
     expect(closed.data.hlsUrl).toContain(`/api/v2/hls/master/${sessionId}/index.m3u8`);
   });
@@ -265,7 +273,7 @@ describe("recordings routes", () => {
         thumbnails: { timestampMs: number; url: string | null }[];
         events: { clipId: number; videoUrl: string | null; thumbnailUrl: string | null }[];
       };
-    }>(await app.request(`/api/v1/recordings/${sessionId}/playback?projectId=1`));
+    }>(await authRequest(`/api/v1/recordings/${sessionId}/playback?projectId=1`));
 
     expect(data.recordingStatus).toBe("recording");
     // the master row has no duration until close: the open ingest supplies it
@@ -283,7 +291,7 @@ describe("recordings routes", () => {
       .where(eq(schema.recordingIngest.ingestId, ingest!.ingestId));
 
     const closed = await json<{ data: { recordingStatus: string } }>(
-      await app.request(`/api/v1/recordings/${sessionId}/playback?projectId=1`),
+      await authRequest(`/api/v1/recordings/${sessionId}/playback?projectId=1`),
     );
     expect(closed.data.recordingStatus).toBe("finalized");
   });
@@ -312,7 +320,7 @@ describe("recordings routes", () => {
 
     const { data } = await json<{
       data: { recordingStatus: string; events: { videoUrl: string | null }[] };
-    }>(await app.request(`/api/v1/recordings/${sessionId}/playback?projectId=1`));
+    }>(await authRequest(`/api/v1/recordings/${sessionId}/playback?projectId=1`));
 
     // no ingest at all reads as finalized, and the event stays unplayable
     expect(data.recordingStatus).toBe("finalized");
@@ -340,7 +348,7 @@ describe("recordings routes", () => {
     });
 
     const res = await json<{ data: { hlsUrl: string | null } }>(
-      await app.request(`/api/v1/recordings/${master!.sessionId}/playback?projectId=1`),
+      await authRequest(`/api/v1/recordings/${master!.sessionId}/playback?projectId=1`),
     );
     expect(res.data.hlsUrl).toBeNull();
   });
@@ -370,19 +378,19 @@ describe("recordings routes", () => {
       });
     }
 
-    const all = await app.request("/api/v1/recordings/unfinished");
+    const all = await authRequest("/api/v1/recordings/unfinished");
     expect((await json(all)).data).toHaveLength(2);
 
-    const scoped = await app.request("/api/v1/recordings/unfinished?projectId=2");
+    const scoped = await authRequest("/api/v1/recordings/unfinished?projectId=2");
     const rows = (await json(scoped)).data;
     expect(rows).toHaveLength(1);
     expect(rows[0].sessionId).toBe(202);
   });
 
   it("missing master is 404 for get and playback", async () => {
-    const get = await app.request("/api/v1/recordings/99999");
+    const get = await authRequest("/api/v1/recordings/99999");
     expect(get.status).toBe(404);
-    const playback = await app.request("/api/v1/recordings/99999/playback?projectId=1");
+    const playback = await authRequest("/api/v1/recordings/99999/playback?projectId=1");
     expect(playback.status).toBe(404);
   });
 
@@ -410,11 +418,11 @@ describe("recordings routes", () => {
     const clipId = clip!.clipId;
 
     // active sweeps see it, project- and session-scoped
-    const activeProject = await app.request("/api/v1/clips/active?projectId=1");
+    const activeProject = await authRequest("/api/v1/clips/active?projectId=1");
     expect((await json(activeProject)).data).toHaveLength(1);
-    const activeSession = await app.request("/api/v1/clips/active?sessionId=101");
+    const activeSession = await authRequest("/api/v1/clips/active?sessionId=101");
     expect((await json(activeSession)).data).toHaveLength(1);
-    const activeOther = await app.request("/api/v1/clips/active?projectId=2");
+    const activeOther = await authRequest("/api/v1/clips/active?projectId=2");
     expect((await json(activeOther)).data).toHaveLength(0);
 
     // batch read keyed by resultId (stringified in JSON), timing facts carried
@@ -431,7 +439,17 @@ describe("recordings routes", () => {
 
     // closing the clip empties the active sweep
     await updateVideoClip(clipId, { endOffsetMs: 5_000 }, testDb);
-    const activeAfter = await app.request("/api/v1/clips/active?projectId=1");
+    const activeAfter = await authRequest("/api/v1/clips/active?projectId=1");
     expect((await json(activeAfter)).data).toHaveLength(0);
   });
 });
+
+// every request carries the Admin token minted in beforeEach
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

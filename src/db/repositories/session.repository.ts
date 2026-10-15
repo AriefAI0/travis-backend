@@ -133,13 +133,19 @@ export const listSessionRecordingRowsByProjectId = async (
     .where(and(eq(session.projectId, projectId), isNotNull(session.startEpoch)))
     .orderBy(asc(session.startEpoch), asc(session.sessionId));
 
-// sessions whose master ingest is still open on the wire
+// sessions whose master ingest is still open on the wire.
+// projectId rides along so a route can org-scope rows this query cannot.
 export const listSessionsWithOpenIngest = async (
   database: DbOrTx = db,
-): Promise<Omit<SessionRecordingRow, "sessionName" | "sessionDisplayNumber">[]> =>
+): Promise<
+  (Omit<SessionRecordingRow, "sessionName" | "sessionDisplayNumber"> & {
+    projectId: number;
+  })[]
+> =>
   database
     .selectDistinct({
       sessionId: session.sessionId,
+      projectId: session.projectId,
       startEpoch: session.startEpoch,
       endEpoch: session.endEpoch,
       durationMs: session.durationMs,

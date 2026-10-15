@@ -1,10 +1,12 @@
 // Load seed for the workspace grids: one project holding thousands of part codes.
 // flow: remove old seed > project > tree in chunks > one session > a few results
-import { desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { intro, log, outro } from "@clack/prompts";
 
 import { db } from "../src/db/client";
 import * as schema from "../src/db/schema";
+import { ensureDefaultOrganization } from "../src/db/ensure-org";
+import { maxProjectDisplayNumber } from "../src/db/repositories/project.repository";
 
 const SEED_TITLE = "Load test 5000";
 const TASK_CODES = 10;
@@ -25,17 +27,6 @@ function chunks<T>(rows: T[], size: number): T[][] {
   return out;
 }
 
-// next free project display number (the index is unique across the org-less set)
-async function nextProjectDisplayNumber(): Promise<number> {
-  const rows = await db
-    .select({ displayNumber: schema.project.displayNumber })
-    .from(schema.project)
-    .orderBy(desc(schema.project.displayNumber))
-    .limit(1);
-
-  return (rows[0]?.displayNumber ?? 0) + 1;
-}
-
 // drop the previous seed run; the project cascade takes its whole tree
 async function removeOldSeed(): Promise<number | null> {
   const existing = await db
@@ -51,11 +42,16 @@ async function removeOldSeed(): Promise<number | null> {
 }
 
 // flow: seed project > task group > task codes
-async function createProjectTree(partCodesPerType: number, partCodeCount: number) {
+async function createProjectTree(
+  organizationId: number,
+  partCodesPerType: number,
+  partCodeCount: number,
+) {
   const projectRows = await db
     .insert(schema.project)
     .values({
-      displayNumber: await nextProjectDisplayNumber(),
+      organizationId,
+      displayNumber: ((await maxProjectDisplayNumber(organizationId)) ?? 0) + 1,
       title: SEED_TITLE,
       description: `Load seed: ${partCodeCount} part codes.`,
     })
@@ -165,10 +161,16 @@ async function main(): Promise<void> {
     log.warn(`Seeding ${requested} part codes into a project named "${SEED_TITLE}".`);
   }
 
+  const org = await ensureDefaultOrganization();
+  if (!org) {
+    log.error("no default organization to seed into");
+    process.exit(1);
+  }
+
   const removed = await removeOldSeed();
   if (removed !== null) log.step(`removed the previous seed project ${removed}`);
 
-  const tree = await createProjectTree(requested / divisor, requested);
+  const tree = await createProjectTree(org.organizationId, requested / divisor, requested);
   const resultCount = await createResults(tree.projectId, tree.partCodeIds);
 
   log.info(

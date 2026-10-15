@@ -17,9 +17,7 @@ import {
   getTaskCodeById,
   getTaskGroupById,
   getTypeById,
-  listPartCodesByTypeId,
   listProjectTaskStructureTree,
-  listTaskCodesByGroupId,
   listTypeCatalog,
   previewTaskStructureDelete,
   updateDescription,
@@ -28,6 +26,8 @@ import {
   updateTaskGroup,
   updateType,
 } from "../../db/services/task-structure.service";
+import { callerOf, requireCan, requireUser, type AuthVariables } from "../../lib/auth/middleware";
+import { structureAt } from "../../lib/auth/ability";
 import { notFound } from "../../lib/error";
 import { compactUpdate, parseBody, parseId, parseQuery } from "../../lib/parse";
 import { ok } from "../../lib/response";
@@ -47,155 +47,232 @@ import {
 } from "../../types/api";
 
 // task tree reads + per-level CRUD (parse > service > ok)
-export const taskStructureRoutes = (database?: DbOrTx) => {
-  const routes = new Hono();
+// flow: requireUser > requireCan(level) > service > ok
+//
+// One guard per path prefix, never "*": Hono merges a sub-app's wildcard
+// middleware at the mount prefix, so `use("*")` would guard every feature
+// mounted after this one.
+const PREFIXES = [
+  "/api/v1/projects",
+  "/api/v1/task-groups",
+  "/api/v1/task-codes",
+  "/api/v1/descriptions",
+  "/api/v1/types",
+  "/api/v1/part-codes",
+  "/api/v1/task-structure",
+];
 
-  routes.get("/api/v1/projects/:projectId/task-structure", async (c) => {
+export const taskStructureRoutes = (database?: DbOrTx) => {
+  const routes = new Hono<{ Variables: AuthVariables }>();
+
+  for (const prefix of PREFIXES) {
+    routes.use(prefix, requireUser(database));
+    routes.use(`${prefix}/*`, requireUser(database));
+  }
+
+  // Each level carries its own Structure condition, so a right granted for one
+  // level does not leak to another.
+  const read = requireCan("read", structureAt("taskGroup"));
+  const writeGroup = requireCan("create", structureAt("taskGroup"));
+  const writeCode = requireCan("create", structureAt("taskCode"));
+  const writeDescription = requireCan("create", structureAt("description"));
+  const writeType = requireCan("create", structureAt("type"));
+  const writePartCode = requireCan("create", structureAt("partCode"));
+
+  routes.get("/api/v1/projects/:projectId/task-structure", read, async (c) => {
     const projectId = parseId(c, "projectId");
-    return ok(c, await listProjectTaskStructureTree(projectId, database));
+    return ok(c, await listProjectTaskStructureTree(projectId, callerOf(c), database));
   });
 
   /* task groups */
-  routes.post("/api/v1/task-groups", async (c) => {
+  routes.post("/api/v1/task-groups", writeGroup, async (c) => {
     const input = await parseBody(c, createTaskGroupSchema);
-    return ok(c, await createTaskGroup(input, database), 201);
+    return ok(c, await createTaskGroup(input, callerOf(c), database), 201);
   });
 
-  routes.get("/api/v1/task-groups/:id", async (c) => {
-    const row = await getTaskGroupById(parseId(c, "id"), database);
+  routes.get("/api/v1/task-groups/:id", read, async (c) => {
+    const row = await getTaskGroupById(parseId(c, "id"), callerOf(c), database);
     if (!row) throw notFound("Task group");
     return ok(c, row);
   });
 
-  routes.patch("/api/v1/task-groups/:id", async (c) => {
-    const input = compactUpdate(await parseBody(c, updateTaskGroupSchema));
-    const row = await updateTaskGroup(parseId(c, "id"), input, database);
-    if (!row) throw notFound("Task group");
-    return ok(c, row);
-  });
+  routes.patch(
+    "/api/v1/task-groups/:id",
+    requireCan("modify", structureAt("taskGroup")),
+    async (c) => {
+      const input = compactUpdate(await parseBody(c, updateTaskGroupSchema));
+      const row = await updateTaskGroup(parseId(c, "id"), input, callerOf(c), database);
+      if (!row) throw notFound("Task group");
+      return ok(c, row);
+    },
+  );
 
-  routes.delete("/api/v1/task-groups/:id", async (c) => {
-    const row = await deleteTaskGroup(parseId(c, "id"), database);
-    if (!row) throw notFound("Task group");
-    return ok(c, row);
-  });
+  routes.delete(
+    "/api/v1/task-groups/:id",
+    requireCan("remove", structureAt("taskGroup")),
+    async (c) => {
+      const row = await deleteTaskGroup(parseId(c, "id"), callerOf(c), database);
+      if (!row) throw notFound("Task group");
+      return ok(c, row);
+    },
+  );
 
   /* task codes */
-  routes.post("/api/v1/task-codes", async (c) => {
+  routes.post("/api/v1/task-codes", writeCode, async (c) => {
     const input = await parseBody(c, createTaskCodeSchema);
-    return ok(c, await createTaskCode(input, database), 201);
+    return ok(c, await createTaskCode(input, callerOf(c), database), 201);
   });
 
-  routes.get("/api/v1/task-codes/:id", async (c) => {
-    const row = await getTaskCodeById(parseId(c, "id"), database);
+  routes.get("/api/v1/task-codes/:id", read, async (c) => {
+    const row = await getTaskCodeById(parseId(c, "id"), callerOf(c), database);
     if (!row) throw notFound("Task code");
     return ok(c, row);
   });
 
-  routes.patch("/api/v1/task-codes/:id", async (c) => {
-    const input = compactUpdate(await parseBody(c, updateTaskCodeSchema));
-    const row = await updateTaskCode(parseId(c, "id"), input, database);
-    if (!row) throw notFound("Task code");
-    return ok(c, row);
-  });
+  routes.patch(
+    "/api/v1/task-codes/:id",
+    requireCan("modify", structureAt("taskCode")),
+    async (c) => {
+      const input = compactUpdate(await parseBody(c, updateTaskCodeSchema));
+      const row = await updateTaskCode(parseId(c, "id"), input, callerOf(c), database);
+      if (!row) throw notFound("Task code");
+      return ok(c, row);
+    },
+  );
 
-  routes.delete("/api/v1/task-codes/:id", async (c) => {
-    const row = await deleteTaskCode(parseId(c, "id"), database);
-    if (!row) throw notFound("Task code");
-    return ok(c, row);
-  });
+  routes.delete(
+    "/api/v1/task-codes/:id",
+    requireCan("remove", structureAt("taskCode")),
+    async (c) => {
+      const row = await deleteTaskCode(parseId(c, "id"), callerOf(c), database);
+      if (!row) throw notFound("Task code");
+      return ok(c, row);
+    },
+  );
 
   /* descriptions */
-  routes.post("/api/v1/descriptions", async (c) => {
+  routes.post("/api/v1/descriptions", writeDescription, async (c) => {
     const input = await parseBody(c, createDescriptionSchema);
-    return ok(c, await createDescription(input, database), 201);
+    return ok(c, await createDescription(input, callerOf(c), database), 201);
   });
 
-  routes.get("/api/v1/descriptions/:id", async (c) => {
-    const row = await getDescriptionById(parseId(c, "id"), database);
+  routes.get("/api/v1/descriptions/:id", read, async (c) => {
+    const row = await getDescriptionById(parseId(c, "id"), callerOf(c), database);
     if (!row) throw notFound("Description");
     return ok(c, row);
   });
 
-  routes.patch("/api/v1/descriptions/:id", async (c) => {
-    const input = compactUpdate(await parseBody(c, updateDescriptionSchema));
-    const row = await updateDescription(parseId(c, "id"), input, database);
-    if (!row) throw notFound("Description");
-    return ok(c, row);
-  });
+  routes.patch(
+    "/api/v1/descriptions/:id",
+    requireCan("modify", structureAt("description")),
+    async (c) => {
+      const input = compactUpdate(await parseBody(c, updateDescriptionSchema));
+      const row = await updateDescription(parseId(c, "id"), input, callerOf(c), database);
+      if (!row) throw notFound("Description");
+      return ok(c, row);
+    },
+  );
 
-  routes.delete("/api/v1/descriptions/:id", async (c) => {
-    const row = await deleteDescription(parseId(c, "id"), database);
-    if (!row) throw notFound("Description");
-    return ok(c, row);
-  });
+  routes.delete(
+    "/api/v1/descriptions/:id",
+    requireCan("remove", structureAt("description")),
+    async (c) => {
+      const row = await deleteDescription(parseId(c, "id"), callerOf(c), database);
+      if (!row) throw notFound("Description");
+      return ok(c, row);
+    },
+  );
 
   /* types (owned by one description) */
-  routes.post("/api/v1/types", async (c) => {
+  routes.post("/api/v1/types", writeType, async (c) => {
     const input = await parseBody(c, createTypeSchema);
-    return ok(c, await createType(input, database), 201);
+    return ok(c, await createType(input, callerOf(c), database), 201);
   });
 
-  routes.get("/api/v1/types/:id", async (c) => {
-    const row = await getTypeById(parseId(c, "id"), database);
+  routes.get("/api/v1/types/:id", read, async (c) => {
+    const row = await getTypeById(parseId(c, "id"), callerOf(c), database);
     if (!row) throw notFound("Type");
     return ok(c, row);
   });
 
-  routes.patch("/api/v1/types/:id", async (c) => {
-    const input = compactUpdate(await parseBody(c, updateTypeSchema));
-    const row = await updateType(parseId(c, "id"), input, database);
-    if (!row) throw notFound("Type");
-    return ok(c, row);
-  });
+  routes.patch(
+    "/api/v1/types/:id",
+    requireCan("modify", structureAt("type")),
+    async (c) => {
+      const input = compactUpdate(await parseBody(c, updateTypeSchema));
+      const row = await updateType(parseId(c, "id"), input, callerOf(c), database);
+      if (!row) throw notFound("Type");
+      return ok(c, row);
+    },
+  );
 
-  routes.delete("/api/v1/types/:id", async (c) => {
-    const row = await deleteType(parseId(c, "id"), database);
+  routes.delete("/api/v1/types/:id", requireCan("remove", structureAt("type")), async (c) => {
+    const row = await deleteType(parseId(c, "id"), callerOf(c), database);
     if (!row) throw notFound("Type");
     return ok(c, row);
   });
 
   /* part codes */
-  routes.post("/api/v1/part-codes", async (c) => {
+  routes.post("/api/v1/part-codes", writePartCode, async (c) => {
     const input = await parseBody(c, createPartCodeSchema);
-    return ok(c, await createPartCode(input, database), 201);
+    return ok(c, await createPartCode(input, callerOf(c), database), 201);
   });
 
-  routes.get("/api/v1/part-codes/:id", async (c) => {
-    const row = await getPartCodeById(parseId(c, "id"), database);
+  routes.get("/api/v1/part-codes/:id", read, async (c) => {
+    const row = await getPartCodeById(parseId(c, "id"), callerOf(c), database);
     if (!row) throw notFound("Part code");
     return ok(c, row);
   });
 
-  routes.patch("/api/v1/part-codes/:id", async (c) => {
-    const input = compactUpdate(await parseBody(c, updatePartCodeSchema));
-    const row = await updatePartCode(parseId(c, "id"), input, database);
-    if (!row) throw notFound("Part code");
-    return ok(c, row);
-  });
+  routes.patch(
+    "/api/v1/part-codes/:id",
+    requireCan("modify", structureAt("partCode")),
+    async (c) => {
+      const input = compactUpdate(await parseBody(c, updatePartCodeSchema));
+      const row = await updatePartCode(parseId(c, "id"), input, callerOf(c), database);
+      if (!row) throw notFound("Part code");
+      return ok(c, row);
+    },
+  );
 
-  routes.delete("/api/v1/part-codes/:id", async (c) => {
-    const row = await deletePartCode(parseId(c, "id"), database);
-    if (!row) throw notFound("Part code");
-    return ok(c, row);
-  });
+  routes.delete(
+    "/api/v1/part-codes/:id",
+    requireCan("remove", structureAt("partCode")),
+    async (c) => {
+      const row = await deletePartCode(parseId(c, "id"), callerOf(c), database);
+      if (!row) throw notFound("Part code");
+      return ok(c, row);
+    },
+  );
 
   /* project type vocabulary: autocomplete from the tree, no catalog table */
-  routes.get("/api/v1/projects/:projectId/type-catalog", async (c) => {
+  routes.get("/api/v1/projects/:projectId/type-catalog", read, async (c) => {
     const projectId = parseId(c, "projectId");
     parseQuery(c, typeCatalogQuerySchema);
-    return ok(c, await listTypeCatalog(projectId, database));
+    return ok(c, await listTypeCatalog(projectId, callerOf(c), database));
   });
 
   /* bulk delete: one route, preview reads and delete writes the same selection */
-  routes.post("/api/v1/task-structure/bulk-delete", async (c) => {
-    const input = await parseBody(c, bulkDeleteTaskStructureSchema);
-    const preview =
-      input.mode === "preview"
-        ? await previewTaskStructureDelete(input.nodes, database)
-        : await deleteTaskStructureSelection(input.nodes, database, input.force === true);
-    return ok(c, preview);
-  });
+  routes.post(
+    "/api/v1/task-structure/bulk-delete",
+    requireCan("remove", structureAt("taskGroup")),
+    async (c) => {
+      const input = await parseBody(c, bulkDeleteTaskStructureSchema);
+      const preview =
+        input.mode === "preview"
+          ? await previewTaskStructureDelete(input.nodes, callerOf(c), database)
+          : await deleteTaskStructureSelection(
+              input.nodes,
+              callerOf(c),
+              database,
+              input.force === true,
+            );
+      return ok(c, preview);
+    },
+  );
+
+  // The convenience single-parent reads are not exposed here: the tree read
+  // covers them. They stay service-level helpers.
 
   return routes;
 };

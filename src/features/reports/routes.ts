@@ -1,6 +1,8 @@
 import { Hono, type Context } from "hono";
+import { getCookie } from "hono/cookie";
 import type { DbOrTx } from "../../db/client";
-import { getProjectById } from "../../db/services/project.service";
+import { findProjectById } from "../../db/repositories/project.repository";
+import { findReportRecordByIdInternal } from "../../db/repositories/report.repository";
 import {
   DOCX_MIME,
   getReportStatus,
@@ -11,9 +13,13 @@ import {
   reportListItem,
   saveReportDocx,
 } from "../../db/services/report.service";
+import { callerOf, requireCan, requireUser, type AuthVariables } from "../../lib/auth/middleware";
+import type { Caller } from "../../lib/caller";
 import { AppError } from "../../lib/error";
-import { parseBody, parseId, parseUuid } from "../../lib/parse";
+import { isUuid, parseBody, parseId, parseUuid } from "../../lib/parse";
+import { REPORT_EDITOR_COOKIE, verifyReportEditorToken } from "../../lib/report_editor_token";
 import { ok } from "../../lib/response";
+import type { Action, Subject } from "../../lib/auth/permissions";
 import { convertDocxToPdf } from "../../lib/pdf/convert";
 import { reportCreateSchema, reportNameSchema } from "../../types/api";
 import { queueReportGeneration } from "./generate";
@@ -63,15 +69,61 @@ const attachmentResponse = (c: Context, bytes: Uint8Array, filename: string, mim
 // The report surface: one row and one docx per generated document. The app
 // lists them, the browser editor opens and saves one.
 export const reportRoutes = (database?: DbOrTx) => {
-  const routes = new Hono();
+  const routes = new Hono<{ Variables: AuthVariables }>();
 
-  // 404 beats a foreign-key error later, and the list is per project
-  const requireProject = async (projectId: number) => {
-    const project = await getProjectById(projectId, database);
+  // 404 beats a foreign-key error later, and the list is per project.
+  // A project in another org reads as absent, so the id cannot be probed.
+  const requireProject = async (projectId: number, caller: Caller) => {
+    const project = await findProjectById(projectId, caller.organizationId, database);
     if (!project) {
       throw new AppError(404, "project_not_found", `No project with id ${projectId}`);
     }
     return project;
+  };
+
+  // The two check middlewares only read the request and set context, so calling
+  // them with a no-op next runs the check and stops there. That keeps one
+  // implementation of each check instead of a second copy for this feature.
+  const enforced = async (
+    c: Context<{ Variables: AuthVariables }>,
+    action: Action,
+    subject: Subject,
+  ): Promise<Caller> => {
+    const noop = async () => {};
+    await requireUser(database)(c, noop);
+    await requireCan(action, subject)(c, noop);
+    return callerOf(c);
+  };
+
+  // The editor's own authorization: the signed cookie the page serve set, bound
+  // to this one report id. Its row supplies the org, because the cookie names a
+  // report and no organization. A write through it has no actor, so its audit
+  // row carries a null user.
+  const editorCaller = async (
+    c: Context<{ Variables: AuthVariables }>,
+  ): Promise<Caller | null> => {
+    const reportId = c.req.param("reportId");
+    if (!reportId || !isUuid(reportId)) return null;
+    const token = getCookie(c, REPORT_EDITOR_COOKIE) ?? null;
+    if (!verifyReportEditorToken(token, reportId)) return null;
+
+    const row = await findReportRecordByIdInternal(reportId, database);
+    return row ? { userId: null, organizationId: row.organizationId } : null;
+  };
+
+  // flow: editor cookie (only where the editor needs it) > bearer + ability
+  const authorized = async (
+    c: Context<{ Variables: AuthVariables }>,
+    action: Action,
+    subject: Subject,
+    editorAllowed = false,
+  ): Promise<Caller> => {
+    if (editorAllowed) {
+      const fromEditor = await editorCaller(c);
+      if (fromEditor) return fromEditor;
+    }
+
+    return enforced(c, action, subject);
   };
 
   // read the upload, then check it is a docx before it reaches storage
@@ -94,39 +146,43 @@ export const reportRoutes = (database?: DbOrTx) => {
 
   // Generate: the row lands now, the docx lands when the render finishes.
   routes.post("/api/v1/projects/:projectId/reports", async (c) => {
+    const caller = await authorized(c, "create", "Report");
     const projectId = parseId(c, "projectId");
-    await requireProject(projectId);
+    await requireProject(projectId, caller);
 
     const { name, scope } = await parseBody(c, reportCreateSchema);
-    const report = await queueReportGeneration(projectId, name, scope ?? "all", database);
+    const report = await queueReportGeneration(projectId, name, scope ?? "all", caller, database);
 
     return ok(c, reportListItem(report), 202);
   });
 
   routes.get("/api/v1/projects/:projectId/reports", async (c) => {
+    const caller = await authorized(c, "read", "Report");
     const projectId = parseId(c, "projectId");
-    await requireProject(projectId);
+    await requireProject(projectId, caller);
 
-    return ok(c, await listProjectReports(projectId, database));
+    return ok(c, await listProjectReports(projectId, caller, database));
   });
 
   // the editor page reads this for the document name and state
   routes.get("/api/v1/reports/:reportId", async (c) => {
+    const caller = await authorized(c, "read", "Report", true);
     const reportId = parseUuid(c, "reportId");
 
-    return ok(c, await getReportStatus(reportId, database));
+    return ok(c, await getReportStatus(reportId, caller, database));
   });
 
   // the stored document; the editor fetches it and the download link points here
   routes.get("/api/v1/reports/:reportId/docx", async (c) => {
+    const caller = await authorized(c, "read", "Report", true);
     const reportId = parseUuid(c, "reportId");
 
-    const status = await getReportStatus(reportId, database);
+    const status = await getReportStatus(reportId, caller, database);
     if (status.status === "generating") {
       throw new AppError(409, "report_not_ready", "The report is still generating");
     }
 
-    const docx = new Uint8Array(await loadReportDocx(reportId, database));
+    const docx = new Uint8Array(await loadReportDocx(reportId, caller, database));
     return attachmentResponse(
       c,
       docx,
@@ -136,27 +192,32 @@ export const reportRoutes = (database?: DbOrTx) => {
   });
 
   // The printable copy of the same stored document, rendered off-process. The
-  // editor has no exporter, so this is where a PDF comes from.
+  // editor has no exporter, so this is where a PDF comes from. Bearer only: the
+  // editor's cookie is issued for the page's own reads and one save, no more.
   routes.get("/api/v1/reports/:reportId/pdf", async (c) => {
+    const caller = await authorized(c, "read", "Report");
     const reportId = parseUuid(c, "reportId");
 
-    const status = await getReportStatus(reportId, database);
+    const status = await getReportStatus(reportId, caller, database);
     if (status.status === "generating") {
       throw new AppError(409, "report_not_ready", "The report is still generating");
     }
 
-    const pdf = await convertDocxToPdf(new Uint8Array(await loadReportDocx(reportId, database)));
+    const pdf = await convertDocxToPdf(
+      new Uint8Array(await loadReportDocx(reportId, caller, database)),
+    );
     return attachmentResponse(c, pdf, attachmentFilename(status.name, reportId, "pdf"), PDF_MIME);
   });
 
   // the browser editor's save path. The version the editor loaded travels in a
   // header, because the body is the document itself.
   routes.put("/api/v1/reports/:reportId/docx", async (c) => {
+    const caller = await authorized(c, "modify", "Report", true);
     const reportId = parseUuid(c, "reportId");
     const header = c.req.header(VERSION_HEADER);
     const body = await readDocxBody(c);
 
-    const written = await saveReportDocx(reportId, body, parseVersion(header), database);
+    const written = await saveReportDocx(reportId, body, parseVersion(header), caller, database);
 
     return ok(c, written);
   });
@@ -164,21 +225,24 @@ export const reportRoutes = (database?: DbOrTx) => {
   // Rewrite the generated regions from current data. The user's own edits sit
   // outside every region, so they survive.
   routes.post("/api/v1/reports/:reportId/refresh", async (c) => {
+    const caller = await authorized(c, "modify", "Report");
     const reportId = parseUuid(c, "reportId");
 
-    return ok(c, await refreshReport(reportId, database));
+    return ok(c, await refreshReport(reportId, caller, database));
   });
 
   routes.patch("/api/v1/reports/:reportId", async (c) => {
+    const caller = await authorized(c, "modify", "Report");
     const reportId = parseUuid(c, "reportId");
     const { name } = await parseBody(c, reportNameSchema);
 
-    return ok(c, await renameReport(reportId, name, database));
+    return ok(c, await renameReport(reportId, name, caller, database));
   });
 
   routes.delete("/api/v1/reports/:reportId", async (c) => {
+    const caller = await authorized(c, "remove", "Report");
     const reportId = parseUuid(c, "reportId");
-    await removeReport(reportId, database);
+    await removeReport(reportId, caller, database);
 
     return ok(c, { reportId });
   });

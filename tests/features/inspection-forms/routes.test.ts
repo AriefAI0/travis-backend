@@ -1,37 +1,50 @@
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { appFor } from "../../helpers/app";
+import { createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
+import * as schema from "../../../src/db/schema";
 import { inspectionFormRoutes } from "../../../src/features/inspection-forms/routes";
-import { projectRoutes } from "../../../src/features/projects/routes";
 
-const app = appFor(testDb, inspectionFormRoutes, projectRoutes);
+const app = appFor(testDb, inspectionFormRoutes);
+
+// minted per test in beforeEach; every request below carries it
+let adminToken = "";
 
 const post = async (path: string, body: unknown) =>
-  app.request(path, {
+  authRequest(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
 
+// Seeded directly: projectRoutes is guarded now, and this suite is about
+// forms. A project row is all it needs.
 const seedProject = async () => {
-  const res = await post("/api/v1/projects", { title: "Alpha" });
-  return (await json(res)).data.projectId as number;
+  const rows = await testDb
+    .insert(schema.project)
+    .values({ organizationId: testOrgId, displayNumber: 1, title: "Alpha" })
+    .returning();
+  return rows[0]!.projectId;
 };
 
 const getForm = (projectId: number) =>
-  app.request(`/api/v1/projects/${projectId}/inspection-forms/GVI`);
+  authRequest(`/api/v1/projects/${projectId}/inspection-forms/GVI`);
 
 // flow: seed v1 > save versions > reject bad labels
 describe("inspection form routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
-  beforeEach(truncateTestDatabase);
+  beforeEach(async () => {
+    await truncateTestDatabase();
+    adminToken = (await createTestUser({ preset: "Admin" })).token;
+  });
 
   it("seeds version 1 with built-in fields on first read", async () => {
     const projectId = await seedProject();
@@ -91,7 +104,7 @@ describe("inspection form routes", () => {
 
   it("rejects an unknown inspection type code", async () => {
     const projectId = await seedProject();
-    const res = await app.request(`/api/v1/projects/${projectId}/inspection-forms/NOPE`);
+    const res = await authRequest(`/api/v1/projects/${projectId}/inspection-forms/NOPE`);
     expect(res.status).toBe(400);
   });
 
@@ -123,3 +136,13 @@ describe("inspection form routes", () => {
     expect(rows.length).toBe(3 + 4 + 4);
   });
 });
+
+// every request carries the Admin token minted in beforeEach
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

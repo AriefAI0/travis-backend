@@ -5,10 +5,14 @@ import type {
   TaskStructureTaskGroupNode,
   TaskStructureTypeNode,
 } from "../../types/api";
-import { AppError } from "../../lib/error";
+import { AppError, notFound } from "../../lib/error";
+import type { Caller } from "../../lib/caller";
+import type { StructureLevel } from "../../lib/auth/permissions";
 import { removeMediaKeys, removeMediaPrefix } from "../../lib/minio_storage/cleanup";
 import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
 import { db, type DbOrTx } from "../client";
+import { findProjectById, findProjectByIdInternal } from "../repositories/project.repository";
+import { writeAudit, type AuditAction } from "./audit.service";
 import { listIngestRecordsByClipIds } from "../repositories/recording-ingest.repository";
 import { ingestLeaseAlive } from "../../lib/ingest_lease";
 import {
@@ -93,8 +97,12 @@ const normalizeRequired = (value: string, fieldName: string) => {
 /* ---------- tree read (batched: 5 queries for the whole project) ---------- */
 export const listProjectTaskStructureTree = async (
   projectId: number,
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<TaskStructureTaskGroupNode[]> => {
+  // a project in another org has no tree to show
+  if (!(await findProjectById(projectId, caller.organizationId, database))) return [];
+
   const groups = await listTaskGroupRecordsByProjectId(projectId, database);
 
   const taskCodes = await listTaskCodeRecordsByTaskGroupIds(
@@ -167,125 +175,424 @@ export const listProjectTaskStructureTree = async (
   }));
 };
 
+/* ---------- org scoping ---------- */
+// Every node hangs off a project, and the project carries the org. A node
+// resolves its project by walking up the chain rather than denormalising the
+// org onto five tables.
+// flow: node id > parent chain > project id
+const projectIdOfGroup = async (taskGroupId: number, database: DbOrTx) =>
+  (await findTaskGroupById(taskGroupId, database))?.projectId ?? null;
+
+const projectIdOfTaskCode = async (taskCodeId: number, database: DbOrTx) => {
+  const row = await findTaskCodeById(taskCodeId, database);
+  return row ? projectIdOfGroup(row.taskGroupId, database) : null;
+};
+
+const projectIdOfDescription = async (descriptionId: number, database: DbOrTx) => {
+  const row = await findDescriptionById(descriptionId, database);
+  return row ? projectIdOfTaskCode(row.taskCodeId, database) : null;
+};
+
+const projectIdOfType = async (typeId: number, database: DbOrTx) => {
+  const row = await findTypeById(typeId, database);
+  return row ? projectIdOfDescription(row.descriptionId, database) : null;
+};
+
+const projectIdOfPartCode = async (partCodeId: number, database: DbOrTx) => {
+  const row = await findPartCodeById(partCodeId, database);
+  return row ? projectIdOfType(row.typeId, database) : null;
+};
+
+const PROJECT_OF: Record<StructureLevel, (id: number, database: DbOrTx) => Promise<number | null>> = {
+  // a project is its own owner
+  project: async (id) => id,
+  taskGroup: projectIdOfGroup,
+  taskCode: projectIdOfTaskCode,
+  description: projectIdOfDescription,
+  type: projectIdOfType,
+  partCode: projectIdOfPartCode,
+};
+
+// The project a result target hangs off, for features that scope by target id
+// rather than by node id. Exactly one of the two ids is set.
+// flow: target > chain > project id
+export const projectIdOfTarget = async (
+  target: { descriptionId?: number | null; partCodeId?: number | null },
+  database: DbOrTx,
+): Promise<number | null> => {
+  if (target.descriptionId !== undefined && target.descriptionId !== null) {
+    return projectIdOfDescription(target.descriptionId, database);
+  }
+  if (target.partCodeId !== undefined && target.partCodeId !== null) {
+    return projectIdOfPartCode(target.partCodeId, database);
+  }
+  return null;
+};
+
+// The row at each level, for the audit trail's before-value.
+const READ_AT: Record<StructureLevel, (id: number, database: DbOrTx) => Promise<unknown>> = {
+  project: (id, database) => findProjectByIdInternal(id, database),
+  taskGroup: findTaskGroupById,
+  taskCode: findTaskCodeById,
+  description: findDescriptionById,
+  type: findTypeById,
+  partCode: findPartCodeById,
+};
+
+export type ScopedWrite = {
+  action: AuditAction;
+  resourceType: string;
+};
+
+// flow: node > owning project > org check > the write > audit, one transaction
+// A node in another org reads as absent, never as forbidden: the id must not
+// be probeable. The check and the write share a transaction, so nothing can
+// slip between them.
+const writeAsCaller = async <T>(
+  level: StructureLevel,
+  nodeId: number,
+  caller: Caller,
+  entry: ScopedWrite,
+  run: (tx: DbOrTx) => Promise<T | null>,
+  database?: DbOrTx,
+): Promise<T | null> => {
+  const attempt = async (tx: DbOrTx) => {
+    const projectId = await PROJECT_OF[level](nodeId, tx);
+    if (projectId === null) return null;
+    if (!(await findProjectById(projectId, caller.organizationId, tx))) return null;
+
+    const before = await READ_AT[level](nodeId, tx);
+    const result = await run(tx);
+    if (result === null || result === undefined) return null;
+
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: entry.action,
+        resourceType: entry.resourceType,
+        resourceId: nodeId,
+        before: entry.action === "remove" ? before : undefined,
+        after: entry.action === "remove" ? undefined : result,
+      },
+      tx,
+    );
+
+    return result;
+  };
+
+  return database ? attempt(database) : db.transaction(attempt);
+};
+
+// A create has no node to resolve, so it checks the parent it hangs off.
+// A missing or foreign parent throws 404 rather than returning null: a create
+// route has no null to check, and a 500 would leak that the id exists elsewhere.
+const createAsCaller = async <T>(
+  parentLevel: StructureLevel,
+  parentId: number,
+  caller: Caller,
+  entry: ScopedWrite,
+  run: (tx: DbOrTx) => Promise<T | null>,
+  database?: DbOrTx,
+): Promise<T | null> => {
+  const attempt = async (tx: DbOrTx) => {
+    const projectId = await PROJECT_OF[parentLevel](parentId, tx);
+    const parentInOrg =
+      projectId !== null && (await findProjectById(projectId, caller.organizationId, tx));
+
+    if (!parentInOrg) {
+      throw notFound(`The parent ${parentLevel} for this ${entry.resourceType}`);
+    }
+
+    const created = await run(tx);
+    if (created === null) return null;
+
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: entry.action,
+        resourceType: entry.resourceType,
+        resourceId: nodeIdOf(created),
+        after: created,
+      },
+      tx,
+    );
+
+    return created;
+  };
+
+  return database ? attempt(database) : db.transaction(attempt);
+};
+
+// Every created row exposes one identity column, named after its level.
+const nodeIdOf = (row: unknown): number | null => {
+  const record = row as Record<string, number | undefined>;
+  return (
+    record.taskGroupId ??
+    record.taskCodeId ??
+    record.descriptionId ??
+    record.typeId ??
+    record.partCodeId ??
+    null
+  );
+};
+
 /* ---------- task group ---------- */
-export const createTaskGroup = async (data: CreateTaskGroupInput, database?: DbOrTx) =>
-  createTaskGroupRecord(
-    {
-      projectId: data.projectId,
-      code: normalizeRequired(data.code, "Group code"),
-    },
+export const createTaskGroup = async (
+  data: CreateTaskGroupInput,
+  caller: Caller,
+  database?: DbOrTx,
+) =>
+  createAsCaller(
+    "project",
+    data.projectId,
+    caller,
+    { action: "create", resourceType: "TaskGroup" },
+    (tx) =>
+      createTaskGroupRecord(
+        { projectId: data.projectId, code: normalizeRequired(data.code, "Group code") },
+        tx,
+      ),
     database,
   );
 
-export const getTaskGroupById = (taskGroupId: number, database?: DbOrTx) =>
-  findTaskGroupById(taskGroupId, database);
+export const getTaskGroupById = async (
+  taskGroupId: number,
+  caller: Caller,
+  database?: DbOrTx,
+) => {
+  const projectId = await PROJECT_OF.taskGroup(taskGroupId, database ?? db);
+  if (projectId === null) return null;
+  if (!(await findProjectById(projectId, caller.organizationId, database))) return null;
+  return findTaskGroupById(taskGroupId, database);
+};
 
 export const updateTaskGroup = async (
   taskGroupId: number,
   data: Partial<{ code: string }>,
+  caller: Caller,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updateTaskGroupById>[1]> = {};
   if (data.code !== undefined) next.code = normalizeRequired(data.code, "Group code");
-  return updateTaskGroupById(taskGroupId, next, database);
+
+  return writeAsCaller(
+    "taskGroup",
+    taskGroupId,
+    caller,
+    { action: "modify", resourceType: "TaskGroup" },
+    (tx) => updateTaskGroupById(taskGroupId, next, tx),
+    database,
+  );
 };
 
-export const deleteTaskGroup = (taskGroupId: number, database?: DbOrTx) =>
-  deleteTaskGroupById(taskGroupId, database);
-
-/* ---------- task code ---------- */
-export const createTaskCode = async (data: CreateTaskCodeInput, database?: DbOrTx) =>
-  createTaskCodeRecord(
-    {
-      taskGroupId: data.taskGroupId,
-      code: normalizeRequired(data.code, "Task code"),
-    },
+export const deleteTaskGroup = (taskGroupId: number, caller: Caller, database?: DbOrTx) =>
+  writeAsCaller(
+    "taskGroup",
+    taskGroupId,
+    caller,
+    { action: "remove", resourceType: "TaskGroup" },
+    (tx) => deleteTaskGroupById(taskGroupId, tx),
     database,
   );
 
-export const getTaskCodeById = (taskCodeId: number, database?: DbOrTx) =>
-  findTaskCodeById(taskCodeId, database);
+/* ---------- task code ---------- */
+export const createTaskCode = async (
+  data: CreateTaskCodeInput,
+  caller: Caller,
+  database?: DbOrTx,
+) =>
+  createAsCaller(
+    "taskGroup",
+    data.taskGroupId,
+    caller,
+    { action: "create", resourceType: "TaskCode" },
+    (tx) =>
+      createTaskCodeRecord(
+        { taskGroupId: data.taskGroupId, code: normalizeRequired(data.code, "Task code") },
+        tx,
+      ),
+    database,
+  );
+
+export const getTaskCodeById = async (
+  taskCodeId: number,
+  caller: Caller,
+  database?: DbOrTx,
+) => {
+  const projectId = await PROJECT_OF.taskCode(taskCodeId, database ?? db);
+  if (projectId === null) return null;
+  if (!(await findProjectById(projectId, caller.organizationId, database))) return null;
+  return findTaskCodeById(taskCodeId, database);
+};
 
 export const updateTaskCode = async (
   taskCodeId: number,
   data: Partial<{ code: string }>,
+  caller: Caller,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updateTaskCodeById>[1]> = {};
   if (data.code !== undefined) next.code = normalizeRequired(data.code, "Task code");
-  return updateTaskCodeById(taskCodeId, next, database);
+
+  return writeAsCaller(
+    "taskCode",
+    taskCodeId,
+    caller,
+    { action: "modify", resourceType: "TaskCode" },
+    (tx) => updateTaskCodeById(taskCodeId, next, tx),
+    database,
+  );
 };
 
-export const deleteTaskCode = (taskCodeId: number, database?: DbOrTx) =>
-  deleteTaskCodeById(taskCodeId, database);
+export const deleteTaskCode = (taskCodeId: number, caller: Caller, database?: DbOrTx) =>
+  writeAsCaller(
+    "taskCode",
+    taskCodeId,
+    caller,
+    { action: "remove", resourceType: "TaskCode" },
+    (tx) => deleteTaskCodeById(taskCodeId, tx),
+    database,
+  );
 
 /* ---------- description ---------- */
 export const createDescription = async (
   data: CreateDescriptionInput,
+  caller: Caller,
   database?: DbOrTx,
 ) =>
-  createDescriptionRecord(
-    {
-      taskCodeId: data.taskCodeId,
-      label: normalizeRequired(data.label, "Description"),
-    },
+  createAsCaller(
+    "taskCode",
+    data.taskCodeId,
+    caller,
+    { action: "create", resourceType: "Description" },
+    (tx) =>
+      createDescriptionRecord(
+        { taskCodeId: data.taskCodeId, label: normalizeRequired(data.label, "Description") },
+        tx,
+      ),
     database,
   );
 
-export const getDescriptionById = (descriptionId: number, database?: DbOrTx) =>
-  findDescriptionById(descriptionId, database);
+export const getDescriptionById = async (
+  descriptionId: number,
+  caller: Caller,
+  database?: DbOrTx,
+) => {
+  const projectId = await PROJECT_OF.description(descriptionId, database ?? db);
+  if (projectId === null) return null;
+  if (!(await findProjectById(projectId, caller.organizationId, database))) return null;
+  return findDescriptionById(descriptionId, database);
+};
 
 export const updateDescription = async (
   descriptionId: number,
   data: Partial<{ label: string }>,
+  caller: Caller,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updateDescriptionById>[1]> = {};
   if (data.label !== undefined) next.label = normalizeRequired(data.label, "Description");
-  return updateDescriptionById(descriptionId, next, database);
+
+  return writeAsCaller(
+    "description",
+    descriptionId,
+    caller,
+    { action: "modify", resourceType: "Description" },
+    (tx) => updateDescriptionById(descriptionId, next, tx),
+    database,
+  );
 };
 
-export const deleteDescription = (descriptionId: number, database?: DbOrTx) =>
-  deleteDescriptionById(descriptionId, database);
+export const deleteDescription = (
+  descriptionId: number,
+  caller: Caller,
+  database?: DbOrTx,
+) =>
+  writeAsCaller(
+    "description",
+    descriptionId,
+    caller,
+    { action: "remove", resourceType: "Description" },
+    (tx) => deleteDescriptionById(descriptionId, tx),
+    database,
+  );
 
 /* ---------- type (owned by one description) ---------- */
-export const createType = async (data: CreateTypeInput, database?: DbOrTx) => {
+export const createType = async (
+  data: CreateTypeInput,
+  caller: Caller,
+  database?: DbOrTx,
+) => {
   const code = normalizeRequired(data.code, "Type code");
 
-  const existing = await findTypeByDescriptionIdAndCode(data.descriptionId, code, database);
-  if (existing) {
-    throw new AppError(409, "wrong_state", "That type code already exists under this description");
-  }
-
-  return createTypeRecord(
-    {
-      descriptionId: data.descriptionId,
-      code,
+  return createAsCaller(
+    "description",
+    data.descriptionId,
+    caller,
+    { action: "create", resourceType: "Type" },
+    async (tx) => {
+      const existing = await findTypeByDescriptionIdAndCode(data.descriptionId, code, tx);
+      if (existing) {
+        throw new AppError(
+          409,
+          "wrong_state",
+          "That type code already exists under this description",
+        );
+      }
+      return createTypeRecord({ descriptionId: data.descriptionId, code }, tx);
     },
     database,
   );
 };
 
-export const getTypeById = (typeId: number, database?: DbOrTx) =>
-  findTypeById(typeId, database);
+export const getTypeById = async (typeId: number, caller: Caller, database?: DbOrTx) => {
+  const projectId = await PROJECT_OF.type(typeId, database ?? db);
+  if (projectId === null) return null;
+  if (!(await findProjectById(projectId, caller.organizationId, database))) return null;
+  return findTypeById(typeId, database);
+};
 
 // rename in place: stable id, the code changes
 export const updateType = async (
   typeId: number,
   data: Partial<{ code: string }>,
+  caller: Caller,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updateTypeById>[1]> = {};
   if (data.code !== undefined) next.code = normalizeRequired(data.code, "Type code");
-  return updateTypeById(typeId, next, database);
+
+  return writeAsCaller(
+    "type",
+    typeId,
+    caller,
+    { action: "modify", resourceType: "Type" },
+    (tx) => updateTypeById(typeId, next, tx),
+    database,
+  );
 };
 
-export const deleteType = (typeId: number, database?: DbOrTx) =>
-  deleteTypeById(typeId, database);
+export const deleteType = (typeId: number, caller: Caller, database?: DbOrTx) =>
+  writeAsCaller(
+    "type",
+    typeId,
+    caller,
+    { action: "remove", resourceType: "Type" },
+    (tx) => deleteTypeById(typeId, tx),
+    database,
+  );
 
 // project-wide type vocabulary for autocomplete: the distinct type codes
-export const listTypeCatalog = (projectId: number, database?: DbOrTx) =>
-  listTypeCatalogByProjectId(projectId, database);
+export const listTypeCatalog = async (
+  projectId: number,
+  caller: Caller,
+  database?: DbOrTx,
+) => {
+  if (!(await findProjectById(projectId, caller.organizationId, database))) return [];
+  return listTypeCatalogByProjectId(projectId, database);
+};
 
 // The label media keys and breadcrumbs use for a result's target: the
 // description label, else the part code.
@@ -307,31 +614,61 @@ export const resolveTargetLabel = async (
 /* ---------- part code ---------- */
 export const createPartCode = async (
   data: CreatePartCodeInput,
+  caller: Caller,
   database?: DbOrTx,
 ) =>
-  createPartCodeRecord(
-    {
-      typeId: data.typeId,
-      code: normalizeRequired(data.code, "Part code"),
-    },
+  createAsCaller(
+    "type",
+    data.typeId,
+    caller,
+    { action: "create", resourceType: "PartCode" },
+    (tx) =>
+      createPartCodeRecord(
+        { typeId: data.typeId, code: normalizeRequired(data.code, "Part code") },
+        tx,
+      ),
     database,
   );
 
-export const getPartCodeById = (partCodeId: number, database?: DbOrTx) =>
-  findPartCodeById(partCodeId, database);
+export const getPartCodeById = async (
+  partCodeId: number,
+  caller: Caller,
+  database?: DbOrTx,
+) => {
+  const projectId = await PROJECT_OF.partCode(partCodeId, database ?? db);
+  if (projectId === null) return null;
+  if (!(await findProjectById(projectId, caller.organizationId, database))) return null;
+  return findPartCodeById(partCodeId, database);
+};
 
 export const updatePartCode = async (
   partCodeId: number,
   data: Partial<{ code: string }>,
+  caller: Caller,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updatePartCodeById>[1]> = {};
   if (data.code !== undefined) next.code = normalizeRequired(data.code, "Part code");
-  return updatePartCodeById(partCodeId, next, database);
+
+  return writeAsCaller(
+    "partCode",
+    partCodeId,
+    caller,
+    { action: "modify", resourceType: "PartCode" },
+    (tx) => updatePartCodeById(partCodeId, next, tx),
+    database,
+  );
 };
 
-export const deletePartCode = (partCodeId: number, database?: DbOrTx) =>
-  deletePartCodeById(partCodeId, database);
+export const deletePartCode = (partCodeId: number, caller: Caller, database?: DbOrTx) =>
+  writeAsCaller(
+    "partCode",
+    partCodeId,
+    caller,
+    { action: "remove", resourceType: "PartCode" },
+    (tx) => deletePartCodeById(partCodeId, tx),
+    database,
+  );
 
 /* ---------- convenience single-parent lists ---------- */
 export const listTaskCodesByGroupId = (taskGroupId: number, database?: DbOrTx) =>
@@ -526,11 +863,49 @@ const collectSelectionFacts = async (
 
 // Read-only: same walk the delete does, so the dialog never promises a
 // different number than the delete delivers.
+// The wire names the levels in snake_case; the service walks them in camelCase.
+const LEVEL_OF_KIND: Record<TaskStructureNodeKind, StructureLevel> = {
+  task_group: "taskGroup",
+  task_code: "taskCode",
+  description: "description",
+  type: "type",
+  part_code: "partCode",
+};
+
+// The node ids arrive from the client, so each one is resolved to its project
+// and checked before anything is read or deleted. Descendants are not checked:
+// they hang off the nodes checked here.
+// flow: every named node > owning project > org check
+const assertNodesInCallerOrg = async (
+  nodes: TaskStructureNodeRef[],
+  caller: Caller,
+  database: DbOrTx,
+): Promise<void> => {
+  for (const node of nodes) {
+    const level = LEVEL_OF_KIND[node.kind];
+    const projectId = await PROJECT_OF[level](node.id, database);
+    if (projectId === null) {
+      throw notFound(`The selected ${node.kind.replace("_", " ")}`);
+    }
+    if (!(await findProjectById(projectId, caller.organizationId, database))) {
+      throw notFound(`The selected ${node.kind.replace("_", " ")}`);
+    }
+  }
+};
+
 export const previewTaskStructureDelete = async (
   nodes: TaskStructureNodeRef[],
+  caller: Caller,
   database?: DbOrTx,
-): Promise<TaskStructureDeletePreview> =>
-  (await collectSelectionFacts(await resolveSelection(nodes, database), database)).preview;
+): Promise<TaskStructureDeletePreview> => {
+  if (database) {
+    await assertNodesInCallerOrg(nodes, caller, database);
+  } else {
+    await db.transaction((tx) => assertNodesInCallerOrg(nodes, caller, tx));
+  }
+
+  return (await collectSelectionFacts(await resolveSelection(nodes, database), database)).preview;
+};
 
 // What the confirm dialog says before it discards unfinished work. Exported so
 // the refusal and the preview can never drift apart.
@@ -546,9 +921,16 @@ export const orphanReason = (orphans: number): string =>
  */
 export const deleteTaskStructureSelection = async (
   nodes: TaskStructureNodeRef[],
+  caller: Caller,
   database?: DbOrTx,
   force = false,
 ): Promise<TaskStructureDeletePreview> => {
+  if (database) {
+    await assertNodesInCallerOrg(nodes, caller, database);
+  } else {
+    await db.transaction((tx) => assertNodesInCallerOrg(nodes, caller, tx));
+  }
+
   const resolved = await resolveSelection(nodes, database);
   const facts = await collectSelectionFacts(resolved, database);
 

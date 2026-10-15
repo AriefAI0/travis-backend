@@ -5,8 +5,10 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
+import { createTestUser } from "../../helpers/auth";
 import { json } from "../../helpers/json";
 import { sessionTimelineRoutes } from "../../../src/features/session-timeline/routes";
 import { resultRoutes } from "../../../src/features/results/routes";
@@ -15,9 +17,12 @@ import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, sessionTimelineRoutes, resultRoutes, projectRoutes);
 
+// minted per test in beforeEach; the two guarded sidebar reads carry it
+let adminToken = "";
+
 // project > tree chain > session > capturing master, fixed ids
 const seedWorld = async () => {
-  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.taskGroup).values({ taskGroupId: 10, projectId: 1, code: "100" });
   await testDb.insert(schema.taskCode).values({ taskCodeId: 20, taskGroupId: 10, code: "101" });
   await testDb.insert(schema.description).values({ descriptionId: 30, taskCodeId: 20, label: "Row A" });
@@ -53,7 +58,10 @@ const insertResult = async (overrides: Partial<typeof schema.result.$inferInsert
 describe("session timeline routes", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
-  beforeEach(truncateTestDatabase);
+  beforeEach(async () => {
+    await truncateTestDatabase();
+    adminToken = (await createTestUser({ preset: "Admin" })).token;
+  });
 
   it("returns session rows open and finished with breadcrumbs", async () => {
     await seedWorld();
@@ -67,7 +75,7 @@ describe("session timeline routes", () => {
       masterStartMs: 10000,
     });
 
-    const rows = (await json(await app.request("/api/v1/sessions/101/results")))
+    const rows = (await json(await authRequest("/api/v1/sessions/101/results")))
       .data as Array<Record<string, any>>;
     expect(rows).toHaveLength(2);
     expect(rows[0]!.target.kind).toBe("description");
@@ -85,7 +93,7 @@ describe("session timeline routes", () => {
     await insertResult({ displayNumber: 2, layer: 2, descriptionId: null, partCodeId: 60, masterStartMs: 0, masterEndMs: 60000 });
     await insertResult({ displayNumber: 3, layer: 1, masterStartMs: 300000 });
 
-    const markers = (await json(await app.request("/api/v1/sessions/101/inspection-markers")))
+    const markers = (await json(await authRequest("/api/v1/sessions/101/inspection-markers")))
       .data as Array<Record<string, any>>;
     expect(markers).toHaveLength(2);
     expect(markers.map((m) => m.masterStartMs)).toEqual([0, 120000]);
@@ -105,15 +113,25 @@ describe("session timeline routes", () => {
       masterEndMs: 20000,
     });
 
-    const comp = (await json(await app.request("/api/v1/descriptions/30/results")))
+    const comp = (await json(await authRequest("/api/v1/descriptions/30/results")))
       .data as Record<string, any>;
     expect(comp.sessions).toHaveLength(1);
     expect(comp.sessions[0]!.results).toHaveLength(1);
     expect(comp.sessions[0]!.results[0]!.layer).toBe(1);
 
-    const code = (await json(await app.request("/api/v1/part-codes/60/results")))
+    const code = (await json(await authRequest("/api/v1/part-codes/60/results")))
       .data as Record<string, any>;
     expect(code.sessions[0]!.results).toHaveLength(1);
     expect(code.target.partCodeId).toBe(60);
   });
 });
+
+// every request carries the Admin token minted in beforeEach
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

@@ -7,6 +7,7 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import * as schema from "../../../src/db/schema";
@@ -18,7 +19,7 @@ import { SEGMENT_MAX_BYTES, type SegmentStorage } from "../../../src/features/re
 const PROJECT_ID = 9400;
 
 const seedDomain = async () => {
-  await testDb.insert(schema.project).values({ displayNumber: PROJECT_ID, projectId: PROJECT_ID, title: "P" });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: PROJECT_ID, projectId: PROJECT_ID, title: "P" });
   await testDb
     .insert(schema.session)
     .values({ displayNumber: 1, sessionId: PROJECT_ID, projectId: PROJECT_ID, name: "S" });

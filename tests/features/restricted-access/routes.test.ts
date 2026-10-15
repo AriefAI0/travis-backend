@@ -1,9 +1,11 @@
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { appFor } from "../../helpers/app";
+import { createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
@@ -12,20 +14,24 @@ import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, restrictedAccessRoutes);
 
+// minted per test in beforeEach
+let operatorToken = "";
+let adminToken = "";
+
 const post = (body: unknown) =>
-  app.request("/api/v1/restricted-access", {
+  authRequest("/api/v1/restricted-access", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
 
-const list = () => app.request("/api/v1/projects/1/restricted-access");
+const list = () => authRequest("/api/v1/projects/1/restricted-access");
 
 const remove = (id: number) =>
-  app.request(`/api/v1/restricted-access/${id}`, { method: "DELETE" });
+  asAdminRequest(`/api/v1/restricted-access/${id}`, { method: "DELETE" });
 
 const patch = (id: number, body: unknown) =>
-  app.request(`/api/v1/restricted-access/${id}`, {
+  authRequest(`/api/v1/restricted-access/${id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -33,7 +39,7 @@ const patch = (id: number, body: unknown) =>
 
 // one chain: project > group > task code > description > type > part code
 const seedTree = async () => {
-  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.taskGroup).values({ taskGroupId: 1, projectId: 1, code: "100" });
   await testDb.insert(schema.taskCode).values({ taskCodeId: 10, taskGroupId: 1, code: "101" });
   await testDb.insert(schema.description).values({ descriptionId: 100, taskCodeId: 10, label: "I" });
@@ -45,6 +51,10 @@ beforeAll(ensureTestDatabase);
 beforeEach(async () => {
   await truncateTestDatabase();
   await seedTree();
+  const operator = await createTestUser({ preset: "Operator" });
+  operatorToken = operator.token;
+  const admin = await createTestUser({ preset: "Admin" });
+  adminToken = admin.token;
 });
 afterAll(closeTestDatabase);
 
@@ -146,3 +156,23 @@ describe("restricted access", () => {
     expect((await patch(9999, { remarks: "nope" })).status).toBe(404);
   });
 });
+
+// mark writes and reads: an Operator holds read/create/modify Result
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${operatorToken}`,
+    },
+  });
+
+// unmark: `remove Result` is an Admin right
+const asAdminRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

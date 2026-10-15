@@ -6,8 +6,14 @@
 // flow: insert row (generating) > render > store docx > flip ready, else error
 
 import type { DbOrTx } from "../../db/client";
+import type { Caller } from "../../lib/caller";
 import { log } from "../../lib/logger";
-import { createReport, saveReportDocx, setReportStatus } from "../../db/services/report.service";
+import {
+  createReport,
+  saveReportDocx,
+  setReportStatus,
+  systemCaller,
+} from "../../db/services/report.service";
 import type { ReportRow } from "../../db/repositories/report.repository";
 import type { ReportScope } from "../../types/api";
 import { loadReportInputs, renderReport } from "./report-generator";
@@ -16,12 +22,19 @@ import { loadReportInputs, renderReport } from "./report-generator";
 // something to see and delete.
 const renderInto = async (row: ReportRow, database?: DbOrTx) => {
   try {
-    const { template, data } = await loadReportInputs(row.projectId, row.scope, database);
+    // the row carries the org, so the render stays inside its tenant
+    const { template, data } = await loadReportInputs(
+      row.projectId,
+      row.scope,
+      row.organizationId,
+      database,
+    );
     const docx = await renderReport(template, data);
 
     // the row is still `generating`, so the version it was created with is
-    // the one this write claims
-    await saveReportDocx(row.reportId, docx, row.version, database);
+    // the one this write claims. A system caller: the render is not a human
+    // action, so it writes no audit row of its own.
+    await saveReportDocx(row.reportId, docx, row.version, systemCaller(row.organizationId), database);
     await setReportStatus(row.reportId, "ready", null, database);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
@@ -37,9 +50,10 @@ export const queueReportGeneration = async (
   projectId: number,
   name: string,
   scope: ReportScope = "all",
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<ReportRow> => {
-  const row = await createReport(projectId, name, scope, database);
+  const row = await createReport(projectId, name, scope, caller, database);
 
   // never awaited: renderInto swallows its own errors, so this cannot reject
   void renderInto(row, database);

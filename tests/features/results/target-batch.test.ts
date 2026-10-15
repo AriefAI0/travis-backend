@@ -1,9 +1,11 @@
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { appFor } from "../../helpers/app";
+import { createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
@@ -12,8 +14,11 @@ import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, resultRoutes);
 
+// minted per test in beforeEach; every request below carries it
+let adminToken = "";
+
 const post = (body: unknown) =>
-  app.request("/api/v1/targets/results", {
+  authRequest("/api/v1/targets/results", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -21,7 +26,7 @@ const post = (body: unknown) =>
 
 // full chain: project > session > group > code > description > type > part code
 const seedTargets = async () => {
-  await testDb.insert(schema.project).values({ displayNumber: 1, projectId: 1, title: "Alpha" });
+  await testDb.insert(schema.project).values({ organizationId: testOrgId, displayNumber: 1, projectId: 1, title: "Alpha" });
   await testDb.insert(schema.session).values({
     displayNumber: 1,
     sessionId: 101,
@@ -76,15 +81,19 @@ const seedTargets = async () => {
 describe("target results batch route", () => {
   beforeAll(ensureTestDatabase);
   afterAll(closeTestDatabase);
-  beforeEach(truncateTestDatabase);
+  // every route is guarded now; an Admin holds the rights these suites exercise
+  beforeEach(async () => {
+    await truncateTestDatabase();
+    adminToken = (await createTestUser({ preset: "Admin" })).token;
+  });
 
   it("matches the per-target routes for every requested target", async () => {
     await seedTargets();
 
     const byDescription = await json(
-      await app.request("/api/v1/descriptions/100/results"),
+      await authRequest("/api/v1/descriptions/100/results"),
     );
-    const byPartCode = await json(await app.request("/api/v1/part-codes/300/results"));
+    const byPartCode = await json(await authRequest("/api/v1/part-codes/300/results"));
 
     const batch = await json(await post({ descriptionIds: [100], partCodeIds: [300] }));
 
@@ -137,3 +146,13 @@ describe("target results batch route", () => {
     expect(batch.data).toEqual({});
   });
 });
+
+// every request carries the Admin token minted in beforeEach
+const authRequest = (path: string, init: RequestInit = {}) =>
+  app.request(path, {
+    ...init,
+    headers: {
+      ...((init.headers ?? {}) as Record<string, string>),
+      authorization: `Bearer ${adminToken}`,
+    },
+  });

@@ -4,6 +4,7 @@ import {
   closeTestDatabase,
   ensureTestDatabase,
   testDb,
+  testOrgId,
   truncateTestDatabase,
 } from "../helpers/db";
 import { gatherReportData } from "../../src/db/services/report-data.service";
@@ -16,6 +17,7 @@ afterAll(closeTestDatabase);
 // full chain: project > session > group > code > description > type > part code
 const seed = async () => {
   await testDb.insert(schema.project).values({
+    organizationId: testOrgId,
     projectId: 1,
     displayNumber: 1,
     title: "Alpha",
@@ -138,7 +140,7 @@ describe("gatherReportData", () => {
   it("fills project vars and groups items in task-tree order", async () => {
     await seed();
 
-    const data = await gatherReportData(1, "all", testDb);
+    const data = await gatherReportData(1, "all", testOrgId, testDb);
 
     expect(data.project_title).toBe("Alpha");
     expect(data.project_id).toBe(1);
@@ -168,7 +170,7 @@ describe("gatherReportData", () => {
   it("carries the typed GVI columns and sets only the matching flag", async () => {
     await seed();
 
-    const description = (await gatherReportData(1, "all", testDb)).items[0]!;
+    const description = (await gatherReportData(1, "all", testOrgId, testDb)).items[0]!;
     const gvi = description.sections[0]!;
 
     expect(gvi.isGVI).toBe(true);
@@ -188,7 +190,7 @@ describe("gatherReportData", () => {
   it("repeats the CVI header down one row per clock position", async () => {
     await seed();
 
-    const description = (await gatherReportData(1, "all", testDb)).items[0]!;
+    const description = (await gatherReportData(1, "all", testOrgId, testDb)).items[0]!;
     const cvi = description.sections[1]!;
 
     expect(cvi.isCVI).toBe(true);
@@ -211,7 +213,7 @@ describe("gatherReportData", () => {
   it("drops restricted-access marks, with no section and no target key", async () => {
     await seed();
 
-    const data = await gatherReportData(1, "all", testDb);
+    const data = await gatherReportData(1, "all", testOrgId, testDb);
     const types = data.items.flatMap((item) =>
       item.sections.map((section) => section.inspection_type),
     );
@@ -228,7 +230,7 @@ describe("gatherReportData", () => {
   it("offers the evidence image alone, never a clip still", async () => {
     await seed();
 
-    const description = (await gatherReportData(1, "all", testDb)).items[0]!;
+    const description = (await gatherReportData(1, "all", testOrgId, testDb)).items[0]!;
 
     expect(description.sections[0]!.image_keys).toEqual([
       "1-alpha/session-1/evidence-img/9001.png",
@@ -242,7 +244,7 @@ describe("gatherReportData", () => {
     await seed();
     await testDb.update(schema.resultImage).set({ hasAnnotated: true });
 
-    const description = (await gatherReportData(1, "all", testDb)).items[0]!;
+    const description = (await gatherReportData(1, "all", testOrgId, testDb)).items[0]!;
 
     expect(description.sections[0]!.image_keys[0]).toBe(
       "1-alpha/session-1/evidence-img/9001-annotated.png",
@@ -254,6 +256,7 @@ describe("gatherReportData", () => {
     // a description under another project is reachable from this result but
     // absent from this project's tree walk
     await testDb.insert(schema.project).values({
+      organizationId: testOrgId,
       projectId: 2,
       displayNumber: 2,
       title: "Other",
@@ -275,7 +278,7 @@ describe("gatherReportData", () => {
     });
     await testDb.insert(schema.resultGvi).values({ resultId: 5005, condition: "ok" });
 
-    const data = await gatherReportData(1, "all", testDb);
+    const data = await gatherReportData(1, "all", testOrgId, testDb);
 
     // tree order first, then the orphan
     expect(data.items).toHaveLength(3);
@@ -287,7 +290,7 @@ describe("gatherReportData", () => {
 
   it("names each section's target key, so a refresh can find its regions", async () => {
     await seed();
-    const data = await gatherReportData(1, "all", testDb);
+    const data = await gatherReportData(1, "all", testOrgId, testDb);
     const keys = data.items.flatMap((item) =>
       item.sections.map((section) => `${section.target_key}:${section.inspection_type}`),
     );
@@ -311,7 +314,7 @@ describe("gatherReportData", () => {
       .set({ resultClass: "anomaly" })
       .where(eq(schema.result.resultId, 5003));
 
-    const anomaly = await gatherReportData(1, "anomaly", testDb);
+    const anomaly = await gatherReportData(1, "anomaly", testOrgId, testDb);
     expect(anomaly.items).toHaveLength(1);
     expect(anomaly.items[0]!.description).toBe("Leg A");
     expect(anomaly.items[0]!.sections.map((section) => section.inspection_type)).toEqual([
@@ -319,24 +322,24 @@ describe("gatherReportData", () => {
     ]);
 
     // the full scope still carries everything the class filter would drop
-    const all = await gatherReportData(1, "all", testDb);
+    const all = await gatherReportData(1, "all", testOrgId, testDb);
     expect(all.items).toHaveLength(2);
   });
 
   it("throws for an unknown project", async () => {
-    await expect(gatherReportData(999, "all", testDb)).rejects.toThrow();
+    await expect(gatherReportData(999, "all", testOrgId, testDb)).rejects.toThrow();
   });
 
   it("throws for a non-positive id", async () => {
-    await expect(gatherReportData(0, "all", testDb)).rejects.toThrow();
+    await expect(gatherReportData(0, "all", testOrgId, testDb)).rejects.toThrow();
   });
 
   it("returns no items for a project with an empty tree", async () => {
     await testDb
       .insert(schema.project)
-      .values({ projectId: 2, displayNumber: 2, title: "Empty" });
+      .values({ organizationId: testOrgId, projectId: 2, displayNumber: 2, title: "Empty" });
 
-    const data = await gatherReportData(2, "all", testDb);
+    const data = await gatherReportData(2, "all", testOrgId, testDb);
 
     expect(data.items).toEqual([]);
     expect(data.document_id).toBe("");

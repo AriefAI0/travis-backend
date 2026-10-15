@@ -8,6 +8,7 @@
 // flow: guard > stored docx > render > splice > save at the loaded version
 
 import type { DbOrTx } from "../../db/client";
+import type { Caller } from "../../lib/caller";
 import {
   getReport,
   loadReportDocx,
@@ -25,24 +26,30 @@ export type RefreshReport = RegionSplice & { reportId: string; version: number }
 // belongs behind the job tracker, with the regions read back from the row.
 export const refreshReport = async (
   reportId: string,
+  caller: Caller,
   database?: DbOrTx,
 ): Promise<RefreshReport> => {
-  const row = await getReport(reportId, database);
+  const row = await getReport(reportId, caller, database);
   if (row.status === "generating") {
     throw new AppError(409, "report_not_ready", "The report is still generating");
   }
 
-  const stored = await loadReportDocx(reportId, database);
+  const stored = await loadReportDocx(reportId, caller, database);
 
   await setReportStatus(reportId, "generating", null, database);
   try {
-    const { template, data } = await loadReportInputs(row.projectId, row.scope, database);
+    const { template, data } = await loadReportInputs(
+      row.projectId,
+      row.scope,
+      row.organizationId,
+      database,
+    );
     const fresh = await renderReport(template, data);
     const { docx, result } = spliceRegions(stored, fresh);
 
     // The claim rides the version guard the editor's save uses, so a save that
     // lands mid-refresh wins and this reports the conflict instead of undoing it.
-    const written = await saveReportDocx(reportId, docx, row.version, database);
+    const written = await saveReportDocx(reportId, docx, row.version, caller, database);
     await setReportStatus(reportId, "ready", null, database);
 
     return { reportId, version: written.version, ...result };

@@ -2,7 +2,7 @@
 // Opt-in check, like the other drills here. Reads and writes the test database.
 // Run: ~/.bun/bin/bun run tests/checks/import-scale.ts
 import { appFor } from "../helpers/app";
-import { ensureTestDatabase, testDb, truncateTestDatabase } from "../helpers/db";
+import { ensureTestDatabase, testDb, testOrgId, truncateTestDatabase } from "../helpers/db";
 import { importRoutes } from "../../src/features/import/routes";
 import * as schema from "../../src/db/schema";
 
@@ -25,7 +25,7 @@ const time = async (count: number) => {
   await truncateTestDatabase();
   await testDb
     .insert(schema.project)
-    .values({ displayNumber: 1, projectId: 1, title: "Scale" });
+    .values({ organizationId: testOrgId, displayNumber: 1, projectId: 1, title: "Scale" });
 
   const rows = buildRows(count);
   const body = JSON.stringify({ projectId: 1, mode: "append", dryRun: false, rows });

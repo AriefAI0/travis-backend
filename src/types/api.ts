@@ -3,6 +3,8 @@
 // Below the mirrors: zod request schemas (server-only vocabulary) that gate
 // the SAME shapes at the REST boundary.
 import { z } from "zod";
+import { ACTIONS, isGrantable, SUBJECTS } from "../lib/auth/permissions";
+import { MIN_PASSWORD_LENGTH } from "../lib/auth/auth";
 
 /* =========================================================
    structure (app: src/shared/structure.ts)
@@ -1105,6 +1107,17 @@ export const activeClipsQuerySchema = z.object({
   sessionId: queryId.optional(),
 });
 
+// The archive page: one resource at a time, or every readable one. `result` is
+// absent on purpose — a result is removed directly, never through the archive.
+export const archiveQuerySchema = z.object({
+  resource: z
+    .enum(["project", "session", "taskGroup", "taskCode", "description", "type", "partCode"])
+    .optional(),
+  search: z.string().trim().max(200).default(""),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 /* ==========================================================
    inspections — typed detail payload union + lifecycle requests
    Payload shapes sourced from the app's
@@ -1510,4 +1523,73 @@ export const reportCreateSchema = z.object({
 // Remarks-only edit on an RA mark. An empty string clears them, like a null.
 export const updateRestrictedAccessSchema = z.object({
   remarks: z.string().nullable().optional(),
+});
+
+/* =========================================================
+   accounts — the admin surface (travis-viewer-spec.md)
+========================================================= */
+
+// The password floor is enforced in the service, so the seed and the route
+// agree on it. This only keeps nonsense out of the hasher.
+export const createUserSchema = z.object({
+  email: z.string().trim().email().max(200),
+  name: z.string().trim().min(1).max(120),
+  preset: z.enum(["Admin", "Operator", "Viewer"]),
+});
+
+export const updateUserSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  disabled: z.boolean().optional(),
+});
+
+// Self-service: a person edits their own name and password. The current
+// password is always required, and an empty body is refused.
+export const updateOwnAccountSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  currentPassword: z.string().min(1),
+  // The spec's policy for a password a person chooses: 12 characters, letters
+  // and digits. A minted one is strong by construction and skips this.
+  newPassword: z
+    .string()
+    .min(MIN_PASSWORD_LENGTH)
+    .regex(/[A-Za-z]/, "Password must contain a letter")
+    .regex(/[0-9]/, "Password must contain a digit")
+    .optional(),
+});
+
+// One row per tick box. A pair the grid cannot grant is refused here rather
+// than stored and ignored, and a repeated pair would only trip the unique
+// index into a confusing 409.
+export const replacePermissionsSchema = z
+  .object({
+    permissions: z
+      .array(
+        z.object({
+          action: z.enum(ACTIONS),
+          subject: z.enum(SUBJECTS),
+          conditions: z.record(z.string(), z.unknown()).nullish(),
+        }),
+      )
+      .max(200),
+  })
+  .refine(
+    (body) => body.permissions.every((tick) => isGrantable(tick.action, tick.subject)),
+    { message: "one or more permissions cannot be granted" },
+  )
+  .refine(
+    (body) =>
+      new Set(body.permissions.map((tick) => `${tick.action}:${tick.subject}`)).size ===
+      body.permissions.length,
+    { message: "the same permission was sent twice" },
+  );
+
+// The audit read is filtered and paged. Every filter is optional; the org is
+// not, and comes from the token rather than the query.
+export const auditQuerySchema = z.object({
+  userId: z.string().min(1).max(200).optional(),
+  resourceType: z.string().min(1).max(60).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
 });
