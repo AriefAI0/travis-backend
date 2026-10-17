@@ -83,6 +83,22 @@ const SCENARIOS = [
       gviCP: [{ value: 120, remark: "" }],
       condition: "ok",
     },
+    // the current form omits KP range and UT, and adds an MGI findings list
+    omitted: {
+      kind: "gvi",
+      version: 1,
+      depthEl: 12.5,
+      gviCP: [{ value: 120, remark: "low" }],
+      mgi: [
+        {
+          depth: 3,
+          softCoveragePercent: 20,
+          hardCoveragePercent: 10,
+          remarks: "barnacles",
+        },
+      ],
+      condition: "ok",
+    },
     // condition is ok|not_ok
     invalid: {
       kind: "gvi",
@@ -340,6 +356,22 @@ describe("new inspection types", () => {
 
       const stopped = await stopInspection(resultId, scenario.invalid);
       expect(stopped.status).toBe(400);
+    });
+  }
+
+  // both shapes land: fields the current form omits, and fields it still sends
+  for (const scenario of SCENARIOS) {
+    if (!("omitted" in scenario)) continue;
+
+    it(`accepts a ${scenario.type} payload with the optional keys omitted`, async () => {
+      await seedWorld();
+
+      const started = await startInspection(scenario.type);
+      expect(started.status).toBe(201);
+      const resultId = (await json(started)).data.resultId as number;
+
+      const stopped = await stopInspection(resultId, scenario.omitted);
+      expect(stopped.status).toBe(200);
     });
   }
 

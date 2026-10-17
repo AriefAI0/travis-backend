@@ -1183,9 +1183,10 @@ export const scourPayloadSchema = z.object({
 export const gviPayloadSchema = z.object({
   kind: z.literal("gvi"),
   version: z.literal(1),
-  kpRange: z.string().nullable(),
+  // optional: the current GVI form no longer collects KP range or UT
+  kpRange: z.string().nullish(),
   depthEl: z.number().nullable(),
-  gviUT: z.number().nullable(),
+  gviUT: z.number().nullish(),
   gviCP: z.array(
     z.object({
       value: z.number().nullable(),
