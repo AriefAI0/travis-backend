@@ -1,0 +1,1 @@
+ALTER TYPE "public"."pi_damage_type" ADD VALUE 'dent';

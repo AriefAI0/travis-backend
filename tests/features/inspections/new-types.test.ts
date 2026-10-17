@@ -83,6 +83,42 @@ const CI_WITHOUT_PIPES = {
   gratingAnomalyRecommendation: "",
 } as const;
 
+// one healthy PIPELINE finding; the dent and invalid cases vary it
+const PIPELINE_FINDING = {
+  category: "damage",
+  damageDimensions: "10x10",
+  damageType: "crack",
+  debrisType: null,
+  debrisDescription: "",
+  riserBendCondition: null,
+  stabilizationType: "",
+  stabilizationCondition: null,
+  burialStart: "",
+  burialEnd: "",
+  freespansStart: "",
+  freespansEnd: "",
+  freespansLength: "",
+  freespansHeight: "",
+  leakType: "",
+  leakDescription: "",
+  crossingType: null,
+  crossingContact: null,
+  crossingGapDistance: "",
+  crossingDamageMovement: "",
+  featuresType: "",
+  featuresCondition: null,
+  remarks: "",
+} as const;
+
+const PIPELINE_VALID = {
+  kind: "pipeline",
+  version: 1,
+  location: "KP-1",
+  depthEl: 2.5,
+  orientation: "12_oclock",
+  findings: [PIPELINE_FINDING],
+} as const;
+
 const SCENARIOS = [
   {
     // the shape buildGviPayload emits: CP is a findings list, KP and UT scalars
@@ -266,40 +302,7 @@ const SCENARIOS = [
   {
     type: "PIPELINE",
     readPath: "pipeline",
-    valid: {
-      kind: "pipeline",
-      version: 1,
-      location: "KP-1",
-      depthEl: 2.5,
-      orientation: "12_oclock",
-      findings: [
-        {
-          category: "damage",
-          damageDimensions: "10x10",
-          damageType: "crack",
-          debrisType: null,
-          debrisDescription: "",
-          riserBendCondition: null,
-          stabilizationType: "",
-          stabilizationCondition: null,
-          burialStart: "",
-          burialEnd: "",
-          freespansStart: "",
-          freespansEnd: "",
-          freespansLength: "",
-          freespansHeight: "",
-          leakType: "",
-          leakDescription: "",
-          crossingType: null,
-          crossingContact: null,
-          crossingGapDistance: "",
-          crossingDamageMovement: "",
-          featuresType: "",
-          featuresCondition: null,
-          remarks: "",
-        },
-      ],
-    },
+    valid: PIPELINE_VALID,
     // category is a fixed list
     invalid: {
       kind: "pipeline",
@@ -309,29 +312,10 @@ const SCENARIOS = [
       orientation: null,
       findings: [
         {
+          ...PIPELINE_FINDING,
           category: "not_a_category",
           damageDimensions: "",
           damageType: null,
-          debrisType: null,
-          debrisDescription: "",
-          riserBendCondition: null,
-          stabilizationType: "",
-          stabilizationCondition: null,
-          burialStart: "",
-          burialEnd: "",
-          freespansStart: "",
-          freespansEnd: "",
-          freespansLength: "",
-          freespansHeight: "",
-          leakType: "",
-          leakDescription: "",
-          crossingType: null,
-          crossingContact: null,
-          crossingGapDistance: "",
-          crossingDamageMovement: "",
-          featuresType: "",
-          featuresCondition: null,
-          remarks: "",
         },
       ],
     },
@@ -419,6 +403,20 @@ describe("new inspection types", () => {
 
     const rows = await testDb.select().from(schema.resultCiGviAssociatedPipe);
     expect(rows.map((row) => row.position)).toEqual(["P-1"]);
+  });
+
+  it("accepts a PIPELINE finding with the dent damage type", async () => {
+    await seedWorld();
+
+    const started = await startInspection("PIPELINE");
+    expect(started.status).toBe(201);
+    const resultId = (await json(started)).data.resultId as number;
+
+    const stopped = await stopInspection(resultId, {
+      ...PIPELINE_VALID,
+      findings: [{ ...PIPELINE_FINDING, damageType: "dent" }],
+    });
+    expect(stopped.status).toBe(200);
   });
 
   it("refuses a payload whose kind does not match the result type", async () => {

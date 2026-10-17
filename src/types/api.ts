@@ -427,6 +427,7 @@ export type PiFindingDetail = {
     | "groove"
     | "bitumen_exposed"
     | "reinforcement_bar_exposed"
+    | "dent"
     | null;
 
   debrisType: "hard" | "soft" | null;
@@ -1404,6 +1405,7 @@ export const pipelinePayloadSchema = z.object({
         "groove",
         "bitumen_exposed",
         "reinforcement_bar_exposed",
+        "dent",
       ]).nullable(),
 
       debrisType: z.enum(["hard", "soft"]).nullable(),

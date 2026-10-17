@@ -30,6 +30,7 @@ export type CreateResultPipelineFindingInput = {
     | "groove"
     | "bitumen_exposed"
     | "reinforcement_bar_exposed"
+    | "dent"
     | null;
 
   debrisType: "hard" | "soft" | null;

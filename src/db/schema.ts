@@ -82,6 +82,7 @@ export const piDamageType = pgEnum("pi_damage_type", [
   "groove",
   "bitumen_exposed",
   "reinforcement_bar_exposed",
+  "dent",
 ]);
 
 export const piDebrisType = pgEnum("pi_debris_type", [
