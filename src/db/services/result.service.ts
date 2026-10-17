@@ -742,7 +742,8 @@ const writeCiDetail = async (
         gratingBlockage: payload.gratingBlockage,
         gratingAnomalyRecommendation:
           payload.gratingAnomalyRecommendation,
-        associatedPipesRecommendation: payload.associatedPipesRecommendation,
+        associatedPipesRecommendation:
+          payload.associatedPipesRecommendation ?? "",
       },
       tx,
     );
@@ -760,7 +761,7 @@ const writeCiDetail = async (
     }
 
     // 3. Save the associated-pipe positions; insertion order is the form order.
-    for (const pipe of payload.gviAssociatedPipes) {
+    for (const pipe of payload.gviAssociatedPipes ?? []) {
       await createResultCiGviAssociatedPipe(
         { resultId, position: pipe.position },
         tx,

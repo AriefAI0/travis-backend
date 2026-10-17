@@ -69,6 +69,20 @@ const stopInspection = (resultId: number, payload: unknown) =>
 
 /* one scenario per type: a payload the schema accepts, a payload it must
    refuse, and the read-only path that serves the detail back */
+// the current CAISSON form sends no associated-pipe keys
+const CI_WITHOUT_PIPES = {
+  kind: "ci",
+  version: 1,
+  cpFindings: [{ cpMv: -900, remarks: "low" }],
+  visualDamage: false,
+  visualDamageRecommendation: "",
+  debrisPresent: null,
+  debrisRecommendation: "",
+  gratingPresent: null,
+  gratingBlockage: null,
+  gratingAnomalyRecommendation: "",
+} as const;
+
 const SCENARIOS = [
   {
     // the shape buildGviPayload emits: CP is a findings list, KP and UT scalars
@@ -216,6 +230,8 @@ const SCENARIOS = [
       gviAssociatedPipes: [{ position: "P-1" }],
       associatedPipesRecommendation: "inspect both",
     },
+    // the current form has no associated-pipe section at all
+    omitted: CI_WITHOUT_PIPES,
     // gratingBlockage is a band enum
     invalid: {
       kind: "ci",
@@ -374,6 +390,36 @@ describe("new inspection types", () => {
       expect(stopped.status).toBe(200);
     });
   }
+
+  it("writes associated-pipe rows only when the CAISSON payload carries them", async () => {
+    await seedWorld();
+
+    const started = await startInspection("CAISSON");
+    expect(started.status).toBe(201);
+    const resultId = (await json(started)).data.resultId as number;
+
+    const stopped = await stopInspection(resultId, CI_WITHOUT_PIPES);
+    expect(stopped.status).toBe(200);
+    expect(await testDb.select().from(schema.resultCiGviAssociatedPipe)).toEqual([]);
+
+    // and the older shape still writes its rows
+    await truncateTestDatabase();
+    resultToken = (await createTestUser({ preset: "Operator" })).token;
+    await seedWorld();
+
+    const restarted = await startInspection("CAISSON");
+    const secondId = (await json(restarted)).data.resultId as number;
+
+    const withPipes = await stopInspection(secondId, {
+      ...CI_WITHOUT_PIPES,
+      gviAssociatedPipes: [{ position: "P-1" }],
+      associatedPipesRecommendation: "inspect both",
+    });
+    expect(withPipes.status).toBe(200);
+
+    const rows = await testDb.select().from(schema.resultCiGviAssociatedPipe);
+    expect(rows.map((row) => row.position)).toEqual(["P-1"]);
+  });
 
   it("refuses a payload whose kind does not match the result type", async () => {
     await seedWorld();

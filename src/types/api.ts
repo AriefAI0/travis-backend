@@ -1341,9 +1341,9 @@ export const ciPayloadSchema = z.object({
 
   gratingAnomalyRecommendation: z.string(),
 
-  // the tool's associated-pipe list and its recommendation
-  gviAssociatedPipes: z.array(z.object({ position: z.string().min(1) })),
-  associatedPipesRecommendation: z.string(),
+  // optional: the current CAISSON form has no associated-pipe section
+  gviAssociatedPipes: z.array(z.object({ position: z.string().min(1) })).nullish(),
+  associatedPipesRecommendation: z.string().nullish(),
 });
 
 export const seabedPayloadSchema = z.object({
