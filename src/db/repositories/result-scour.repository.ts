@@ -4,11 +4,15 @@ import { resultScour } from "../schema";
 
 export type CreateResultScourInput = {
   resultId: number;
-  exposedPile: "exposed" | "not_exposed";
-  exposedPileHeight: number | null;
-  heightLeg1: number | null;
-  heightMidpoint: number | null;
-  heightLeg2: number | null;
+  locationLeg1: string;
+  locationLeg2: string;
+  dimA: number | null;
+  dimB: number | null;
+  dimC: number | null;
+  expLeg1: "yes" | "no";
+  expLeg2: "yes" | "no";
+  heightExpLeg1: number | null;
+  heightExpLeg2: number | null;
 };
 
 export const createResultScour = async (

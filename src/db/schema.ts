@@ -15,7 +15,7 @@ export const mgiGrowthType = pgEnum("mgi_growth_type", ["soft", "hard"]);
 
 export const fmdAttempt = pgEnum("fmd_attempt", ["dry", "flooded", "na"]);
 
-export const scourExposedPile = pgEnum("scour_exposed_pile", ["exposed", "not_exposed"]);
+export const scourYesNo = pgEnum("scour_yes_no", ["yes", "no"]);
 
 export const gviCondition = pgEnum("gvi_condition", ["ok", "not_ok"]);
 
@@ -639,11 +639,15 @@ export const resultScour = pgTable(
     resultId: integer("result_id")
       .primaryKey()
       .references(() => result.resultId, { onDelete: "cascade" }),
-    exposedPile: scourExposedPile("exposed_pile").notNull(),
-    exposedPileHeight: doublePrecision("exposed_pile_height"),
-    heightLeg1: doublePrecision("height_leg1"),
-    heightMidpoint: doublePrecision("height_midpoint"),
-    heightLeg2: doublePrecision("height_leg2"),
+    locationLeg1: text("location_leg1").notNull(),
+    locationLeg2: text("location_leg2").notNull(),
+    dimA: doublePrecision("dim_a"),
+    dimB: doublePrecision("dim_b"),
+    dimC: doublePrecision("dim_c"),
+    expLeg1: scourYesNo("exp_leg1").notNull().default("no"),
+    expLeg2: scourYesNo("exp_leg2").notNull().default("no"),
+    heightExpLeg1: doublePrecision("height_exp_leg1"),
+    heightExpLeg2: doublePrecision("height_exp_leg2"),
 
     ...createdAt,
     ...updatedAt,

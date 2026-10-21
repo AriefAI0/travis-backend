@@ -49,9 +49,12 @@ export const formatResultValue = (
     case "FMD":
       return detail.initialAttempt === "dry" ? "Dry" :
       detail.initialAttempt === "flooded" ? "Flooded" : "N/A";
-    case "SCOUR":
-      return detail.exposedPile === "exposed" ? "Exposed" :
-      detail.exposedPile === "not_exposed" ? "Not exposed" : "N/A";
+    case "SCOUR": {
+      const leg1 = detail.expLeg1 === "yes" ? "Exposed" : "Not exposed";
+      const leg2 = detail.expLeg2 === "yes" ? "Exposed" : "Not exposed";
+
+      return `${detail.locationLeg1 ?? "Leg 1"}: ${leg1} | ${detail.locationLeg2 ?? "Leg 2"}: ${leg2}`;
+    }
     case "MGI":
       return detail.noMgObserved ? "No MG" : `${detail.findingCount ?? 0} findings`;
     case "BSI":

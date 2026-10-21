@@ -182,11 +182,15 @@ export type FmdDetail = {
 
 export type ScourDetail = {
   resultId: number;
-  exposedPile: "exposed" | "not_exposed";
-  exposedPileHeight: number | null;
-  heightLeg1: number | null;
-  heightMidpoint: number | null;
-  heightLeg2: number | null;
+  locationLeg1: string;
+  locationLeg2: string;
+  dimA: number | null;
+  dimB: number | null;
+  dimC: number | null;
+  expLeg1: "yes" | "no";
+  expLeg2: "yes" | "no";
+  heightExpLeg1: number | null;
+  heightExpLeg2: number | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -642,7 +646,11 @@ export type ResultSummaryDetail = {
   kpRange?: string | null;
   gviCp?: number | null;
   gviUt?: number | null;
-  exposedPile?: "exposed" | "not_exposed";
+  // SCOUR — one typed location and one exposed answer per leg
+  locationLeg1?: string | null;
+  locationLeg2?: string | null;
+  expLeg1?: "yes" | "no" | null;
+  expLeg2?: "yes" | "no" | null;
   voltageMv?: number | null;
   anodeType?: string | null;
   depletion?: string | null;
@@ -1172,12 +1180,16 @@ export const fmdPayloadSchema = z.object({
 
 export const scourPayloadSchema = z.object({
   kind: z.literal("scour"),
-  version: z.literal(1),
-  exposedPile: z.enum(["exposed", "not_exposed"]),
-  exposedPileHeight: z.number().nullable(),
-  heightLeg1: z.number().nullable(),
-  heightMidpoint: z.number().nullable(),
-  heightLeg2: z.number().nullable(),
+  version: z.literal(2),
+  locationLeg1: z.string().min(1),
+  locationLeg2: z.string().min(1),
+  dimA: z.number().nullable(),
+  dimB: z.number().nullable(),
+  dimC: z.number().nullable(),
+  expLeg1: z.enum(["yes", "no"]),
+  expLeg2: z.enum(["yes", "no"]),
+  heightExpLeg1: z.number().nullable(),
+  heightExpLeg2: z.number().nullable(),
 });
 
 

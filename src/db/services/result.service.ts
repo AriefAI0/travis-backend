@@ -434,11 +434,15 @@ const writeScourDetail = async (
   await createResultScour(
     {
       resultId,
-      exposedPile: payload.exposedPile,
-      exposedPileHeight: payload.exposedPileHeight,
-      heightLeg1: payload.heightLeg1,
-      heightMidpoint: payload.heightMidpoint,
-      heightLeg2: payload.heightLeg2,
+      locationLeg1: payload.locationLeg1,
+      locationLeg2: payload.locationLeg2,
+      dimA: payload.dimA,
+      dimB: payload.dimB,
+      dimC: payload.dimC,
+      expLeg1: payload.expLeg1,
+      expLeg2: payload.expLeg2,
+      heightExpLeg1: payload.heightExpLeg1,
+      heightExpLeg2: payload.heightExpLeg2,
     },
     database,
   );
@@ -1058,9 +1062,14 @@ export const listProjectSummary = async (
       }
       case "SCOUR": {
         const detail = scour.get(resultRecord.resultId);
-        return detail ? { 
-          exposedPile: detail.exposedPile,
-         } : null;
+        return detail
+          ? {
+              locationLeg1: detail.locationLeg1,
+              locationLeg2: detail.locationLeg2,
+              expLeg1: detail.expLeg1,
+              expLeg2: detail.expLeg2,
+            }
+          : null;
       }
       case "MGI": {
         const detail = mgi.get(resultRecord.resultId);

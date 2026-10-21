@@ -128,7 +128,6 @@ const CONDITION_LABEL: Record<string, string> = {
   not_ok: "Visual Damage",
 };
 const ATTEMPT_LABEL: Record<string, string> = { dry: "Dry", flooded: "Flooded", na: "N/A" };
-const PILE_LABEL: Record<string, string> = { exposed: "Exposed", not_exposed: "Not Exposed" };
 const GAP_LABEL: Record<string, string> = { gap: "Gap", no_gap: "No Gap" };
 const ALIGN_LABEL: Record<string, string> = { aligned: "Aligned", misaligned: "Misaligned" };
 const POSITION_LABEL: Record<string, string> = { top: "Top", mid: "Mid", bottom: "Bottom" };
@@ -218,11 +217,15 @@ const rowsForResult = async (row: SummaryRow, database?: DbOrTx): Promise<Report
       if (!detail) return [];
       return [
         {
-          exposed_pile: label(PILE_LABEL, detail.exposedPile),
-          exposed_pile_height: text(detail.exposedPileHeight),
-          height_leg1: text(detail.heightLeg1),
-          height_midpoint: text(detail.heightMidpoint),
-          height_leg2: text(detail.heightLeg2),
+          location_leg1: text(detail.locationLeg1),
+          dim_a: text(detail.dimA),
+          dim_b: text(detail.dimB),
+          dim_c: text(detail.dimC),
+          exp_leg1: label(YES_NO_LABEL, detail.expLeg1),
+          height_exp_leg1: text(detail.heightExpLeg1),
+          location_leg2: text(detail.locationLeg2),
+          exp_leg2: label(YES_NO_LABEL, detail.expLeg2),
+          height_exp_leg2: text(detail.heightExpLeg2),
           remarks,
           recorded,
         },
