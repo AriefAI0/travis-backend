@@ -107,6 +107,9 @@ const PIPELINE_FINDING = {
   crossingDamageMovement: "",
   featuresType: "",
   featuresCondition: null,
+  anodeCpValue: "",
+  anodeDepletion: "",
+  anodeKp: "",
   remarks: "",
 } as const;
 

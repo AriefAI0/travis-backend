@@ -422,7 +422,8 @@ export type PiFindingDetail = {
     | "freespans"
     | "leak_observation"
     | "Crossings"
-    | "features";
+    | "features"
+    | "anode";
 
   damageDimensions: string;
   damageType:
@@ -464,6 +465,10 @@ export type PiFindingDetail = {
 
   featuresType: string;
   featuresCondition: "good" | "bad" | "damage" | null;
+
+  anodeCpValue: string;
+  anodeDepletion: string;
+  anodeKp: string;
 
   remarks: string;
 
@@ -630,6 +635,9 @@ export type PipelineSummaryFinding = {
   crossingDamageMovement: string;
   featuresType: string;
   featuresCondition: string | null;
+  anodeCpValue: string;
+  anodeDepletion: string;
+  anodeKp: string;
   remarks: string;
 };
 
@@ -1408,6 +1416,7 @@ export const pipelinePayloadSchema = z.object({
         "leak_observation",
         "Crossings",
         "features",
+        "anode",
       ]),
 
       damageDimensions: z.string(),
@@ -1460,6 +1469,10 @@ export const pipelinePayloadSchema = z.object({
         "bad",
         "damage",
       ]).nullable(),
+
+      anodeCpValue: z.string(),
+      anodeDepletion: z.string(),
+      anodeKp: z.string(),
 
       remarks: z.string(),
     }),

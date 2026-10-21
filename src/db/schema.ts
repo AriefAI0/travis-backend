@@ -74,6 +74,7 @@ export const piFindingCategory = pgEnum("pi_finding_category", [
   "leak_observation",
   "Crossings",
   "features",
+  "anode",
 ]);
 
 export const piDamageType = pgEnum("pi_damage_type", [
@@ -1169,6 +1170,11 @@ export const resultPipelineFinding = pgTable("result_pipeline_finding", {
 
   featuresType: text("features_type").notNull(),
   featuresCondition: piFeaturesCondition("features_condition"),
+
+  // anode: default '' backfills rows created before this category existed
+  anodeCpValue: text("anode_cp_value").notNull().default(""),
+  anodeDepletion: text("anode_depletion").notNull().default(""),
+  anodeKp: text("anode_kp").notNull().default(""),
 
   remarks: text("remarks").notNull(),
 

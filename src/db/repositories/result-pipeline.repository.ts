@@ -21,7 +21,8 @@ export type CreateResultPipelineFindingInput = {
     | "freespans"
     | "leak_observation"
     | "Crossings"
-    | "features";
+    | "features"
+    | "anode";
 
   damageDimensions: string;
   damageType:
@@ -63,6 +64,10 @@ export type CreateResultPipelineFindingInput = {
 
   featuresType: string;
   featuresCondition: "good" | "bad" | "damage" | null;
+
+  anodeCpValue: string;
+  anodeDepletion: string;
+  anodeKp: string;
 
   remarks: string;
 };
