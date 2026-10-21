@@ -408,7 +408,21 @@ describe("generateReport", () => {
       { resultId: 5012, displayNumber: 12, projectId: 1, sessionId: 101, inspectionTypeCode: "CAISSON", descriptionId: 100, layer: 1, masterStartMs: 12 },
       { resultId: 5013, displayNumber: 13, projectId: 1, sessionId: 101, inspectionTypeCode: "SEABED", descriptionId: 100, layer: 1, masterStartMs: 13 },
       { resultId: 5014, displayNumber: 14, projectId: 1, sessionId: 101, inspectionTypeCode: "PIPELINE", descriptionId: 100, layer: 1, masterStartMs: 14 },
+      { resultId: 5015, displayNumber: 15, projectId: 1, sessionId: 101, inspectionTypeCode: "SCOUR", descriptionId: 100, layer: 1, masterStartMs: 15 },
     ]);
+
+    // per-leg scour: both typed locations, dims, one exposed height
+    await testDb.insert(schema.resultScour).values({
+      resultId: 5015,
+      locationLeg1: "Leg 1 - N4",
+      locationLeg2: "Leg 2 - S2",
+      dimA: 1200,
+      dimB: 900,
+      dimC: 450,
+      expLeg1: "yes",
+      expLeg2: "no",
+      heightExpLeg1: 400,
+    });
 
     await testDb.insert(schema.resultCgb).values({
       resultId: 5010,
@@ -487,9 +501,16 @@ describe("generateReport", () => {
 
     const xml = documentXmlIn(await generateReport(1, "all", testOrgId, testDb));
 
-    for (const type of ["CGB", "RISER", "CAISSON", "SEABED", "PIPELINE"]) {
+    for (const type of ["CGB", "RISER", "CAISSON", "SEABED", "PIPELINE", "SCOUR"]) {
       expect(xml).toContain(`${type} Results`);
     }
+
+    // the scour table names each leg by its typed location and carries the dims
+    expect(xml).toContain("Leg 1 - N4");
+    expect(xml).toContain("Leg 2 - S2");
+    expect(xml).toContain("1200");
+    expect(xml).not.toContain("{location_leg1}");
+    expect(xml).not.toContain("{height_exp_leg2}");
 
     // one distinctive value per type, so a block cannot render empty
     expect(xml).toContain("cgb-moved");
