@@ -41,15 +41,30 @@ const seedWorld = async () => {
 // NOTE: inspection routes are not mounted here; rows are inserted directly so
 // this suite stays read-only over its own fixtures
 const insertResult = async (overrides: Partial<typeof schema.result.$inferInsert>) => {
-  await testDb.insert(schema.result).values({
-    projectId: 1,
+  const [row] = await testDb
+    .insert(schema.result)
+    .values({
+      projectId: 1,
+      sessionId: 101,
+      inspectionTypeCode: "GVI",
+      descriptionId: 30,
+      layer: 1,
+      masterStartMs: 0,
+      inspectionFormId: null,
+      displayNumber: 1,
+      ...overrides,
+    })
+    .returning();
+  return row!;
+};
+
+// markers are drawn from clips, so every finishable result needs one
+const insertClip = async (
+  overrides: Partial<typeof schema.videoClip.$inferInsert> & { resultId: number },
+) => {
+  await testDb.insert(schema.videoClip).values({
     sessionId: 101,
-    inspectionTypeCode: "GVI",
-    descriptionId: 30,
-    layer: 1,
-    masterStartMs: 0,
-    inspectionFormId: null,
-    displayNumber: 1,
+    startOffsetMs: 0,
     ...overrides,
   });
 };
@@ -87,11 +102,15 @@ describe("session timeline routes", () => {
     expect(rows[1]!.masterEndMs).toBeNull();
   });
 
-  it("returns only finished markers ordered by master start", async () => {
+  it("returns one marker per finished clip ordered by clip start", async () => {
     await seedWorld();
-    await insertResult({ displayNumber: 1, layer: 1, masterStartMs: 120000, masterEndMs: 240000 });
-    await insertResult({ displayNumber: 2, layer: 2, descriptionId: null, partCodeId: 60, masterStartMs: 0, masterEndMs: 60000 });
-    await insertResult({ displayNumber: 3, layer: 1, masterStartMs: 300000 });
+    const slow = await insertResult({ displayNumber: 1, layer: 1, masterStartMs: 120000, masterEndMs: 240000 });
+    const quick = await insertResult({ displayNumber: 2, layer: 2, descriptionId: null, partCodeId: 60, masterStartMs: 0, masterEndMs: 60000 });
+    const open = await insertResult({ displayNumber: 3, layer: 1, masterStartMs: 300000 });
+    await insertClip({ resultId: slow.resultId, startOffsetMs: 120000, endOffsetMs: 240000 });
+    await insertClip({ resultId: quick.resultId, startOffsetMs: 0, endOffsetMs: 60000 });
+    // an open clip has no span yet, so it draws nothing
+    await insertClip({ resultId: open.resultId, startOffsetMs: 300000 });
 
     const markers = (await json(await authRequest("/api/v1/sessions/101/inspection-markers")))
       .data as Array<Record<string, any>>;
@@ -99,6 +118,38 @@ describe("session timeline routes", () => {
     expect(markers.map((m) => m.masterStartMs)).toEqual([0, 120000]);
     expect(markers[0]!.layer).toBe(2);
     expect(markers[1]!.layer).toBe(1);
+    expect(markers[0]!.clipId).toBeNumber();
+  });
+
+  it("places a resumed clip on the take that recorded it", async () => {
+    await seedWorld();
+    await testDb.insert(schema.session).values({
+      displayNumber: 2,
+      sessionId: 102,
+      projectId: 1,
+      name: "Run 2",
+      startEpoch: 2000,
+    });
+    // one result, resumed on a later take: a clip on each session
+    const resumed = await insertResult({ masterStartMs: 0, masterEndMs: 30000 });
+    await insertClip({ resultId: resumed.resultId, sessionId: 101, startOffsetMs: 0, endOffsetMs: 30000 });
+    await insertClip({ resultId: resumed.resultId, sessionId: 102, startOffsetMs: 4000, endOffsetMs: 20000 });
+
+    const read = async (sessionId: number) =>
+      (await json(await authRequest(`/api/v1/sessions/${sessionId}/inspection-markers`)))
+        .data as Array<Record<string, any>>;
+
+    const firstTake = await read(101);
+    const secondTake = await read(102);
+    expect(firstTake).toHaveLength(1);
+    expect(secondTake).toHaveLength(1);
+    // each marker sits where its own clip sits, on its own take
+    expect(firstTake[0]!.masterStartMs).toBe(0);
+    expect(secondTake[0]!.masterStartMs).toBe(4000);
+    expect(secondTake[0]!.masterEndMs).toBe(20000);
+    // same inspection, two markers, never the same clip
+    expect(secondTake[0]!.resultId).toBe(firstTake[0]!.resultId);
+    expect(secondTake[0]!.clipId).not.toBe(firstTake[0]!.clipId);
   });
 
   it("serves the sidebar for both target kinds", async () => {

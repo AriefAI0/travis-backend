@@ -7,6 +7,7 @@ import { AppError, notFound } from "../../lib/error";
 import { removeMediaPrefix } from "../../lib/minio_storage/cleanup";
 import { listIngestRecordsByClipIds } from "../repositories/recording-ingest.repository";
 import { listInspectionFormFieldRecordsByFormId } from "../repositories/inspection-form.repository";
+import { listVideoClipRecordsBySessionId } from "../repositories/video-clip.repository";
 // Internal read: these ids come from a result row the route already scoped.
 import { findSessionByIdInternal } from "./session.service";
 import {
@@ -548,22 +549,47 @@ export const listSessionInspectionRows = async (
   );
 };
 
-// finished rows only, ordered by master start — the playback layer markers
+// Playback markers: one per finished clip, anchored on the CLIP's own offsets.
+// A result resumed on a later take holds a clip on each session, so the result's
+// own start and end cannot place both. Ordered by where the clip starts.
 export const listSessionInspectionMarkers = async (
   sessionId: number,
   database?: DbOrTx,
 ) => {
-  const rows = await listSessionInspectionRows(sessionId, database);
-  return rows
-    .filter((row) => row.masterEndMs !== null)
-    .sort((a, b) => (a.masterStartMs ?? 0) - (b.masterStartMs ?? 0))
-    .map((row) => ({
-      resultId: row.resultId,
-      inspectionTypeCode: row.inspectionTypeCode,
-      layer: row.layer,
-      masterStartMs: row.masterStartMs,
-      masterEndMs: row.masterEndMs,
-      targetLabel: row.target.label,
-      breadcrumb: row.breadcrumb,
-    }));
+  const sessionRecord = await findSessionByIdInternal(sessionId, database);
+  if (!sessionRecord) throw notFound(`session ${sessionId}`);
+
+  // An open clip has no end yet, so it has no span to draw.
+  const clips = (
+    await listVideoClipRecordsBySessionId(sessionId, database)
+  ).filter((clip) => clip.endOffsetMs !== null);
+
+  const markers = await Promise.all(
+    clips.map(async (clip) => {
+      const result = await getResultById(clip.resultId, database);
+      // A clip whose result is gone has no type or label to draw.
+      if (!result || result.layer === null) return null;
+
+      const { breadcrumb, label } = await buildBreadcrumb(
+        result.descriptionId,
+        result.partCodeId,
+        database,
+      );
+
+      return {
+        clipId: clip.clipId,
+        resultId: result.resultId,
+        inspectionTypeCode: result.inspectionTypeCode,
+        layer: result.layer,
+        masterStartMs: clip.startOffsetMs,
+        masterEndMs: clip.endOffsetMs,
+        targetLabel: label,
+        breadcrumb,
+      };
+    }),
+  );
+
+  return markers
+    .filter((marker) => marker !== null)
+    .sort((left, right) => left.masterStartMs - right.masterStartMs);
 };
