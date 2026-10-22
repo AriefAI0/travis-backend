@@ -76,9 +76,9 @@ const auditDatasheet = async (
 
   await writeAudit(
     {
-    organizationId: caller.organizationId,
-    userId: caller.userId,
-    action,
+      organizationId: caller.organizationId,
+      userId: caller.userId,
+      action,
       resourceType: "Report",
       resourceId: row.datasheetId,
       before,
