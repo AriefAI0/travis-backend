@@ -10,17 +10,21 @@ import {
   type ReportSection,
   type ReportTemplateData,
 } from "../../db/services/report-data.service";
+import {
+  dropInsertedGaps,
+  keepMissingPlaceholder,
+  renumberDrawingIds,
+  renderTemplate,
+} from "../../lib/docx/render";
 import { findRegions } from "../../lib/docx/regions";
 import { templatesDir } from "../../lib/docx/templates";
 import { sectionRegionTags } from "./report-layout";
 import type { ReportScope } from "../../types/api";
 
-// All three ship CommonJS only, so one require form covers them. The image
-// module must be required by its installed name: the older
-// `open-docxtemplater-image-module` it was forked from is not in the tree.
+// CommonJS only, so one require form covers it. The image module must be
+// required by its installed name: the older `open-docxtemplater-image-module`
+// it was forked from is not in the tree.
 const require = createRequire(import.meta.url);
-const PizZip = require("pizzip");
-const Docxtemplater = require("docxtemplater");
 const ImageModule = require("docxtemplater-image-module-free");
 
 // The box one picture fits inside, in pixels: the module sizes in pixels and
@@ -132,35 +136,6 @@ const resolvePictures = async (sections: ReportSection[]) => {
   return { pictures, chosen };
 };
 
-// Pull docxtemplater's real error list out of its wrapper error. Its
-// `explanation` names the exact tag, which is what a user needs to fix the
-// template; `message` alone says only "Unclosed loop".
-const describeTemplateError = (err: unknown): string => {
-  const errors = (
-    err as {
-      properties?: {
-        errors?: { message?: string; properties?: { explanation?: string } }[];
-      };
-    }
-  ).properties?.errors;
-  if (errors?.length) {
-    return errors
-      .map((entry) => entry.properties?.explanation ?? entry.message ?? String(entry))
-      .join("; ");
-  }
-  return err instanceof Error ? err.message : String(err);
-};
-
-// A value the data never supplies keeps its placeholder in the page, so a user
-// who opens the report sees which one is missing and can fix the template.
-// docxtemplater's own fallback writes the word "undefined" there instead, which
-// reads as a rendering fault rather than a gap in the template.
-//
-// A block tag is a different matter: `{#x}` with no `{/x}` cannot produce a
-// document at all, so that still fails the render.
-const keepMissingPlaceholder = (part: { value?: string }) =>
-  part?.value ? `{${part.value}}` : "";
-
 // The template writes this constant for every region, and the renderer replaces
 // each with the tag of the section it holds.
 const REGION_TAG = /<w:tag w:val="region"\/>/g;
@@ -228,25 +203,6 @@ const assertRegionAnchors = (xml: string): void => {
   }
 };
 
-// docxtemplater cannot see a content control, so a table that closes a region
-// looks to it like a table ending a block, and its `joinUncorrupt` step inserts
-// a paragraph behind it — inside the region, where the next refresh would
-// overwrite whatever a user typed. The gap belongs outside the region, and
-// `regionBlock` already puts one there.
-// flow: drop the inserted paragraph > the region ends with its table
-const dropInsertedGaps = (xml: string): string =>
-  xml.replace(/<\/w:tbl><w:p\/><\/w:sdtContent>/g, "</w:tbl></w:sdtContent>");
-
-// The image module stamps every drawing with the same id. OOXML wants one id
-// per drawing, and Word repairs a document that repeats them.
-const renumberDrawingIds = (xml: string): string => {
-  let next = 1;
-  return xml
-    .replace(/<wp:docPr id="\d+"/g, () => `<wp:docPr id="${next++}"`)
-    .replace(/<pic:cNvPr id="\d+"/g, () => `<pic:cNvPr id="${next++}"`);
-};
-
-
 // Fill a template with gathered data and return the finished .docx.
 // flow: load pictures > wire image module > render > renumber drawings
 export const renderReport = async (
@@ -289,42 +245,18 @@ export const renderReport = async (
     },
   });
 
-  // The constructor is inside the try because docxtemplater pairs its block tags
-  // when it is built, not when it renders: an unclosed `{#x}` throws there, and
-  // a raw throw would reach the client as a bare 500 with no reason in it.
-  let doc: any;
-  try {
-    doc = new Docxtemplater(new PizZip(template), {
-      paragraphLoop: true,
-      linebreaks: true,
-      // a tag the data never fills stays visible, never "undefined"
-      nullGetter: keepMissingPlaceholder,
-      // the v4 constructor takes modules here; attachModule() throws on it
-      modules: [imageModule],
-    });
-
-    // renderAsync, not render: the image module resolves tag values through a
-    // promise path, and the sync one hands a promise straight to PizZip.
-    await doc.renderAsync(filled);
-  } catch (err) {
-    throw new AppError(
-      500,
-      "template_error",
-      `The report template cannot be rendered: ${describeTemplateError(err)}`,
-    );
-  }
-
-  const zip = doc.getZip();
-  const page = zip.file("word/document.xml");
-  if (page) {
+  return renderTemplate(template, filled, {
+    modules: [imageModule],
+    // a tag the data never fills stays visible, never "undefined"
+    nullGetter: keepMissingPlaceholder,
     // one tag per picture and per table, in the order the template renders them
-    const regions = sections.flatMap((section) => sectionRegionTags(section));
-    const named = tagRegions(page.asText() as string, regions);
-    assertRegionAnchors(named);
-    zip.file("word/document.xml", renumberDrawingIds(dropInsertedGaps(named)));
-  }
-
-  return zip.generate({ type: "nodebuffer" }) as Buffer;
+    editDocument: (xml) => {
+      const regions = sections.flatMap((section) => sectionRegionTags(section));
+      const named = tagRegions(xml, regions);
+      assertRegionAnchors(named);
+      return renumberDrawingIds(dropInsertedGaps(named));
+    },
+  });
 };
 
 // A project's template and data. Both report paths start here, so the template
