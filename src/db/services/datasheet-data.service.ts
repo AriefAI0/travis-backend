@@ -5,7 +5,11 @@
 // flow: target keys > results > tree order > per-kind rows > table
 import type { DbOrTx } from "../client";
 import { AppError } from "../../lib/error";
-import type { InspectionTypeCode } from "../../types/api";
+import {
+  datasheetKinds,
+  type DatasheetKind,
+  type InspectionTypeCode,
+} from "../../types/api";
 import { listResultRecordsByTargetIds } from "../repositories/result.repository";
 import { getProjectById } from "./project.service";
 import { listSessionsByIds } from "./session.service";
@@ -17,8 +21,8 @@ import {
   type TargetLabel,
 } from "./report-data.service";
 
-export const DATASHEET_KINDS = ["GVI", "CP_ANODE", "CP_MEMBER", "FMD", "SCOUR", "DVI"] as const;
-export type DatasheetKind = (typeof DATASHEET_KINDS)[number];
+export const DATASHEET_KINDS = datasheetKinds;
+export type { DatasheetKind };
 
 // One generate holds this many results. Detail reads run per result, so the cap
 // keeps one job bounded. ponytail: raise it when detail reads batch by type.

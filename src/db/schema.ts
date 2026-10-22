@@ -1391,3 +1391,61 @@ export const report = pgTable(
     ),
   })
 );
+
+/* =================== DATASHEET REPORTS =================== */
+
+// One datasheet per inspection kind. CP_MEMBER is the CVI datasheet: the
+// member sheet renders CVI results.
+export const datasheetKind = pgEnum("datasheet_kind", [
+  "GVI",
+  "CP_ANODE",
+  "CP_MEMBER",
+  "FMD",
+  "SCOUR",
+  "DVI",
+]);
+
+export const datasheetStatus = pgEnum("datasheet_status", ["generating", "ready", "error"]);
+
+export const datasheetReport = pgTable(
+  "datasheet_report",
+  {
+    // uuid, not a serial: this id travels in a browser URL
+    datasheetId: uuid("datasheet_id").primaryKey().defaultRandom(),
+
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => project.projectId, { onDelete: "cascade" }),
+
+    organizationId: integer("organization_id")
+      .notNull()
+      .references(() => organization.organizationId),
+
+    kind: datasheetKind("kind").notNull(),
+    name: text("name").notNull(),
+
+    // The ticked targets, frozen: a retry renders the same selection, never
+    // whatever happens to be ticked when the user clicks again.
+    targets: jsonb("targets").$type<string[]>().notNull(),
+
+    status: datasheetStatus("status").notNull().default("generating"),
+    errorDetail: text("error_detail"),
+
+    docxKey: text("docx_key").notNull(),
+    // set once the PDF lands; a failed conversion leaves it null
+    pdfKey: text("pdf_key"),
+    // why the PDF is missing, when the docx still rendered
+    pdfError: text("pdf_error"),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    // every read is one project's list, newest first
+    idxDatasheetProjectCreated: index("idx_datasheet_project_created").on(
+      table.organizationId,
+      table.projectId,
+      table.createdAt,
+    ),
+  })
+);

@@ -1553,6 +1553,48 @@ export const updateRestrictedAccessSchema = z.object({
   remarks: z.string().nullable().optional(),
 });
 
+/* ==========================================================
+   datasheet documents — one docx and one pdf per inspection kind
+========================================================= */
+
+// CP_MEMBER is the CVI datasheet: the member sheet renders CVI results. DVI
+// ships disabled until a template lands.
+export const datasheetKinds = ["GVI", "CP_ANODE", "CP_MEMBER", "FMD", "SCOUR", "DVI"] as const;
+export type DatasheetKind = (typeof datasheetKinds)[number];
+export type DatasheetStatus = "generating" | "ready" | "error";
+
+// what the app's datasheet list renders; the bytes stay in MinIO
+export type DatasheetListItem = {
+  datasheetId: string;
+  name: string;
+  kind: DatasheetKind;
+  status: DatasheetStatus;
+  // set only while status is "error"
+  errorDetail: string | null;
+  // why the PDF is missing while the docx is ready
+  pdfError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// A ticked tree row. The app sends these keys, never result ids.
+const datasheetTargetSchema = z.string().regex(/^(description|partCode):[1-9]\d*$/);
+
+// Preview takes the same selection the generate will take, so card counts and
+// the produced sheet cannot disagree.
+export const datasheetPreviewSchema = z.object({
+  targets: z.array(datasheetTargetSchema).min(1).max(2000),
+  // when set, the answer also carries that kind's first rows
+  kind: z.enum(datasheetKinds).optional(),
+});
+
+export const datasheetCreateSchema = z.object({
+  kind: z.enum(datasheetKinds),
+  targets: z.array(datasheetTargetSchema).min(1).max(2000),
+  // omitted: named after the kind and the day
+  name: z.string().trim().min(1).max(200).optional(),
+});
+
 /* =========================================================
    accounts — the admin surface (travis-viewer-spec.md)
 ========================================================= */
