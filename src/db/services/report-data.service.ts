@@ -150,13 +150,23 @@ const positions = (parts: { position: string }[]) => parts.map((part) => part.po
 
 /* ---------- per-type rows ---------- */
 
-type SummaryRow = Awaited<ReturnType<typeof listProjectSummary>>[number];
+export type SummaryRow = Awaited<ReturnType<typeof listProjectSummary>>[number];
+
+// The four fields a row read needs. Both callers carry them: the project
+// summary and a target-key result read.
+export type ResultRowInput = Pick<
+  SummaryRow,
+  "resultId" | "inspectionTypeCode" | "remarks" | "createdAt"
+>;
 
 // Rows for one result, shaped for its type's table. CVI/DVI and MGI repeat the
 // parent fields down each child row: a table row cannot hold its own loop.
 // ponytail: one readback per result, so 2-5 queries each. Batch by type when a
 // project grows past a few hundred results.
-const rowsForResult = async (row: SummaryRow, database?: DbOrTx): Promise<ReportRow[]> => {
+export const rowsForResult = async (
+  row: ResultRowInput,
+  database?: DbOrTx,
+): Promise<ReportRow[]> => {
   const remarks = row.remarks ?? "";
   const recorded = row.createdAt;
 
@@ -450,7 +460,7 @@ const rowsForResult = async (row: SummaryRow, database?: DbOrTx): Promise<Report
 /* ---------- task tree ---------- */
 
 // Task-tree labels carried onto every item.
-type TargetLabel = {
+export type TargetLabel = {
   task_group: string;
   task_code: string;
   description: string;
@@ -468,7 +478,7 @@ const EMPTY_LABEL: TargetLabel = {
 
 // Walk the tree once, collecting target labels plus their display order.
 // flow: groups > codes > descriptions > types > part codes
-const collectTargets = (groups: Awaited<ReturnType<typeof listProjectTaskStructureTree>>) => {
+export const collectTargets = (groups: Awaited<ReturnType<typeof listProjectTaskStructureTree>>) => {
   const byDescriptionId = new Map<number, TargetLabel>();
   const byPartCodeId = new Map<number, TargetLabel>();
   const order: string[] = [];
