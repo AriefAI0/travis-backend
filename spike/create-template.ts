@@ -23,7 +23,7 @@ const Docxtemplater = require("docxtemplater");
 const ImageModule = require("docxtemplater-image-module-free");
 
 const SOURCE = new URL("./source.docx", import.meta.url);
-const OUT_PATH = new URL("../src/features/reports/default-template.docx", import.meta.url);
+const OUT_PATH = new URL("../templates/narrative-default.docx", import.meta.url);
 
 // A4 portrait minus the 1134-twip side margins.
 const TABLE_W = 11906 - 2268;

@@ -33,6 +33,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json bun.lock ./
 COPY src ./src
+COPY templates ./templates
 
 # NODE_ENV stays unset on purpose. Set to production, Bun stops bundling the
 # report editor page at runtime and points the page at asset paths its own

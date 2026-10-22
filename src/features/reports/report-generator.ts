@@ -11,6 +11,7 @@ import {
   type ReportTemplateData,
 } from "../../db/services/report-data.service";
 import { findRegions } from "../../lib/docx/regions";
+import { templatesDir } from "../../lib/docx/templates";
 import { sectionRegionTags } from "./report-layout";
 import type { ReportScope } from "../../types/api";
 
@@ -61,7 +62,7 @@ export const loadTemplate = async (projectId: number): Promise<Buffer> => {
     const stream = await minio.getObject(env.BUCKET_MEDIA, reportTemplateKey(projectId));
     return await drainStream(stream);
   } catch {
-    const bundled = Bun.file(new URL("./default-template.docx", import.meta.url));
+    const bundled = Bun.file(templatesDir("narrative-default.docx"));
     return Buffer.from(await bundled.arrayBuffer());
   }
 };
