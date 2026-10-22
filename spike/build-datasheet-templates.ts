@@ -353,8 +353,8 @@ const buildFmd = (xml: string) => {
 
 /* ---------- SCOUR ---------- */
 
-// Gap after each result's row: 240 twips is one blank line at 12pt.
-const ROW_GAP_TWIPS = 240;
+// Gap after each result's row: 240 twips is two blank lines at 12pt.
+const ROW_GAP_TWIPS = 480;
 
 // The outer table's own width, from its tblW.
 const SCOUR_TABLE_W = 10911;
