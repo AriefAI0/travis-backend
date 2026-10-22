@@ -353,6 +353,12 @@ const buildFmd = (xml: string) => {
 
 /* ---------- SCOUR ---------- */
 
+// Gap after each result's row: 240 twips is one blank line at 12pt.
+const ROW_GAP_TWIPS = 240;
+
+// The outer table's own width, from its tblW.
+const SCOUR_TABLE_W = 10911;
+
 // The outer row repeats per result, so the drawing clones with it.
 const patchScour = (xml: string) => {
   const rows = scanRows(xml);
@@ -397,14 +403,18 @@ const patchScour = (xml: string) => {
     /(<w:p [^>]*>)(<w:pPr>[\s\S]*?<\/w:pPr>)/,
     `$1$2${run("{#scour_rows}")}`,
   );
-  // the cell keeps an empty paragraph after the nested table: close the loop there
-  const tail = "</w:pPr></w:p></w:tc></w:tr>";
-  const closeAt = rebuilt.lastIndexOf(tail);
-  assert(closeAt !== -1, "scour: closing paragraph not found");
-  rebuilt = rebuilt.slice(0, closeAt) + `</w:pPr>${run("{/scour_rows}")}</w:p></w:tc></w:tr>` + rebuilt.slice(closeAt + tail.length);
-  assert(rebuilt.includes("{#scour_rows}") && rebuilt.includes("{/scour_rows}"), "scour: loop tags missing");
+  // Word drops space-after on the last paragraph of a cell, so the gap between
+  // two results is a second, borderless row inside the loop. The outer cells
+  // carry no borders, so the spacer draws nothing; its height is the gap.
+  const spacer =
+    `<w:tr><w:trPr><w:trHeight w:val="${ROW_GAP_TWIPS}" w:hRule="atLeast"/></w:trPr>` +
+    `<w:tc><w:tcPr><w:tcW w:w="${SCOUR_TABLE_W}" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>` +
+    `<w:p><w:pPr><w:pStyle w:val="NoSpacing"/></w:pPr>${run("{/scour_rows}")}</w:p></w:tc></w:tr>`;
 
-  return xml.slice(0, outerRow.start) + rebuilt + xml.slice(outerRow.end);
+  const looped = rebuilt + spacer;
+  assert(looped.includes("{#scour_rows}") && looped.includes("{/scour_rows}"), "scour: loop tags missing");
+
+  return xml.slice(0, outerRow.start) + looped + xml.slice(outerRow.end);
 };
 
 /* ---------- build ---------- */

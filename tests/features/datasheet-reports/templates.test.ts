@@ -136,6 +136,14 @@ describe("datasheet templates", () => {
     });
   }
 
+  it("puts a spacer row after every scour result", async () => {
+    const xml = pageOf(await render("scour"));
+
+    // three results, three spacer rows: Word drops space-after in a cell, so
+    // the gap is its own row
+    expect(xml.match(/<w:trHeight w:val="240" w:hRule="atLeast"\/>/g) ?? []).toHaveLength(3);
+  });
+
   it("a scour row clones its picture with a fresh drawing id", async () => {
     const xml = pageOf(await render("scour"));
 
