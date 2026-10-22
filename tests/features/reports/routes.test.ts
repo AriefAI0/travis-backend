@@ -157,6 +157,20 @@ describe("report generation", () => {
     expect(report.errorDetail).toBeNull();
   }, 20_000);
 
+  it("renders two concurrent reports one after the other", async () => {
+    await seedProject();
+
+    const [first, second] = await Promise.all([generate("One"), generate("Two")]);
+    const [a, b] = await Promise.all([
+      waitForRender(first.reportId),
+      waitForRender(second.reportId),
+    ]);
+
+    expect([a.status, b.status]).toEqual(["ready", "ready"]);
+    expect(a.errorDetail).toBeNull();
+    expect(b.errorDetail).toBeNull();
+  }, 30_000);
+
   it("answers 404 for an unknown project", async () => {
     const res = await authRequest("/api/v1/projects/999/reports", {
       method: "POST",

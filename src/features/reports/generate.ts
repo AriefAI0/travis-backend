@@ -16,26 +16,36 @@ import {
 } from "../../db/services/report.service";
 import type { ReportRow } from "../../db/repositories/report.repository";
 import type { ReportScope } from "../../types/api";
+import { enqueueRender } from "../../lib/render-queue";
 import { loadReportInputs, renderReport } from "./report-generator";
 
 // The row exists before any bytes do, so a failed render still leaves the user
 // something to see and delete.
 const renderInto = async (row: ReportRow, database?: DbOrTx) => {
   try {
-    // the row carries the org, so the render stays inside its tenant
-    const { template, data } = await loadReportInputs(
-      row.projectId,
-      row.scope,
-      row.organizationId,
-      database,
-    );
-    const docx = await renderReport(template, data);
+    // one render at a time across every report path; a transient fault retries
+    await enqueueRender(async () => {
+      // the row carries the org, so the render stays inside its tenant
+      const { template, data } = await loadReportInputs(
+        row.projectId,
+        row.scope,
+        row.organizationId,
+        database,
+      );
+      const docx = await renderReport(template, data);
 
-    // the row is still `generating`, so the version it was created with is
-    // the one this write claims. A system caller: the render is not a human
-    // action, so it writes no audit row of its own.
-    await saveReportDocx(row.reportId, docx, row.version, systemCaller(row.organizationId), database);
-    await setReportStatus(row.reportId, "ready", null, database);
+      // the row is still `generating`, so the version it was created with is
+      // the one this write claims. A system caller: the render is not a human
+      // action, so it writes no audit row of its own.
+      await saveReportDocx(
+        row.reportId,
+        docx,
+        row.version,
+        systemCaller(row.organizationId),
+        database,
+      );
+      await setReportStatus(row.reportId, "ready", null, database);
+    });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     log.error("report render failed", { reportId: row.reportId, err: detail });
