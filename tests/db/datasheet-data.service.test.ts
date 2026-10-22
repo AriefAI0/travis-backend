@@ -131,7 +131,7 @@ describe("datasheet data", () => {
     expect(table.rows[2]).toMatchObject({ cp_mv: "-950", wall_mm: "", remarks: "reading" });
   });
 
-  it("ticks the FMD attempt pair that the form chose", async () => {
+  it("repeats the FMD attempt word the form chose", async () => {
     await seedTree();
     await addResult({ resultId: 5004, type: "FMD", partCodeId: 300 });
     await testDb.insert(schema.resultFmd).values({
@@ -149,12 +149,10 @@ describe("datasheet data", () => {
       component_id: "P1",
       component_type: "T1",
       depth_el: "2.5",
-      initial_flooded: "",
-      initial_dry: "√",
-      add1_flooded: "√",
-      add1_dry: "",
-      add2_flooded: "",
-      add2_dry: "",
+      initial_attempt: "Dry",
+      additional_attempt_1: "Flooded",
+      additional_attempt_2: "N/A",
+      additional_attempt_3: "N/A",
     });
   });
 

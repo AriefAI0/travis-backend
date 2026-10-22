@@ -76,14 +76,10 @@ export const KIND_SPECS: Record<DatasheetKind, KindSpec> = {
       "component_id",
       "component_type",
       "depth_el",
-      "initial_flooded",
-      "initial_dry",
-      "add1_flooded",
-      "add1_dry",
-      "add2_flooded",
-      "add2_dry",
-      "add3_flooded",
-      "add3_dry",
+      "initial_attempt",
+      "additional_attempt_1",
+      "additional_attempt_2",
+      "additional_attempt_3",
       "remarks",
     ],
   },
@@ -220,31 +216,18 @@ const shapeRow = (
         remarks: row.findings ?? "",
       };
     }
-    case "FMD": {
-      // the form records one of three words per attempt; the sheet ticks a pair
-      const pair = (value: string) => ({
-        flooded: value === "Flooded" ? TICK : "",
-        dry: value === "Dry" ? TICK : "",
-      });
-      const initial = pair(row.initial_attempt ?? "");
-      const first = pair(row.additional_attempt_1 ?? "");
-      const second = pair(row.additional_attempt_2 ?? "");
-      const third = pair(row.additional_attempt_3 ?? "");
+    case "FMD":
+      // the form records Dry, Flooded or N/A per attempt; the sheet repeats it
       return {
         component_id: id,
         component_type: label.type_code,
         depth_el: row.depth_el ?? "",
-        initial_flooded: initial.flooded,
-        initial_dry: initial.dry,
-        add1_flooded: first.flooded,
-        add1_dry: first.dry,
-        add2_flooded: second.flooded,
-        add2_dry: second.dry,
-        add3_flooded: third.flooded,
-        add3_dry: third.dry,
+        initial_attempt: row.initial_attempt ?? "",
+        additional_attempt_1: row.additional_attempt_1 ?? "",
+        additional_attempt_2: row.additional_attempt_2 ?? "",
+        additional_attempt_3: row.additional_attempt_3 ?? "",
         remarks: row.remarks ?? "",
       };
-    }
     case "SCOUR":
       return {
         location_leg1: row.location_leg1 ?? "",

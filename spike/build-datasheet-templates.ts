@@ -142,6 +142,41 @@ const withText = (cellXml: string, runs: string) => {
   );
 };
 
+// The sheet-header rows above the data table still carry the vendor's grid
+// spans, which no longer match the rebuilt columns. Word then squeezes them
+// into the wrong columns. Each cell stretches to the columns its width covers.
+// flow: running target width > nearest grid boundary > span + width
+const alignHeaderRow = (rowXml: string, widths: number[]) => {
+  const bounds = [0];
+  for (const width of widths) bounds.push(bounds[bounds.length - 1]! + width);
+
+  let start = 0;
+  let target = 0;
+
+  return rowXml.replace(/<w:tc>[\s\S]*?<\/w:tc>/g, (cellXml) => {
+    const width = Number(/<w:tcW w:w="(\d+)"/.exec(cellXml)?.[1] ?? 0);
+    const want = target + width;
+
+    // the closest boundary after the cell's own start column
+    let end = start + 1;
+    for (let index = start + 1; index <= widths.length; index++) {
+      if (Math.abs(bounds[index]! - want) < Math.abs(bounds[end]! - want)) end = index;
+    }
+
+    const span = end - start;
+    const cellWidth = bounds[end]! - bounds[start]!;
+    start = end;
+    target = want;
+
+    return cellXml
+      .replace(/<w:gridSpan w:val="\d+"\/>/, "")
+      .replace(/<w:tcW w:w="\d+"([^>]*)\/>/, (_match, rest: string) => {
+        const widthTag = `<w:tcW w:w="${cellWidth}"${rest}/>`;
+        return span > 1 ? `${widthTag}<w:gridSpan w:val="${span}"/>` : widthTag;
+      });
+  });
+};
+
 // Swap the column grid and the header/data rows of the table holding `needle`.
 // Everything above the header row (the sheet header cells) stays untouched.
 const rebuildTable = (xml: string, needle: string, widths: number[], rows: string[]) => {
@@ -157,10 +192,16 @@ const rebuildTable = (xml: string, needle: string, widths: number[], rows: strin
   );
   assert(headerRow, `header row not found: ${needle}`);
 
+  // the sheet header above the data rows keeps its cells, restretched to the
+  // new columns, so it fills the sheet instead of sitting in its first half
+  const sheetHeader = xml
+    .slice(gridEnd, headerRow.start)
+    .replace(/<w:tr[\s>][\s\S]*?<\/w:tr>/g, (rowXml) => alignHeaderRow(rowXml, widths));
+
   return (
     xml.slice(0, gridStart) +
     grid(widths) +
-    xml.slice(gridEnd, headerRow.start) +
+    sheetHeader +
     rows.join("") +
     "</w:tbl>" +
     xml.slice(tableEnd)
@@ -298,7 +339,10 @@ const buildCpMember = (xml: string) => {
 
 /* ---------- FMD ---------- */
 
-const FMD_WIDTHS = [1900, 1400, 850, 600, 600, 600, 600, 600, 600, 600, 600, 1625];
+const FMD_WIDTHS = [2000, 1500, 975, 1050, 1050, 1050, 1050, 1900];
+
+// One cell says Dry, Flooded or N/A; the sheet carries no tick pair.
+const FMD_ATTEMPTS = ["Initial", "Attempt 1", "Attempt 2", "Attempt 3"];
 
 const buildFmd = (xml: string) => {
   const fixed = (text: string, i: number, vmerge: CellSpec["vmerge"]): CellSpec => ({
@@ -308,39 +352,31 @@ const buildFmd = (xml: string) => {
     header: true,
   });
 
-  const attempts = ["Initial", "Additional 1", "Additional 2", "Additional 3"].map(
-    (text, i) => ({ w: 1200, text, span: 2, header: true, size: 14 }),
-  );
-
   const head: CellSpec[] = [
     fixed("COMPONENT ID", 0, "restart"),
     fixed("COMPONENT TYPE", 1, "restart"),
     fixed("EL (-)m", 2, "restart"),
-    ...attempts,
-    fixed("REMARKS", 11, "restart"),
+    // no tick boxes any more: each attempt cell says Dry, Flooded or N/A
+    { w: 4200, text: "FINDINGS", span: 4, header: true },
+    fixed("REMARKS", 7, "restart"),
   ];
 
-  const pair = ["Flooded", "Dry"].map((text) => ({ w: 600, text, header: true, size: 14 }));
   const sub: CellSpec[] = [
     fixed("", 0, "continue"),
     fixed("", 1, "continue"),
     fixed("", 2, "continue"),
-    ...[0, 1, 2, 3].flatMap(() => pair.map((spec) => ({ ...spec }))),
-    fixed("", 11, "continue"),
+    ...FMD_ATTEMPTS.map((text, i) => ({ w: FMD_WIDTHS[3 + i]!, text, header: true, size: 14 })),
+    fixed("", 7, "continue"),
   ];
 
   const tags = [
     "component_id",
     "component_type",
     "depth_el",
-    "initial_flooded",
-    "initial_dry",
-    "add1_flooded",
-    "add1_dry",
-    "add2_flooded",
-    "add2_dry",
-    "add3_flooded",
-    "add3_dry",
+    "initial_attempt",
+    "additional_attempt_1",
+    "additional_attempt_2",
+    "additional_attempt_3",
     "remarks",
   ];
   const data = tags.map((tag, i) => ({
