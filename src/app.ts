@@ -17,6 +17,7 @@ import { inspectionFormRoutes } from "./features/inspection-forms/routes";
 import { importRoutes } from "./features/import/routes";
 import { sessionTimelineRoutes } from "./features/session-timeline/routes";
 import { reportRoutes } from "./features/reports/routes";
+import { datasheetRoutes } from "./features/datasheet-reports/routes";
 import { editorRoutes } from "./features/reports/editor-page";
 import { archiveRoutes } from "./features/archive/routes";
 import { auditRoutes } from "./features/audit/routes";
@@ -73,6 +74,7 @@ app.route("/", importRoutes());
 app.route("/", sessionTimelineRoutes());
 // Report dialog, template download/upload, and the filled docx.
 app.route("/", reportRoutes());
+app.route("/", datasheetRoutes());
 // The report editor page, served here so the serve can set its cookie.
 app.route("/", editorRoutes());
 app.route("/", archiveRoutes());

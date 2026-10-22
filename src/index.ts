@@ -5,6 +5,7 @@ import { ensureBuckets } from "./lib/minio_storage/clients";
 import { ensureDefaultOrganization } from "./db/ensure-org";
 import { seedFirstAdmin } from "./lib/auth/seed";
 import { failInterruptedReports } from "./db/services/report.service";
+import { failInterruptedDatasheets } from "./db/services/datasheet.service";
 import { startIngestSweep } from "./features/recording/ingest-sweep";
 import { startThumbnailSweep } from "./features/recording/jobs/thumbnails";
 
@@ -21,6 +22,9 @@ startThumbnailSweep();
 // A render cut short by a restart leaves its row in `generating`, and the
 // dialog polls that row. One pass at boot is enough.
 await failInterruptedReports().catch((err) => log.error("report sweep failed", { err: String(err) }));
+await failInterruptedDatasheets().catch((err) =>
+  log.error("datasheet sweep failed", { err: String(err) }),
+);
 
 // The report editor page is a route on the app, not a Bun HTML import: the
 // serve sets the editor's cookie, and an HTML route value cannot carry one.
