@@ -339,7 +339,7 @@ const buildCpMember = (xml: string) => {
 
 /* ---------- FMD ---------- */
 
-const FMD_WIDTHS = [2000, 1500, 975, 1050, 1050, 1050, 1050, 1900];
+const FMD_WIDTHS = [2500, 1800, 1200, 1270, 1270, 1270, 1265];
 
 // One cell says Dry, Flooded or N/A; the sheet carries no tick pair.
 const FMD_ATTEMPTS = ["Initial", "Attempt 1", "Attempt 2", "Attempt 3"];
@@ -356,9 +356,9 @@ const buildFmd = (xml: string) => {
     fixed("COMPONENT ID", 0, "restart"),
     fixed("COMPONENT TYPE", 1, "restart"),
     fixed("EL (-)m", 2, "restart"),
-    // no tick boxes any more: each attempt cell says Dry, Flooded or N/A
-    { w: 4200, text: "FINDINGS", span: 4, header: true },
-    fixed("REMARKS", 7, "restart"),
+    // no tick boxes any more: each attempt cell says Dry, Flooded or N/A,
+    // and the sheet carries no remarks column
+    { w: 5075, text: "FINDINGS", span: 4, header: true },
   ];
 
   const sub: CellSpec[] = [
@@ -366,7 +366,6 @@ const buildFmd = (xml: string) => {
     fixed("", 1, "continue"),
     fixed("", 2, "continue"),
     ...FMD_ATTEMPTS.map((text, i) => ({ w: FMD_WIDTHS[3 + i]!, text, header: true, size: 14 })),
-    fixed("", 7, "continue"),
   ];
 
   const tags = [
@@ -377,7 +376,6 @@ const buildFmd = (xml: string) => {
     "additional_attempt_1",
     "additional_attempt_2",
     "additional_attempt_3",
-    "remarks",
   ];
   const data = tags.map((tag, i) => ({
     w: FMD_WIDTHS[i]!,

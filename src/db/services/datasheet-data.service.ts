@@ -80,7 +80,6 @@ export const KIND_SPECS: Record<DatasheetKind, KindSpec> = {
       "additional_attempt_1",
       "additional_attempt_2",
       "additional_attempt_3",
-      "remarks",
     ],
   },
   SCOUR: {
@@ -226,7 +225,6 @@ const shapeRow = (
         additional_attempt_1: row.additional_attempt_1 ?? "",
         additional_attempt_2: row.additional_attempt_2 ?? "",
         additional_attempt_3: row.additional_attempt_3 ?? "",
-        remarks: row.remarks ?? "",
       };
     case "SCOUR":
       return {

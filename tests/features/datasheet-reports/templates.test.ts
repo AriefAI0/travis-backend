@@ -91,11 +91,10 @@ const FIXTURES: Record<string, { data: Record<string, unknown>; expect: string[]
           additional_attempt_1: "Flooded",
           additional_attempt_2: "N/A",
           additional_attempt_3: "N/A",
-          remarks: "Confirmed dry",
         },
       ],
     },
-    expect: ["A-1205", "BRACE", "-82.4", "Dry", "Flooded", "N/A", "Confirmed dry"],
+    expect: ["A-1205", "BRACE", "-82.4", "Dry", "Flooded", "N/A"],
   },
   scour: {
     data: {
