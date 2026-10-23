@@ -253,8 +253,8 @@ const shapeRow = (
 };
 
 // One target set, read once: the project, its live results in tree order, and
-// the labels each result carries.
-const loadTargets = async (
+// the labels each result carries. No cap here: the export counts its own way.
+export const loadTargets = async (
   projectId: number,
   targets: DatasheetTargets,
   organizationId: number,
@@ -278,14 +278,6 @@ const loadTargets = async (
   const results = records.filter(
     (record) => record.projectId === projectId && record.inspectionTypeCode !== "RA",
   );
-  if (results.length > MAX_DATASHEET_RESULTS) {
-    throw new AppError(
-      413,
-      "too_many_results",
-      `${results.length} results selected; one datasheet holds at most ${MAX_DATASHEET_RESULTS}`,
-    );
-  }
-
   const { byDescriptionId, byPartCodeId, order } = collectTargets(groups);
   const rank = new Map(order.map((key, index) => [key, index]));
 
@@ -339,6 +331,15 @@ export const gatherDatasheet = async (
 
   const spec = KIND_SPECS[kind];
   const picked = sorted.filter((record) => record.inspectionTypeCode === spec.type);
+
+  // the cap guards a full gather; a preview reads ten rows and stops there
+  if (maxRows === Number.POSITIVE_INFINITY && picked.length > MAX_DATASHEET_RESULTS) {
+    throw new AppError(
+      413,
+      "too_many_results",
+      `${picked.length} results selected; one datasheet holds at most ${MAX_DATASHEET_RESULTS}`,
+    );
+  }
 
   const rows: Record<string, string>[] = [];
   for (const record of picked) {

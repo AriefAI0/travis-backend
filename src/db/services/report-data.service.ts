@@ -123,18 +123,18 @@ const byTypeRank = (a: ReportSection, b: ReportSection) =>
 /* ---------- value formatting ---------- */
 
 // Enum wording mirrors the app so the report reads like the workspace.
-const CONDITION_LABEL: Record<string, string> = {
+export const CONDITION_LABEL: Record<string, string> = {
   ok: "Good Condition",
   not_ok: "Visual Damage",
 };
-const ATTEMPT_LABEL: Record<string, string> = { dry: "Dry", flooded: "Flooded", na: "N/A" };
-const GAP_LABEL: Record<string, string> = { gap: "Gap", no_gap: "No Gap" };
-const ALIGN_LABEL: Record<string, string> = { aligned: "Aligned", misaligned: "Misaligned" };
-const POSITION_LABEL: Record<string, string> = { top: "Top", mid: "Mid", bottom: "Bottom" };
-const YES_NO_LABEL: Record<string, string> = { yes: "Yes", no: "No" };
-const COATING_STATUS_LABEL: Record<string, string> = { present: "Present", "not-present": "Not present" };
-const COATING_CONDITION_LABEL: Record<string, string> = { good: "Good", "peel-off": "Peel-off" };
-const BLOCKAGE_LABEL: Record<string, string> = {
+export const ATTEMPT_LABEL: Record<string, string> = { dry: "Dry", flooded: "Flooded", na: "N/A" };
+export const GAP_LABEL: Record<string, string> = { gap: "Gap", no_gap: "No Gap" };
+export const ALIGN_LABEL: Record<string, string> = { aligned: "Aligned", misaligned: "Misaligned" };
+export const POSITION_LABEL: Record<string, string> = { top: "Top", mid: "Mid", bottom: "Bottom" };
+export const YES_NO_LABEL: Record<string, string> = { yes: "Yes", no: "No" };
+export const COATING_STATUS_LABEL: Record<string, string> = { present: "Present", "not-present": "Not present" };
+export const COATING_CONDITION_LABEL: Record<string, string> = { good: "Good", "peel-off": "Peel-off" };
+export const BLOCKAGE_LABEL: Record<string, string> = {
   "0_25": "0-25%",
   "25_50": "25-50%",
   "50_75": "50-75%",
