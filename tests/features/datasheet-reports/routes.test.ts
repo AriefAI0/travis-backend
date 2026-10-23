@@ -78,6 +78,10 @@ type DatasheetBody = {
 const readData = async <T>(res: Response): Promise<T> =>
   ((await res.json()) as { data: T }).data;
 
+// problem+json error body
+const codeOf = async (res: Response): Promise<string> =>
+  ((await res.json()) as { code: string }).code;
+
 const preview = (body: Record<string, unknown>) =>
   authRequest("/api/v1/projects/1/datasheets/preview", {
     method: "POST",
@@ -188,7 +192,7 @@ describe("datasheet reports", () => {
     }
 
     expect(pdf.status).toBe(409);
-    expect((await pdf.json()).code).toBe("pdf_unavailable");
+    expect(await codeOf(pdf)).toBe("pdf_unavailable");
 
     const docx = await authRequest(`/api/v1/datasheets/${datasheetId}/docx`);
     expect(docx.status).toBe(200);
@@ -199,7 +203,7 @@ describe("datasheet reports", () => {
 
     const res = await generate({ kind: "DVI", targets: ["partCode:300"] });
     expect(res.status).toBe(400);
-    expect((await res.json()).code).toBe("datasheet_template_missing");
+    expect(await codeOf(res)).toBe("datasheet_template_missing");
   });
 
   it("rejects a target key that names no kind", async () => {
@@ -207,7 +211,7 @@ describe("datasheet reports", () => {
 
     const res = await generate({ kind: "GVI", targets: ["part_code:300"] });
     expect(res.status).toBe(400);
-    expect((await res.json()).code).toBe("validation_error");
+    expect(await codeOf(res)).toBe("validation_error");
   });
 
   it("answers 404 for an unknown project", async () => {

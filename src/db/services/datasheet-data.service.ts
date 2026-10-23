@@ -274,8 +274,10 @@ const loadTargets = async (
     listResultRecordsByTargetIds(targets.descriptionIds, targets.partCodeIds, database),
   ]);
 
-  // RA is a gap mark, not an inspection result, so it never reaches a sheet
-  const results = records.filter((record) => record.inspectionTypeCode !== "RA");
+  // drop other projects' rows (ids are client input) and RA gap marks
+  const results = records.filter(
+    (record) => record.projectId === projectId && record.inspectionTypeCode !== "RA",
+  );
   if (results.length > MAX_DATASHEET_RESULTS) {
     throw new AppError(
       413,

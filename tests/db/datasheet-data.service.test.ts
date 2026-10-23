@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { eq } from "drizzle-orm";
 import {
   closeTestDatabase,
   ensureTestDatabase,
@@ -248,6 +249,53 @@ describe("datasheet data", () => {
     await expect(gatherDatasheet(1, "GVI", targets("partCode:300"), testOrgId, testDb)).rejects.toMatchObject({
       code: "too_many_results",
     });
+  });
+
+  it("drops results a target from another org points at", async () => {
+    await seedTree();
+    // the org table outlives a truncate, so the seed is idempotent
+    await testDb.insert(schema.organization).values({ name: "other" }).onConflictDoNothing();
+    const [other] = await testDb
+      .select({ organizationId: schema.organization.organizationId })
+      .from(schema.organization)
+      .where(eq(schema.organization.name, "other"));
+    await testDb.insert(schema.project).values({
+      organizationId: other!.organizationId,
+      projectId: 2,
+      displayNumber: 1,
+      title: "Beta",
+    });
+    await testDb.insert(schema.session).values({ sessionId: 201, projectId: 2, displayNumber: 1, name: "Run B" });
+    await testDb.insert(schema.taskGroup).values({ taskGroupId: 2, projectId: 2, code: "900" });
+    await testDb.insert(schema.taskCode).values({ taskCodeId: 20, taskGroupId: 2, code: "901" });
+    await testDb.insert(schema.description).values({ descriptionId: 110, taskCodeId: 20, label: "Leg Z" });
+    await testDb.insert(schema.type).values({ typeId: 210, descriptionId: 110, code: "TZ" });
+    await testDb.insert(schema.partCode).values({ partCodeId: 310, typeId: 210, code: "PZ" });
+
+    await addResult({ resultId: 5001, type: "GVI", partCodeId: 300 });
+    await testDb.insert(schema.result).values({
+      resultId: 6001,
+      displayNumber: 1,
+      projectId: 2,
+      sessionId: 201,
+      inspectionTypeCode: "GVI",
+      partCodeId: 310,
+      layer: 1,
+      masterStartMs: 0,
+      remarks: "other org",
+    });
+    await testDb.insert(schema.resultGvi).values([
+      { resultId: 5001, condition: "ok" },
+      { resultId: 6001, condition: "not_ok" },
+    ]);
+
+    // project 1, asked for its own target plus the other org's
+    const picked = targets("partCode:300", "partCode:310");
+    const table = await gatherDatasheet(1, "GVI", picked, testOrgId, testDb);
+    const counts = await countDatasheetResults(1, picked, testOrgId, testDb);
+
+    expect(table.rows.map((row) => row.component_id)).toEqual(["P1"]);
+    expect(counts.GVI).toBe(1);
   });
 
   it("rejects a target key that names no kind", () => {
