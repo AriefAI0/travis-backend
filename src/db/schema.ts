@@ -1449,3 +1449,85 @@ export const datasheetReport = pgTable(
     ),
   })
 );
+
+/* =========================================================
+   EXCEL EXPORT (durable job)
+========================================================= */
+// queued > running > ready | ready_with_errors | failed | cancelled | expired
+// cancelling is a running job asked to stop; it ends cancelled
+export const excelExportStatus = pgEnum("excel_export_status", [
+  "queued",
+  "running",
+  "cancelling",
+  "cancelled",
+  "ready",
+  "ready_with_errors",
+  "failed",
+  "expired",
+]);
+
+export const excelExportMedia = pgEnum("excel_export_media", ["raw", "images", "clips"]);
+
+// two worker lanes: a clip merge never holds up a workbook-only export
+export const excelExportLane = pgEnum("excel_export_lane", ["light", "clips"]);
+
+export const excelExport = pgTable(
+  "excel_export",
+  {
+    // uuid, not a serial: this id travels in a browser URL
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    organizationId: integer("organization_id")
+      .notNull()
+      .references(() => organization.organizationId),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => project.projectId, { onDelete: "cascade" }),
+
+    // better-auth user id; every read is owner-scoped after the org check
+    ownerUserId: text("owner_user_id").notNull(),
+
+    // the request, frozen: a retry exports the same selection
+    types: jsonb("types").$type<string[]>().notNull(),
+    targets: jsonb("targets").$type<string[]>().notNull(),
+    media: excelExportMedia("media").notNull(),
+    lane: excelExportLane("lane").notNull(),
+
+    status: excelExportStatus("status").notNull().default("queued"),
+    phase: text("phase").notNull().default(""),
+    itemsTotal: integer("items_total").notNull().default(0),
+    itemsDone: integer("items_done").notNull().default(0),
+    bytesWritten: bigint("bytes_written", { mode: "number" }).notNull().default(0),
+    attempts: integer("attempts").notNull().default(0),
+    errors: jsonb("errors").$type<unknown[]>().notNull().default(sql`'[]'::jsonb`),
+
+    // set at claim, before the upload starts, so an abort can remove it
+    packageKey: text("package_key"),
+    packageSize: bigint("package_size", { mode: "number" }),
+
+    // projectId + media + sorted types + sorted targets, so a repeat dedupes
+    requestHash: text("request_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    // the export list: one owner's rows, newest first
+    idxExcelExportOwnerCreated: index("idx_excel_export_owner_created").on(
+      table.organizationId,
+      table.ownerUserId,
+      table.createdAt,
+    ),
+    // one live export per identical request; terminal rows never collide
+    uqExcelExportActive: uniqueIndex("uq_excel_export_active")
+      .on(table.ownerUserId, table.requestHash)
+      .where(sql`${table.status} IN ('queued', 'running', 'cancelling')`),
+    // the claim reads the oldest queued row of one lane
+    idxExcelExportLaneCreated: index("idx_excel_export_lane_created").on(
+      table.lane,
+      table.status,
+      table.createdAt,
+    ),
+  })
+);

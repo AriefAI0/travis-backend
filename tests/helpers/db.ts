@@ -103,6 +103,7 @@ const deleteOrder = [
   schema.timelineThumbnail,
   schema.session,
   schema.report,
+  schema.excelExport,
   schema.project,
 
   // auth block: last, and children first — auth_user goes after everything

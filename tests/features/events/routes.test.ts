@@ -432,3 +432,29 @@ describe("GET /api/v1/events", () => {
     });
   });
 });
+
+describe("excel export events", () => {
+  it("reaches the owner only, not a teammate who can read Report", async () => {
+    const owner = await createTestUser({ preset: "Admin" });
+    const teammate = await createTestUser({ preset: "Admin" });
+    const ownerStream = await openStream(owner.token);
+    const teammateStream = await openStream(teammate.token);
+
+    publish({
+      organizationId: testOrgId,
+      action: "modify",
+      resourceType: "ExcelExport",
+      resourceId: "00000000-0000-0000-0000-000000000001",
+      userId: owner.userId,
+    });
+
+    expect(await ownerStream.next()).toMatchObject({
+      resourceType: "ExcelExport",
+      userId: owner.userId,
+    });
+    await teammateStream.silence();
+
+    await ownerStream.close();
+    await teammateStream.close();
+  });
+});

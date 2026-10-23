@@ -8,6 +8,19 @@ export function mintGetUrl(bucket: string, key: string): Promise<string> {
   return minio.presignedUrl("GET", bucket, key, env.PRESIGN_GET_TTL_SECONDS);
 }
 
+// A download link that names the file the browser saves. The TTL never outlives
+// the package it points at.
+export function mintDownloadUrl(
+  bucket: string,
+  key: string,
+  filename: string,
+  ttlSeconds: number,
+): Promise<string> {
+  return minio.presignedUrl("GET", bucket, key, Math.max(1, ttlSeconds), {
+    "response-content-disposition": `attachment; filename="${filename}"`,
+  });
+}
+
 // Short window for a playback redirect. The playlist is fetched again for every
 // segment, so each redirect mints its own URL and a leaked one dies in minutes.
 export const PLAYBACK_REDIRECT_TTL_SECONDS = 300;

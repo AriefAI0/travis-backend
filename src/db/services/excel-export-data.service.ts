@@ -55,7 +55,9 @@ export const PREVIEW_ROWS_PER_TYPE = 10;
 export type ExcelCellType = "text" | "number" | "date";
 export type ExcelCell = string | number | Date | null;
 
-export type ExcelColumn = { key: string; label: string; type: ExcelCellType };
+// `group` puts the column in a collapsible Excel outline: wide one-to-one
+// blocks collapse so the sheet stays readable.
+export type ExcelColumn = { key: string; label: string; type: ExcelCellType; group?: boolean };
 
 export type ExcelChildSet = {
   key: string;
@@ -76,6 +78,8 @@ const col = (key: string, label: string, type: ExcelCellType = "text"): ExcelCol
   type,
 });
 const num = (key: string, label: string) => col(key, label, "number");
+// a wide block's detail column: collapsed by default
+const wide = (column: ExcelColumn): ExcelColumn => ({ ...column, group: true });
 
 // Identity columns lead every sheet, so a row stays readable out of context.
 export const IDENTITY_COLUMNS: ExcelColumn[] = [
@@ -216,16 +220,16 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       col("hinge_pin", "Hinge pin"),
       num("hinge_bolt_nut_quantity", "Hinge bolts"),
       col("liners", "Liners"),
-      col("inboard_gap_condition", "In. gap"),
-      num("inboard_estimate_gap", "In. est."),
-      col("inboard_alignment_condition", "In. align."),
-      col("inboard_misaligned_position", "In. position"),
-      col("inboard_anomaly_recommendation", "In. note"),
-      col("outboard_gap_condition", "Out. gap"),
-      num("outboard_estimate_gap", "Out. est."),
-      col("outboard_alignment_condition", "Out. align."),
-      col("outboard_misaligned_position", "Out. position"),
-      col("outboard_anomaly_recommendation", "Out. note"),
+      wide(col("inboard_gap_condition", "In. gap")),
+      wide(num("inboard_estimate_gap", "In. est.")),
+      wide(col("inboard_alignment_condition", "In. align.")),
+      wide(col("inboard_misaligned_position", "In. position")),
+      wide(col("inboard_anomaly_recommendation", "In. note")),
+      wide(col("outboard_gap_condition", "Out. gap")),
+      wide(num("outboard_estimate_gap", "Out. est.")),
+      wide(col("outboard_alignment_condition", "Out. align.")),
+      wide(col("outboard_misaligned_position", "Out. position")),
+      wide(col("outboard_anomaly_recommendation", "Out. note")),
       col("clamp_missing_bolts", "Clamp missing bolts"),
       col("clamp_missing_washers", "Clamp missing washers"),
       col("hinge_missing_bolts", "Hinge missing bolts"),
@@ -251,14 +255,14 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       num("touchdown_distance", "TD from bend"),
       num("mudbrace_distance", "Bend to mudbrace"),
       num("bend_height", "Bend height"),
-      col("coating_status", "Coating"),
-      col("coating_condition", "Coating condition"),
-      col("knee_brace", "Knee brace"),
-      col("debris", "Debris"),
-      col("debris_type", "Debris type"),
-      col("anomaly", "Anomaly"),
-      col("recommendation", "Recommendation"),
-      col("restricted_access", "Restricted access"),
+      wide(col("coating_status", "Coating")),
+      wide(col("coating_condition", "Coating condition")),
+      wide(col("knee_brace", "Knee brace")),
+      wide(col("debris", "Debris")),
+      wide(col("debris_type", "Debris type")),
+      wide(col("anomaly", "Anomaly")),
+      wide(col("recommendation", "Recommendation")),
+      wide(col("restricted_access", "Restricted access")),
     ],
     children: [],
   },
@@ -791,6 +795,25 @@ export const gatherExcelExport = async (
     documentId: project.documentId ?? "",
     sheets,
   };
+};
+
+// Per-type counts for the dialog's cards, from one target read.
+export const countExcelResults = async (
+  projectId: number,
+  targets: DatasheetTargets,
+  organizationId: number,
+  database?: DbOrTx,
+): Promise<Record<string, number>> => {
+  const { sorted } = await loadTargets(projectId, targets, organizationId, database);
+
+  const counts = Object.fromEntries(EXCEL_CONTRACT.map((entry) => [entry.type, 0])) as Record<
+    string,
+    number
+  >;
+  for (const record of sorted) {
+    if (record.inspectionTypeCode in counts) counts[record.inspectionTypeCode]!++;
+  }
+  return counts;
 };
 
 // The dialog preview: same sheets, ten rows per type.

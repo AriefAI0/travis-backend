@@ -41,6 +41,9 @@ const schema = z.object({
   PLAYBACK_TOKEN_SECRET: z
     .string()
     .min(32, { message: "must be at least 32 characters" }),
+  // Where an excel export keeps its scratch files. Boot clears this directory
+  // and nothing else, so a wrong value cannot reach the rest of the volume.
+  EXCEL_EXPORT_SCRATCH_DIR: z.string().min(1).default("/app/data/excel-export"),
   // The report PDF converter. One run at a time, and one run may not outlive
   // the timeout below.
   SOFFICE_PATH: z.string().min(1).default("soffice"),

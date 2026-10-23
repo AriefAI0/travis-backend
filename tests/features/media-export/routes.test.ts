@@ -74,7 +74,8 @@ describe("export stubs reserve nothing real", () => {
 
     // Guard the filter itself: a silent match-all-nothing would pass the rest.
     expect(tableNames.length).toBeGreaterThan(20);
-    expect(tableNames.filter((name) => name.includes("export"))).toEqual([]);
+    // The excel export owns the one export table. This stub still adds none.
+    expect(tableNames.filter((name) => name.includes("export"))).toEqual(["excelexport"]);
   });
 
   // Acceptance: the replaced surfaces are untouched by this stub.

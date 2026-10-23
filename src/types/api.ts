@@ -1596,6 +1596,56 @@ export const datasheetCreateSchema = z.object({
 });
 
 /* =========================================================
+   excel exports
+========================================================= */
+
+// The 13 result types. RA is a gap mark and never exports.
+export const excelTypes = [
+  "GVI",
+  "CVI",
+  "DVI",
+  "MGI",
+  "CP",
+  "FMD",
+  "SCOUR",
+  "BSI",
+  "CAISSON",
+  "CGB",
+  "RISER",
+  "SEABED",
+  "PIPELINE",
+] as const;
+
+export const excelMediaLevels = ["raw", "images", "clips"] as const;
+
+// Same selection shape as a datasheet: ticked tree rows, never result ids.
+export const excelPreviewSchema = z.object({
+  targets: z.array(datasheetTargetSchema).min(1).max(2000),
+  types: z.array(z.enum(excelTypes)).min(1),
+});
+
+export const excelCreateSchema = excelPreviewSchema.extend({
+  media: z.enum(excelMediaLevels).default("raw"),
+});
+
+// One export row as the list and the detail route hand it out.
+export type ExcelExportListItem = {
+  id: string;
+  projectId: number;
+  types: string[];
+  media: string;
+  status: string;
+  phase: string;
+  itemsTotal: number;
+  itemsDone: number;
+  packageSize: number | null;
+  errors: unknown[];
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/* =========================================================
    accounts — the admin surface (travis-viewer-spec.md)
 ========================================================= */
 

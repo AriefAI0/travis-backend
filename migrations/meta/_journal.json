@@ -64,6 +64,13 @@
       "when": 1792680650762,
       "tag": "0008_talented_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792767845190,
+      "tag": "0009_useful_korg",
+      "breakpoints": true
     }
   ]
 }

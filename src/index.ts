@@ -8,6 +8,8 @@ import { failInterruptedReports } from "./db/services/report.service";
 import { failInterruptedDatasheets } from "./db/services/datasheet.service";
 import { startIngestSweep } from "./features/recording/ingest-sweep";
 import { startThumbnailSweep } from "./features/recording/jobs/thumbnails";
+import { recoverExcelExports } from "./db/services/excel-export.service";
+import { startExcelExportWorker } from "./features/excel-export/worker";
 
 // flow: buckets + org > sweeps > serve.
 // Boot even when MinIO is down — /health/ready is what reports it.
@@ -24,6 +26,14 @@ startThumbnailSweep();
 await failInterruptedReports().catch((err) => log.error("report sweep failed", { err: String(err) }));
 await failInterruptedDatasheets().catch((err) =>
   log.error("datasheet sweep failed", { err: String(err) }),
+);
+// An export cut short by a restart returns to the queue, and a cancel that
+// lost its worker finishes. Both lanes start after the recovery pass.
+await recoverExcelExports().catch((err) =>
+  log.error("excel export recovery failed", { err: String(err) }),
+);
+await startExcelExportWorker().catch((err) =>
+  log.error("excel export worker failed", { err: String(err) }),
 );
 
 // The report editor page is a route on the app, not a Bun HTML import: the

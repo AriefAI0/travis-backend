@@ -36,6 +36,8 @@ const SUBJECT_OF: Record<string, Subject> = {
   resultimage: "Result",
   recording: "Recording",
   report: "Report",
+  // an export is a report artifact; the owner check runs in isVisible too
+  excelexport: "Report",
   taskgroup: "Structure",
   taskcode: "Structure",
   description: "Structure",
@@ -57,12 +59,18 @@ const isAboutMe = (event: ChangeEvent, userId: string): boolean =>
   (event.resourceType.toLowerCase() === "user" ||
     event.resourceType.toLowerCase() === "permission");
 
-// flow: is it about me? tell me : do I hold read on its subject
+// flow: is it about me? tell me : is it mine alone? tell its owner : read subject
 // A change to the caller's own account always arrives: a user must learn that
 // their rights moved, or they keep working against a stale view.
 const isVisible = (ability: AppAbility, event: ChangeEvent, userId: string): boolean => {
   if (isAboutMe(event, userId)) {
     return true;
+  }
+
+  // An export belongs to one account. Reading Report is not enough: the row and
+  // its progress are the owner's, so a teammate's stream stays silent.
+  if (event.resourceType.toLowerCase() === "excelexport" && event.userId !== userId) {
+    return false;
   }
 
   const subject = SUBJECT_OF[event.resourceType.toLowerCase()];
