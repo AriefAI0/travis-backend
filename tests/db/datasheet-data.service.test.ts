@@ -114,22 +114,57 @@ describe("datasheet data", () => {
     expect(table.rows.map((row) => row.component_id)).toEqual(["P1", "P1"]);
   });
 
-  it("renders CP-MEMBER as position rows then CP finding rows, with ticks", async () => {
+  it("renders CP-MEMBER from GVI, splitting the two reading methods", async () => {
     await seedTree();
-    await addResult({ resultId: 5003, type: "CVI", partCodeId: 300 });
-    await testDb.insert(schema.resultCvi).values({ resultId: 5003, datumReference: "D-1" });
-    await testDb.insert(schema.resultCviPosition).values([
-      { resultId: 5003, memberType: "chord", clockPosition: "12:00", utMm: 19.8, findings: "thin", sortOrder: 0 },
-      { resultId: 5003, memberType: "chord", clockPosition: "3:00", utMm: 20.1, findings: "", sortOrder: 1 },
+    await addResult({ resultId: 5003, type: "GVI", partCodeId: 300 });
+    await addResult({ resultId: 5004, type: "GVI", partCodeId: 300 });
+    await testDb.insert(schema.resultGvi).values([
+      { resultId: 5003, depthEl: 12.4, condition: "ok" },
+      { resultId: 5004, depthEl: 13.1, condition: "ok" },
     ]);
-    await testDb.insert(schema.resultCviFinding).values({ resultId: 5003, value: -950, remark: "reading", sortOrder: 0 });
+    // 5003 carries the method; 5004 is a pre-split row, so order decides
+    await testDb.insert(schema.resultGviFinding).values([
+      { resultGviId: 5003, value: -950, remark: "contact ok", cpMethod: "contact", sortOrder: 0 },
+      { resultGviId: 5003, value: -921, remark: "proximity ok", cpMethod: "proximity", sortOrder: 1 },
+      { resultGviId: 5004, value: -880, remark: "first", sortOrder: 0 },
+      { resultGviId: 5004, value: -870, remark: "second", sortOrder: 1 },
+    ]);
 
     const table = await gatherDatasheet(1, "CP_MEMBER", targets("partCode:300"), testOrgId, testDb);
 
-    expect(table.rows).toHaveLength(3);
-    expect(table.rows[0]).toMatchObject({ component_id: "P1", wall_mm: "19.8", clock_12: "√", clock_3: "" });
-    expect(table.rows[1]).toMatchObject({ wall_mm: "20.1", clock_12: "", clock_3: "√" });
-    expect(table.rows[2]).toMatchObject({ cp_mv: "-950", wall_mm: "", remarks: "reading" });
+    expect(table.rows).toHaveLength(2);
+    expect(table.rows[0]).toMatchObject({
+      component_id: "P1",
+      cp_contact: "-950",
+      cp_proximity: "-921",
+      depth_el: "12.4",
+      remarks: "contact ok; proximity ok",
+    });
+    expect(table.rows[1]).toMatchObject({ cp_contact: "-880", cp_proximity: "-870" });
+  });
+
+  it("renders UT as one row per CVI clock reading", async () => {
+    await seedTree();
+    await addResult({ resultId: 5005, type: "CVI", partCodeId: 300 });
+    await testDb.insert(schema.resultCvi).values({ resultId: 5005 });
+    await testDb.insert(schema.resultCviPosition).values([
+      { resultId: 5005, memberType: "chord", clockPosition: "12", utMm: 20.1, findings: "coating intact", sortOrder: 0 },
+      { resultId: 5005, memberType: "chord", clockPosition: "3", utMm: 19.8, findings: "", sortOrder: 1 },
+      { resultId: 5005, memberType: "chord", clockPosition: "6", utMm: null, findings: "", sortOrder: 2 },
+    ]);
+
+    const table = await gatherDatasheet(1, "UT", targets("partCode:300"), testOrgId, testDb);
+
+    // a point with no reading and no remark makes no row
+    expect(table.rows).toHaveLength(2);
+    expect(table.rows[0]).toMatchObject({
+      component_id: "P1",
+      wall_mm: "",
+      clock_12: "20.1",
+      clock_3: "",
+      remarks: "coating intact",
+    });
+    expect(table.rows[1]).toMatchObject({ clock_3: "19.8", clock_12: "" });
   });
 
   it("repeats the FMD attempt word the form chose", async () => {
@@ -194,7 +229,16 @@ describe("datasheet data", () => {
 
     const counts = await countDatasheetResults(1, targets("partCode:300"), testOrgId, testDb);
 
-    expect(counts).toMatchObject({ GVI: 2, CP_ANODE: 1, CP_MEMBER: 0, FMD: 0, SCOUR: 0, DVI: 0 });
+    expect(counts).toMatchObject({
+      GVI: 2,
+      CP_ANODE: 1,
+      // CP_MEMBER reads the same GVI results; UT reads CVI
+      CP_MEMBER: 2,
+      FMD: 0,
+      SCOUR: 0,
+      DVI: 0,
+      UT: 0,
+    });
   });
 
   it("leaves the session blank when the results span two sessions", async () => {

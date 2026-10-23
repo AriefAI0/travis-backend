@@ -33,6 +33,7 @@ const TEMPLATE_FILES: Record<DatasheetKind, string | null> = {
   FMD: "fmd.docx",
   SCOUR: "scour.docx",
   DVI: null,
+  UT: "ut.docx",
 };
 
 // A card with no template cannot generate. Callers check before creating a row.

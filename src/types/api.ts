@@ -201,6 +201,8 @@ export type GviCPFindingDetail = {
   resultGviId: number;
   value: number | null;
   remark: string | null;
+  // null on readings saved before the tool split the two methods
+  cpMethod: "contact" | "proximity" | null;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -226,9 +228,7 @@ export type GviMgiDetail = {
 
 export type GviDetail = {
   resultId: number;
-  kpRange: string | null;
   depthEl: number | null;
-  gviUt: number | null;
   condition: "ok" | "not_ok";
   createdAt: string;
   updatedAt: string;
@@ -649,11 +649,9 @@ export type ResultSummaryDetail = {
   // CVI — schema-update model: member type sits on each position, CP on findings
   memberTypes?: ("chord" | "brace")[];
   cpValues?: (number | null)[];
-  // GVI — the tool shows KP, depth, CP and UT beside the condition
+  // GVI — depth and CP findings sit beside the condition
   // (depthEl is shared with PIPELINE, declared once below)
-  kpRange?: string | null;
   gviCp?: number | null;
-  gviUt?: number | null;
   // SCOUR — one typed location and one exposed answer per leg
   locationLeg1?: string | null;
   locationLeg2?: string | null;
@@ -875,6 +873,8 @@ export const updateItemSchema = z.object({
 export type TaskStructurePartCodeNode = {
   partCodeId: number;
   code: string;
+  // design wall, entered once per part code; the UT sheet reads it
+  nominalWallMm: number | null;
 };
 
 export type TaskStructureTypeNode = {
@@ -935,9 +935,11 @@ export const updateTypeSchema = z.object({
 export const createPartCodeSchema = z.object({
   typeId: id,
   code: z.string().min(1),
+  nominalWallMm: z.number().nullable().optional(),
 });
 export const updatePartCodeSchema = z.object({
   code: z.string().min(1).optional(),
+  nominalWallMm: z.number().nullable().optional(),
 });
 // project type vocabulary: the distinct type codes already used in the tree
 export const typeCatalogQuerySchema = z.object({ q: z.string().min(1).optional() });
@@ -1204,14 +1206,12 @@ export const scourPayloadSchema = z.object({
 export const gviPayloadSchema = z.object({
   kind: z.literal("gvi"),
   version: z.literal(1),
-  // optional: the current GVI form no longer collects KP range or UT
-  kpRange: z.string().nullish(),
   depthEl: z.number().nullable(),
-  gviUT: z.number().nullish(),
   gviCP: z.array(
     z.object({
       value: z.number().nullable(),
       remark: z.string(),
+      method: z.enum(["contact", "proximity"]),
     }),
   ).optional(),
   mgi: z.array(
@@ -1557,9 +1557,9 @@ export const updateRestrictedAccessSchema = z.object({
    datasheet documents — one docx and one pdf per inspection kind
 ========================================================= */
 
-// CP_MEMBER is the CVI datasheet: the member sheet renders CVI results. DVI
-// ships disabled until a template lands.
-export const datasheetKinds = ["GVI", "CP_ANODE", "CP_MEMBER", "FMD", "SCOUR", "DVI"] as const;
+// CP_MEMBER is the GVI datasheet and UT is the CVI one: each pair reads the
+// same results. DVI ships disabled until a template lands.
+export const datasheetKinds = ["GVI", "CP_ANODE", "CP_MEMBER", "FMD", "SCOUR", "DVI", "UT"] as const;
 export type DatasheetKind = (typeof datasheetKinds)[number];
 export type DatasheetStatus = "generating" | "ready" | "error";
 

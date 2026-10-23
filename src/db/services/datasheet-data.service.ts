@@ -20,6 +20,8 @@ import {
   type ResultRowInput,
   type TargetLabel,
 } from "./report-data.service";
+import { getCviDetailByResultId, getGviDetailByResultId } from "./result.service";
+import type { CviDetail, GviDetail } from "../../types/api";
 
 export const DATASHEET_KINDS = datasheetKinds;
 export type { DatasheetKind };
@@ -27,9 +29,6 @@ export type { DatasheetKind };
 // One generate holds this many results. Detail reads run per result, so the cap
 // keeps one job bounded. ponytail: raise it when detail reads batch by type.
 export const MAX_DATASHEET_RESULTS = 500;
-
-// The tick a datasheet cell carries where a form had a choice.
-const TICK = "√";
 
 type KindSpec = {
   // the result type the card reads; CP-MEMBER is the CVI datasheet
@@ -58,17 +57,9 @@ export const KIND_SPECS: Record<DatasheetKind, KindSpec> = {
     ],
   },
   CP_MEMBER: {
-    type: "CVI",
-    columns: [
-      "component_id",
-      "cp_mv",
-      "wall_mm",
-      "clock_12",
-      "clock_3",
-      "clock_6",
-      "clock_9",
-      "remarks",
-    ],
+    // the member sheet reads GVI results: depth plus the two CP readings
+    type: "GVI",
+    columns: ["component_id", "cp_contact", "cp_proximity", "depth_el", "remarks"],
   },
   FMD: {
     type: "FMD",
@@ -80,6 +71,19 @@ export const KIND_SPECS: Record<DatasheetKind, KindSpec> = {
       "additional_attempt_1",
       "additional_attempt_2",
       "additional_attempt_3",
+    ],
+  },
+  // the wall sheet: one row per CVI clock reading
+  UT: {
+    type: "CVI",
+    columns: [
+      "component_id",
+      "wall_mm",
+      "clock_12",
+      "clock_3",
+      "clock_6",
+      "clock_9",
+      "remarks",
     ],
   },
   SCOUR: {
@@ -168,9 +172,12 @@ const headerFor = async (
 // Label a result carries: its target's part code, else its description.
 const componentId = (label: TargetLabel) => label.part_code || label.description;
 
-// A record shaped for the sheet, from the report row of its type.
+// A record shaped for the sheet, from the report row of its type. CP_MEMBER
+// and UT read their own detail and never reach this function.
+type RowsFromReport = Exclude<DatasheetKind, "CP_MEMBER" | "UT">;
+
 const shapeRow = (
-  kind: DatasheetKind,
+  kind: RowsFromReport,
   row: Record<string, string>,
   label: TargetLabel,
 ): Record<string, string> => {
@@ -198,23 +205,6 @@ const shapeRow = (
         deepest_pit: row.deepest_pit ?? "",
         remarks: row.remarks ?? "",
       };
-    case "CP_MEMBER": {
-      // one row per member position, then one per CP finding; both carry the
-      // reading in cp_potential_mv and the note in findings
-      const clock = row.clock_position ?? "";
-      const tick = (hour: string) =>
-        new RegExp(`\\b${hour}\\b`).test(clock) ? TICK : "";
-      return {
-        component_id: id,
-        cp_mv: row.cp_potential_mv ?? "",
-        wall_mm: row.ut_mm ?? "",
-        clock_12: tick("12"),
-        clock_3: tick("3"),
-        clock_6: tick("6"),
-        clock_9: tick("9"),
-        remarks: row.findings ?? "",
-      };
-    }
     case "FMD":
       // the form records Dry, Flooded or N/A per attempt; the sheet repeats it
       return {
@@ -251,6 +241,46 @@ const shapeRow = (
       };
   }
 };
+
+// A number cell, blank when the form left it empty.
+const reading = (value: number | null | undefined) => (value == null ? "" : String(value));
+
+// One CP-MEMBER row per GVI result. The two reading methods fill their own
+// cell; rows saved before the split fall back to the finding order.
+// flow: findings > method match (or index) > contact, proximity, remarks
+const cpMemberRow = (detail: GviDetail, label: TargetLabel): Record<string, string> => {
+  const tagged = detail.cpFindings.some((finding) => finding.cpMethod !== null);
+  const contact = tagged
+    ? detail.cpFindings.find((finding) => finding.cpMethod === "contact")
+    : detail.cpFindings[0];
+  const proximity = tagged
+    ? detail.cpFindings.find((finding) => finding.cpMethod === "proximity")
+    : detail.cpFindings[1];
+
+  return {
+    component_id: componentId(label),
+    cp_contact: reading(contact?.value),
+    cp_proximity: reading(proximity?.value),
+    depth_el: detail.depthEl == null ? "" : String(detail.depthEl),
+    remarks: [contact?.remark, proximity?.remark].filter(Boolean).join("; "),
+  };
+};
+
+// One UT row per CVI clock reading: the reading sits in its own clock cell.
+// flow: positions > drop blank points > one row each
+const utRows = (detail: CviDetail, label: TargetLabel): Record<string, string>[] =>
+  detail.members
+    .flatMap((member) => member.positions)
+    .filter((position) => position.utMm !== null || (position.findings ?? "").trim() !== "")
+    .map((position) => ({
+      component_id: componentId(label),
+      wall_mm: label.nominal_wall_mm,
+      clock_12: position.clockPosition === "12" ? reading(position.utMm) : "",
+      clock_3: position.clockPosition === "3" ? reading(position.utMm) : "",
+      clock_6: position.clockPosition === "6" ? reading(position.utMm) : "",
+      clock_9: position.clockPosition === "9" ? reading(position.utMm) : "",
+      remarks: position.findings ?? "",
+    }));
 
 // One target set, read once: the project, its live results in tree order, and
 // the labels each result carries. No cap here: the export counts its own way.
@@ -322,7 +352,7 @@ export const gatherDatasheet = async (
   database?: DbOrTx,
   maxRows = Number.POSITIVE_INFINITY,
 ): Promise<DatasheetTable> => {
-  const { project, sorted, byDescriptionId, byPartCodeId, keyOf } = await loadTargets(
+  const { project, sorted, byDescriptionId, byPartCodeId } = await loadTargets(
     projectId,
     targets,
     organizationId,
@@ -344,13 +374,26 @@ export const gatherDatasheet = async (
   const rows: Record<string, string>[] = [];
   for (const record of picked) {
     if (rows.length >= maxRows) break;
-    const key = keyOf(record);
     const label =
       record.descriptionId !== null
         ? byDescriptionId.get(record.descriptionId)
         : record.partCodeId !== null
           ? byPartCodeId.get(record.partCodeId)
           : undefined;
+    const bound = label ?? EMPTY_LABEL;
+
+    // the two detail sheets read their own record shape
+    if (kind === "CP_MEMBER") {
+      const detail = await getGviDetailByResultId(record.resultId, database);
+      if (detail) rows.push(cpMemberRow(detail, bound));
+      continue;
+    }
+    if (kind === "UT") {
+      const detail = await getCviDetailByResultId(record.resultId, database);
+      if (detail) rows.push(...utRows(detail, bound));
+      continue;
+    }
+
     const input: ResultRowInput = {
       resultId: record.resultId,
       inspectionTypeCode: record.inspectionTypeCode,
@@ -359,7 +402,7 @@ export const gatherDatasheet = async (
     };
 
     for (const row of await rowsForResult(input, database)) {
-      rows.push(shapeRow(kind, row, label ?? EMPTY_LABEL));
+      rows.push(shapeRow(kind, row, bound));
     }
   }
 

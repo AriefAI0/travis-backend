@@ -42,6 +42,7 @@ const KIND_LABEL: Record<DatasheetKind, string> = {
   FMD: "FMD",
   SCOUR: "SCOUR",
   DVI: "DVI",
+  UT: "UT",
 };
 
 // `GVI 2026-10-22`: the kind and the day, which is what a user calls one.
