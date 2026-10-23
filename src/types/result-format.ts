@@ -19,13 +19,11 @@ export const formatResultValue = (
   switch (inspectionTypeCode) {
     // mirrors the tool's own generateGviSummary
     case "GVI": {
-      const kp = detail.kpRange ? `KP: ${detail.kpRange}, ` : "";
       const depth = detail.depthEl != null ? `Depth EL: ${detail.depthEl}, ` : "";
       const cp = detail.gviCp != null ? `${detail.gviCp} mV` : "N/A";
-      const ut = detail.gviUt != null ? `${detail.gviUt} mm` : "N/A";
       const condition = detail.condition === "ok" ? "Good Condition" : "Visual Damage";
 
-      return `${kp}${depth}CP: ${cp}, UT: ${ut}, ${condition}`;
+      return `${depth}CP: ${cp}, ${condition}`;
     }
     case "CVI": {
       // schema-update model: member type per position, CP per finding

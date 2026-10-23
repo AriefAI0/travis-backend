@@ -118,7 +118,7 @@ describe("excel export data", () => {
   it("writes numbers as numbers and recorded as a date", async () => {
     await seedTree();
     await addResult({ resultId: 5001, type: "GVI" });
-    await testDb.insert(schema.resultGvi).values({ resultId: 5001, depthEl: 2.5, gviUt: 11, condition: "ok" });
+    await testDb.insert(schema.resultGvi).values({ resultId: 5001, depthEl: 2.5, condition: "ok" });
 
     const [row] = (await gatherExcelExport(1, ["GVI"], targets("partCode:300"), testOrgId, testDb)).sheets[0]!
       .rows;
@@ -131,7 +131,6 @@ describe("excel export data", () => {
       type_code: "T1",
       condition: "Good Condition",
       depth_el: 2.5,
-      gvi_ut: 11,
     });
     expect(typeof row!.cells.depth_el).toBe("number");
     expect(row!.cells.recorded).toBeInstanceOf(Date);

@@ -177,11 +177,9 @@ describe("gatherReportData", () => {
     expect(gvi.isCVI).toBe(false);
     expect(gvi.isBSI).toBe(false);
     expect(gvi.rows).toHaveLength(1);
-    // schema-update shape: kp_range/gvi_ut have no column anymore
-    expect(gvi.rows[0]!.kp_range).toBe("");
+    // the GVI parent keeps depth only; readings live on the findings
     expect(gvi.rows[0]!.depth_el).toBe("1.25");
     expect(gvi.rows[0]!.gvi_cp).toBe("-900");
-    expect(gvi.rows[0]!.gvi_ut).toBe("");
     expect(gvi.rows[0]!.condition).toBe("Good Condition");
     expect(gvi.rows[0]!.remarks).toBe("looks fine");
     expect(gvi.rows[0]!.recorded).toMatch(/^\d{4}-\d{2}-\d{2}T/);

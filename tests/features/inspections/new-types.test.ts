@@ -124,24 +124,22 @@ const PIPELINE_VALID = {
 
 const SCENARIOS = [
   {
-    // the shape buildGviPayload emits: CP is a findings list, KP and UT scalars
+    // the shape buildGviPayload emits: CP is a findings list, depth a scalar
     type: "GVI",
     readPath: "gvi",
     valid: {
       kind: "gvi",
       version: 1,
-      kpRange: "KP-1",
       depthEl: 12.5,
-      gviUT: 8,
-      gviCP: [{ value: 120, remark: "" }],
+      gviCP: [{ value: 120, remark: "", method: "contact" }],
       condition: "ok",
     },
-    // the current form omits KP range and UT, and adds an MGI findings list
+    // depth may be omitted, and an MGI findings list rides alongside
     omitted: {
       kind: "gvi",
       version: 1,
       depthEl: 12.5,
-      gviCP: [{ value: 120, remark: "low" }],
+      gviCP: [{ value: 120, remark: "low", method: "proximity" }],
       mgi: [
         {
           depth: 3,
@@ -156,9 +154,7 @@ const SCENARIOS = [
     invalid: {
       kind: "gvi",
       version: 1,
-      kpRange: null,
       depthEl: null,
-      gviUT: null,
       gviCP: [],
       condition: "maybe",
     },
@@ -433,7 +429,7 @@ describe("new inspection types", () => {
       kind: "gvi",
       version: 1,
       depthEl: 1,
-      gviCP: [{ value: 1, remark: "" }],
+      gviCP: [{ value: 1, remark: "", method: "contact" }],
       condition: "ok",
     });
     expect(stopped.status).toBe(400);

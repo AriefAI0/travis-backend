@@ -7,6 +7,7 @@ export type CreateResultGviFindingInput = {
   resultGviId: number;
   value?: number | null;
   remark?: string | null;
+  cpMethod?: "contact" | "proximity" | null;
   sortOrder?: number;
 };
 

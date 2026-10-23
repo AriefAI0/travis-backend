@@ -19,6 +19,9 @@ export const scourYesNo = pgEnum("scour_yes_no", ["yes", "no"]);
 
 export const gviCondition = pgEnum("gvi_condition", ["ok", "not_ok"]);
 
+// the two CP reading methods the GVI tool collects
+export const gviCpMethod = pgEnum("gvi_cp_method", ["contact", "proximity"]);
+
 export const cviMemberType = pgEnum("cvi_member_type", ["chord", "brace"]);
 
 export const dviMemberType = pgEnum("dvi_member_type", ["chord", "brace"]);
@@ -327,6 +330,9 @@ export const partCode = pgTable(
       .references(() => type.typeId, { onDelete: "cascade" }),
 
     code: text("code").notNull(),
+
+    // design wall entered once per part code; the UT sheet reads it
+    nominalWallMm: doublePrecision("nominal_wall_mm"),
 
     ...createdAt,
     ...updatedAt,
@@ -664,10 +670,9 @@ export const resultGvi = pgTable(
       .primaryKey()
       .references(() => result.resultId, { onDelete: "cascade" }),
 
-    // the GVI tool form collects all three; kept off the findings table
-    kpRange: text("kp_range"),
+    // depth is the only sheet field the GVI parent keeps; readings live on
+    // the findings
     depthEl: doublePrecision("depth_el"),
-    gviUt: doublePrecision("gvi_ut"),
 
     condition: gviCondition("condition").notNull(),
 
@@ -690,6 +695,8 @@ export const resultGviFinding = pgTable(
 
     value: doublePrecision("value"),
     remark: text("remark"),
+    // which probe took the reading; null on rows saved before the method
+    cpMethod: gviCpMethod("cp_method"),
     sortOrder: integer("sort_order").notNull().default(0),
 
     ...createdAt,
@@ -1394,8 +1401,8 @@ export const report = pgTable(
 
 /* =================== DATASHEET REPORTS =================== */
 
-// One datasheet per inspection kind. CP_MEMBER is the CVI datasheet: the
-// member sheet renders CVI results.
+// One datasheet per inspection kind. CP_MEMBER renders GVI results; UT renders
+// the CVI clock readings.
 export const datasheetKind = pgEnum("datasheet_kind", [
   "GVI",
   "CP_ANODE",
@@ -1403,6 +1410,7 @@ export const datasheetKind = pgEnum("datasheet_kind", [
   "FMD",
   "SCOUR",
   "DVI",
+  "UT",
 ]);
 
 export const datasheetStatus = pgEnum("datasheet_status", ["generating", "ready", "error"]);

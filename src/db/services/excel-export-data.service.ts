@@ -101,10 +101,8 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
     type: "GVI",
     sheet: "GVI",
     columns: [
-      col("kp_range", "KP range"),
       num("depth_el", "Depth EL"),
       col("gvi_cp", "GVI CP"),
-      num("gvi_ut", "GVI UT"),
       col("condition", "Condition"),
     ],
     children: [],
@@ -383,10 +381,8 @@ const shapeResult = async (
       if (!detail) return empty;
       return {
         cells: {
-          kp_range: txt(detail.kpRange),
           depth_el: number(detail.depthEl),
           gvi_cp: joined(detail.cpFindings.map((finding) => txt(finding.value))),
-          gvi_ut: number(detail.gviUt),
           condition: label(CONDITION_LABEL, detail.condition),
         },
         children: {},

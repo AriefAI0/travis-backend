@@ -464,9 +464,7 @@ const writeGviDetail = async (
     const resultGvi = await createResultGvi(
       {
         resultId,
-        kpRange: payload.kpRange ?? null,
         depthEl: payload.depthEl ?? null,
-        gviUt: payload.gviUT ?? null,
         condition: payload.condition,
       },
       tx,
@@ -483,6 +481,7 @@ const writeGviDetail = async (
           resultGviId: resultGvi.resultId,
           value: finding.value,
           remark: finding.remark,
+          cpMethod: finding.method,
           sortOrder: index,
         },
         tx,
@@ -1008,12 +1007,10 @@ export const listProjectSummary = async (
       case "GVI": {
         const detail = gvi.get(resultRecord.resultId);
         if (!detail) return null;
-        // the GVI tool shows KP, depth, CP and UT alongside the condition
+        // the GVI tool shows depth and CP findings beside the condition
         return {
-          kpRange: detail.kpRange,
           depthEl: detail.depthEl,
           gviCp: (gviFindings.get(resultRecord.resultId) ?? [])[0]?.value ?? null,
-          gviUt: detail.gviUt,
           condition: detail.condition,
         };
       }
@@ -1479,9 +1476,7 @@ export const getGviDetailByResultId = async (
 
   return {
     resultId: resultGvi.resultId,
-    kpRange: resultGvi.kpRange,
     depthEl: resultGvi.depthEl,
-    gviUt: resultGvi.gviUt,
     condition: resultGvi.condition,
     createdAt: toIsoString(resultGvi.createdAt),
     updatedAt: toIsoString(resultGvi.updatedAt),

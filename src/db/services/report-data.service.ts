@@ -176,13 +176,11 @@ export const rowsForResult = async (
       if (!detail) return [];
       return [
         {
-          kp_range: text(detail.kpRange),
           depth_el: text(detail.depthEl),
           gvi_cp: detail.cpFindings
             .map((finding) => text(finding.value))
             .filter(Boolean)
             .join(", "),
-          gvi_ut: text(detail.gviUt),
           condition: label(CONDITION_LABEL, detail.condition),
           remarks,
           recorded,
@@ -466,6 +464,9 @@ export type TargetLabel = {
   description: string;
   type_code: string;
   part_code: string;
+  // the part code's design wall, blank on a description target; the UT sheet
+  // reads it and no report column does
+  nominal_wall_mm: string;
 };
 
 const EMPTY_LABEL: TargetLabel = {
@@ -474,6 +475,7 @@ const EMPTY_LABEL: TargetLabel = {
   description: "",
   type_code: "",
   part_code: "",
+  nominal_wall_mm: "",
 };
 
 // Walk the tree once, collecting target labels plus their display order.
@@ -492,6 +494,7 @@ export const collectTargets = (groups: Awaited<ReturnType<typeof listProjectTask
           description: descriptionNode.label,
           type_code: "",
           part_code: "",
+          nominal_wall_mm: "",
         });
         order.push(`description:${descriptionNode.descriptionId}`);
 
@@ -504,6 +507,7 @@ export const collectTargets = (groups: Awaited<ReturnType<typeof listProjectTask
               description: "",
               type_code: typeNode.code,
               part_code: partCodeNode.code,
+              nominal_wall_mm: text(partCodeNode.nominalWallMm),
             });
             order.push(`part_code:${partCodeNode.partCodeId}`);
           }

@@ -45,10 +45,8 @@ const TYPES: { code: string; readPath: string; payload: unknown }[] = [
     payload: {
       kind: "gvi",
       version: 1,
-      kpRange: "KP-1",
       depthEl: 12.5,
-      gviUT: 8,
-      gviCP: [{ value: 120, remark: "" }],
+      gviCP: [{ value: 120, remark: "", method: "contact" }],
       condition: "ok",
     },
   },
