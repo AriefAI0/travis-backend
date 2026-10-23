@@ -52,6 +52,7 @@ beforeEach(() => {
   excelWorkerDeps.read = async () => current;
   excelWorkerDeps.gather = async () => emptyData;
   excelWorkerDeps.build = async () => Buffer.from("workbook");
+  excelWorkerDeps.package = async (key) => ({ bytes: 42, key });
   excelWorkerDeps.putObject = async (key, body) => void stored.set(key, body);
   excelWorkerDeps.removeObject = async (key) => {
     removed.push(key);
@@ -104,12 +105,13 @@ describe("excel export worker", () => {
     expect(String((current.errors as { message: string }[])[0]?.message)).toContain("gather exploded");
   });
 
-  it("fails a media level no phase can build yet", async () => {
-    current = rowFor({ media: "clips", lane: "clips" });
+  it("packages an images export as a zip", async () => {
+    current = rowFor({ media: "images" });
 
     await runExcelExport(current);
 
-    expect(current.status).toBe("failed");
+    expect(current.status).toBe("ready");
+    expect(current.packageSize).toBe(42);
     expect(stored.size).toBe(0);
   });
 

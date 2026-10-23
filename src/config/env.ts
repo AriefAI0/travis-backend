@@ -1,3 +1,6 @@
+import os from "node:os";
+import path from "node:path";
+
 import { z } from "zod";
 
 const schema = z.object({
@@ -43,12 +46,18 @@ const schema = z.object({
     .min(32, { message: "must be at least 32 characters" }),
   // Where an excel export keeps its scratch files. Boot clears this directory
   // and nothing else, so a wrong value cannot reach the rest of the volume.
-  EXCEL_EXPORT_SCRATCH_DIR: z.string().min(1).default("/app/data/excel-export"),
+  // The container sets /app/data/excel-export. The default follows the OS, so
+  // a dev host or a test run never writes under a directory it cannot create.
+  EXCEL_EXPORT_SCRATCH_DIR: z
+    .string()
+    .min(1)
+    .default(path.join(os.tmpdir(), "travis-excel-export")),
   // The report PDF converter. One run at a time, and one run may not outlive
   // the timeout below.
   SOFFICE_PATH: z.string().min(1).default("soffice"),
   PDF_CONVERT_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
+  FFPROBE_PATH: z.string().min(1).default("ffprobe"),
   FFMPEG_CONCURRENCY: z.coerce.number().int().positive().default(1),
   // One FFmpeg run may not outlive this. A hung encoder is killed, never
   // waited on: thumbnails are best effort and must not pin a worker slot.

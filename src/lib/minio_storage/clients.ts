@@ -2,7 +2,14 @@ import { Client } from "minio";
 import { buckets, env } from "../../config/env";
 
 // Ported from the travis app's scripts/minio-mint-service.ts buildMinioClient.
-export function buildMinioClient(endpoint: string, accessKey: string, secretKey: string) {
+// `partSize` matters for a streamed upload with no known length: unset, minio-js
+// assumes a 5 TiB object and buffers a 528 MiB part in memory.
+export function buildMinioClient(
+  endpoint: string,
+  accessKey: string,
+  secretKey: string,
+  partSize?: number,
+) {
   const url = new URL(endpoint);
   return new Client({
     endPoint: url.hostname,
@@ -10,6 +17,7 @@ export function buildMinioClient(endpoint: string, accessKey: string, secretKey:
     useSSL: url.protocol === "https:",
     accessKey,
     secretKey,
+    ...(partSize ? { partSize } : {}),
     // pin the region: presigning stays offline (unset, minio-js does a
     // GetBucketLocation round-trip per first presign per bucket)
     region: "us-east-1",

@@ -347,7 +347,9 @@ describe("clip still job", () => {
 
 describe("bounded FFmpeg", () => {
   test("resolves a clean run", async () => {
-    await expect(runFfmpegBounded(process.execPath, ["-e", "process.exit(0)"], 5_000)).resolves.toBeUndefined();
+    await expect(
+      runFfmpegBounded(process.execPath, ["-e", "process.exit(0)"], 5_000),
+    ).resolves.toMatchObject({ stdout: "", nonMonotonous: false });
   });
 
   test("rejects a non-zero exit with its stderr", async () => {

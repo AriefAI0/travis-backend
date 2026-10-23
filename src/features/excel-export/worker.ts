@@ -7,7 +7,9 @@
 // flow: wake > claim > gather > build > upload > compare-and-set
 
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
+import path from "node:path";
+import { Readable } from "node:stream";
 
 import { env } from "../../config/env";
 import { log } from "../../lib/logger";
@@ -23,7 +25,9 @@ import {
   type ExcelExportView,
 } from "../../db/services/excel-export.service";
 import type { InspectionTypeCode } from "../../types/api";
-import { exportFilename, writeWorkbook } from "./workbook";
+import { collectImages } from "./images";
+import { readmeEntry, writePackage, type PackageEntry } from "./package";
+import { exportFilename, writeWorkbook, type MediaThumb } from "./workbook";
 
 const LANES = ["light", "clips"] as const;
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -58,6 +62,7 @@ export type ExcelWorkerDeps = {
   read: (id: string, organizationId: number, ownerUserId: string) => Promise<ExcelExportView>;
   gather: typeof gatherExcelExport;
   build: typeof writeWorkbook;
+  package: typeof writePackage;
   putObject: (key: string, body: Buffer) => Promise<void>;
   removeObject: (key: string) => Promise<void>;
   emit: (row: ExcelExportView, action: "create" | "modify") => void;
@@ -69,6 +74,7 @@ const defaultDeps: ExcelWorkerDeps = {
   read: getExcelExport,
   gather: gatherExcelExport,
   build: writeWorkbook,
+  package: writePackage,
   putObject: async (key, body) =>
     void (await minio.putObject(env.BUCKET_MEDIA, key, body, body.length, {
       "Content-Type": XLSX_MIME,
@@ -96,14 +102,30 @@ const removePackage = async (key: string | null) => {
   });
 };
 
-// The workbook for one row. Media levels land in later phases.
-const buildPackage = async (row: ExcelExportView) => {
-  if (row.media !== "raw") {
-    // ponytail: images and clips arrive with their own phases; until then a
-    // media export fails loudly instead of shipping a workbook that lies
-    throw new Error(`media level ${row.media} is not available yet`);
-  }
+// What one export produces: a bare workbook, or a zip of media beside it.
+type BuiltPackage =
+  | { kind: "xlsx"; body: Buffer; name: string; errors: string[] }
+  | { kind: "zip"; entries: PackageEntry[]; name: string; errors: string[] };
 
+const MIB = 1024 ** 2;
+
+// The README that ships before any media, naming the zip rules and the tools
+// that open a ZIP64 archive.
+const readmeLines = (row: ExcelExportView, files: number) => [
+  "Travis excel export",
+  "",
+  `Project: ${row.projectId}`,
+  `Results: ${row.itemsTotal}, media files: ${files}`,
+  "",
+  "Extract this zip before opening the workbook: image and clip links point to",
+  "files beside it, and they break inside the archive.",
+  "",
+  "Windows Explorer and 7-Zip open this archive.",
+  "macOS Archive Utility does not open a ZIP64 archive: use 7-Zip or Keka.",
+];
+
+// flow: gather > (media: images > thumbnails) > workbook > zip entries
+const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<BuiltPackage> => {
   const data = await excelWorkerDeps.gather(
     row.projectId,
     row.types as InspectionTypeCode[],
@@ -111,8 +133,66 @@ const buildPackage = async (row: ExcelExportView) => {
     row.organizationId,
   );
 
-  const body = await excelWorkerDeps.build(data, { mediaLevel: row.media });
-  return { body, name: exportFilename(data.projectTitle, row.media), extension: "xlsx" };
+  if (row.media === "raw") {
+    const body = await excelWorkerDeps.build(data, { mediaLevel: "raw" });
+    return { kind: "xlsx", body, name: exportFilename(data.projectTitle, "raw"), errors: [] };
+  }
+
+  const scratch = path.join(env.EXCEL_EXPORT_SCRATCH_DIR, row.id);
+  const resultTypes = data.sheets.flatMap((sheet) =>
+    sheet.rows.map((entry) => ({ resultId: entry.resultId, type: sheet.type })),
+  );
+
+  const plan =
+    row.media === "images" || row.media === "clips"
+      ? await collectImages(resultTypes, scratch, signal)
+      : { files: [], rows: [], errors: [] };
+
+  const imageThumbs = new Map<number, MediaThumb[]>();
+  for (const file of plan.files) {
+    const list = imageThumbs.get(file.resultId) ?? [];
+    list.push({ thumbnail: file.thumbnail, target: file.target });
+    imageThumbs.set(file.resultId, list);
+  }
+
+  const workbookBody = await excelWorkerDeps.build(data, {
+    mediaLevel: row.media,
+    mediaRows: plan.rows,
+    imageThumbs,
+  });
+
+  // the workbook must be a stream like everything else, so it lands on disk
+  await mkdir(scratch, { recursive: true });
+  const workbookFile = path.join(scratch, "workbook.xlsx");
+  await Bun.write(workbookFile, workbookBody);
+
+  const mediaFiles = plan.files.flatMap((file) => {
+    const entries: PackageEntry[] = [
+      { name: file.raw.name, open: () => Readable.from(Bun.file(file.raw.file).stream()) },
+    ];
+    const annotated = file.annotated;
+    if (annotated) {
+      entries.push({
+        name: annotated.name,
+        open: () => Readable.from(Bun.file(annotated.file).stream()),
+      });
+    }
+    return entries;
+  });
+
+  const entries: PackageEntry[] = [
+    readmeEntry(readmeLines(row, mediaFiles.length)),
+    ...mediaFiles,
+    { name: "workbook.xlsx", open: () => Readable.from(Bun.file(workbookFile).stream()) },
+  ];
+
+  // a missing image is a delivered package with a stated gap, not a failure
+  return {
+    kind: "zip",
+    entries,
+    name: exportFilename(data.projectTitle, row.media),
+    errors: plan.errors,
+  };
 };
 
 // Move one claimed row to a terminal status, or leave it cancelled.
@@ -136,30 +216,40 @@ export const runExcelExport = async (claimed: ExcelExportView) => {
       return;
     }
 
-    const built = await buildPackage(current);
+    // one controller per run: a cancel stops the fetches, ffmpeg, and upload
+    const controller = new AbortController();
+    const built = await buildPackage(current, controller.signal);
     progressClock.set(claimed.id, Date.now());
 
-    // a cancel that landed while the workbook was building still wins
+    // a cancel that landed while the package was building still wins
     const beforeUpload = await excelWorkerDeps.read(
       claimed.id,
       current.organizationId,
       current.ownerUserId,
     );
     if (beforeUpload.status === "cancelling") {
+      controller.abort();
       await excelWorkerDeps.move(claimed.id, "cancelling", { status: "cancelled" });
       emit(beforeUpload, "modify");
+      await removePackage(packageKey);
       return;
     }
 
-    await excelWorkerDeps.putObject(packageKey!, built.body);
+    const bytes =
+      built.kind === "xlsx"
+        ? (await excelWorkerDeps.putObject(packageKey!, built.body), built.body.length)
+        : (await excelWorkerDeps.package(packageKey!, built.entries, { signal: controller.signal }))
+            .bytes;
 
+    const status = built.errors.length > 0 ? "ready_with_errors" : "ready";
     const moved = await excelWorkerDeps.move(claimed.id, "running", {
-      status: "ready",
+      status,
       phase: "done",
       packageKey,
-      packageSize: built.body.length,
-      bytesWritten: built.body.length,
+      packageSize: bytes,
+      bytesWritten: bytes,
       itemsDone: current.itemsTotal,
+      errors: built.errors.map((message) => ({ message })),
     });
 
     // the row left the table mid-run: the package has no owner
@@ -168,10 +258,11 @@ export const runExcelExport = async (claimed: ExcelExportView) => {
       return;
     }
 
-    emit({ ...current, status: "ready" }, "modify");
+    emit({ ...current, status }, "modify");
     log.info("excel export ready", {
       id: claimed.id,
-      bytes: built.body.length,
+      bytes,
+      status,
       ms: Date.now() - started,
     });
   } catch (error) {

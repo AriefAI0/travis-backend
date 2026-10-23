@@ -7,7 +7,6 @@
 //
 // flow: due grid points > fetch those segments > local stills > dated keys > rows
 
-import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -39,43 +38,19 @@ const POSTER_AT_MS = 1_000;
 export type ThumbnailDeps = {
   loadSource: (sessionId: number) => Promise<ThumbnailSource | null>;
   loadClipSource: (clipId: number) => Promise<ClipStillSource | null>;
-  runFfmpeg: (command: string, args: string[], timeoutMs: number) => Promise<void>;
+  // unknown, not void: the shared runner answers with stdout, and a still
+  // never reads it
+  runFfmpeg: (command: string, args: string[], timeoutMs: number) => Promise<unknown>;
   fetchSegment: (objectKey: string, destination: string) => Promise<void>;
   putObject: (key: string, body: Uint8Array) => Promise<void>;
   recordRows: (rows: TimelineThumbnailInsert[]) => Promise<number>;
   recordClipStill: (clipId: number, thumbnailKey: string) => Promise<void>;
 };
 
-// flow: spawn > collect stderr > kill at the deadline > settle once
-export const runFfmpegBounded = (
-  command: string,
-  args: string[],
-  timeoutMs: number,
-): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
-    let stderr = "";
-    let settled = false;
-    const settle = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      error ? reject(error) : resolve();
-    };
-    const timer = setTimeout(() => {
-      // A hung encoder is killed, never waited on.
-      child.kill("SIGKILL");
-      settle(new Error(`ffmpeg exceeded ${timeoutMs}ms and was killed`));
-    }, timeoutMs);
-
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString()).slice(-2_000);
-    });
-    child.on("error", (error) => settle(error));
-    child.on("close", (code) =>
-      code === 0 ? settle() : settle(new Error(`ffmpeg exited ${code}: ${stderr}`)),
-    );
-  });
+// The runner lives in lib/ffmpeg.ts now; re-exported so existing callers and
+// tests keep one import.
+import { runFfmpegBounded } from "../../../lib/ffmpeg";
+export { runFfmpegBounded };
 
 const segmentPath = (directory: string, sequence: number): string =>
   path.join(directory, `segment-${String(sequence).padStart(10, "0")}.ts`);

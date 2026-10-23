@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import ExcelJS from "exceljs";
 
 import { IDENTITY_COLUMNS, type ExcelExportData } from "../../../src/db/services/excel-export-data.service";
@@ -137,6 +140,40 @@ describe("excel workbook", () => {
 
     expect(text).toContain("Extract the zip");
   });
+
+  it("stacks three thumbnails and links the rest past them", async () => {
+    // one real jpeg, reused: the cell placement is what this test checks
+    const directory = await mkdtemp(path.join(tmpdir(), "workbook-thumb-"));
+    const thumbnail = path.join(directory, "thumb.jpg");
+    const made = Bun.spawn(
+      ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x336699:size=160x120:d=1", "-frames:v", "1", thumbnail],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    await made.exited;
+
+    const thumbs = Array.from({ length: 5 }, (_, index) => ({
+      thumbnail,
+      target: `images/GVI/5001_${index + 1}.jpg`,
+    }));
+
+    const buffer = await writeWorkbook(data, {
+      mediaLevel: "images",
+      generatedAt: recorded,
+      imageThumbs: new Map([[5001, thumbs]]),
+    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
+
+    const sheet = workbook.getWorksheet("GVI")!;
+    const header = sheet.getRow(1).values as unknown[];
+    const imagesColumn = (header as string[]).indexOf("Images");
+    expect(imagesColumn).toBeGreaterThan(0);
+
+    const cell = sheet.getRow(2).getCell(imagesColumn).value as { text?: string } | null;
+    expect(cell?.text).toBe("+2 more (5)");
+    // three anchors placed, the other two only linked
+    expect(sheet.getImages()).toHaveLength(3);
+  }, 30_000);
 
   it("keeps every sheet name inside the 31 character limit", async () => {
     const workbook = await read();

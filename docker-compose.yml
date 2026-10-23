@@ -55,6 +55,8 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       # browser origins allowed to fetch HLS; defaults to the dev renderer
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,null}
+      # excel export scratch space; boot clears this directory and nothing else
+      EXCEL_EXPORT_SCRATCH_DIR: /app/data/excel-export
     volumes:
       - app-data:/app/data # sqlite tracker + finalize tmp survive redeploys
     networks:
