@@ -2,7 +2,7 @@
 // Run: ~/.bun/bin/bun spike/build-datasheet-templates.ts
 // flow: read _source > patch header tags > rebuild the data table > zip > write datasheets
 //
-// `templates/_source/` holds the five files as the user delivered them. Every
+// `templates/_source/` holds the six files as the user delivered them. Every
 // part rides through verbatim except `word/document.xml`, which this file
 // rewrites. Run it again after a vendor file changes, never against its own
 // output. The runtime image copies `templates/datasheets` only.
@@ -219,7 +219,8 @@ const patchHeader = (xml: string, kind: string) => {
   );
   out = setCellText(out, kind === "gvi" ? "Report" : "Report No.:", run("Report No.: {ReportNo}"));
   out = setCellText(out, "Date:", run("Date: {Date}"));
-  if (kind === "cp_anode") {
+  // ut ships the client and session tags already; the other two need them
+  if (kind === "cp_anode" || kind === "cp_member") {
     out = setCellText(out, "Client :", run("Client : {Client}"));
     out = setCellText(
       out,
@@ -285,9 +286,10 @@ const buildCpAnode = (xml: string) => {
   return rebuildTable(xml, "COMPONENT", CP_ANODE_WIDTHS, [row(header), row(data)]);
 };
 
-/* ---------- CP-MEMBER (renders CVI results) ---------- */
+/* ---------- CP-MEMBER (renders GVI results) ---------- */
 
-const CP_MEMBER_WIDTHS = [2000, 1000, 1600, 990, 990, 990, 990, 2015];
+// COMPONENT ID | CP VALUE (Contact | Proximity) | EL | REMARKS
+const CP_MEMBER_WIDTHS = [3200, 1500, 1500, 1000, 3432];
 
 const buildCpMember = (xml: string) => {
   const fixed = (text: string, i: number, vmerge: CellSpec["vmerge"]): CellSpec => ({
@@ -299,29 +301,60 @@ const buildCpMember = (xml: string) => {
 
   const head: CellSpec[] = [
     fixed("COMPONENT ID", 0, "restart"),
-    fixed("CP (mV)", 1, "restart"),
-    fixed("NOMINAL WALL THICKNESS (mm)", 2, "restart"),
-    { w: 3960, text: "CLOCK POSITION (UT mm)", span: 4, header: true },
-    fixed("REMARKS", 7, "restart"),
+    // the reading method pairs under one heading
+    { w: 3000, text: "CP VALUE (-)mV", span: 2, header: true },
+    fixed("EL (-)m", 3, "restart"),
+    fixed("REMARKS", 4, "restart"),
   ];
 
-  const clock = ["12 o'clock", "3 o'clock", "6 o'clock", "9 o'clock"].map((text, i) => ({
-    w: CP_MEMBER_WIDTHS[3 + i]!,
-    text,
-    header: true,
+  const sub: CellSpec[] = [
+    fixed("", 0, "continue"),
+    { w: 1500, text: "Contact", header: true },
+    { w: 1500, text: "Proximity", header: true },
+    fixed("", 3, "continue"),
+    fixed("", 4, "continue"),
+  ];
+
+  const tags = ["component_id", "cp_contact", "cp_proximity", "depth_el", "remarks"];
+  const data = tags.map((tag, i) => ({
+    w: CP_MEMBER_WIDTHS[i]!,
+    text: i === 0 ? `{#rows}{${tag}}` : i === tags.length - 1 ? `{${tag}}{/rows}` : `{${tag}}`,
   }));
+
+  return rebuildTable(xml, "COMPONENT", CP_MEMBER_WIDTHS, [row(head), row(sub), row(data)]);
+};
+
+/* ---------- UT (renders CVI results) ---------- */
+
+// COMPONENT ID | NOMINAL WALL THICKNESS | CLOCK POSITION (4) | REMARKS
+const UT_WIDTHS = [2610, 1620, 990, 990, 990, 1080, 2295];
+
+const UT_CLOCKS = ["12 o'clock", "3 o'clock", "6 o'clock", "9 o'clock"];
+
+const buildUt = (xml: string) => {
+  const fixed = (text: string, i: number, vmerge: CellSpec["vmerge"]): CellSpec => ({
+    w: UT_WIDTHS[i]!,
+    text,
+    vmerge,
+    header: true,
+  });
+
+  const head: CellSpec[] = [
+    fixed("COMPONENT ID", 0, "restart"),
+    fixed("NOMINAL WALL THICKNESS (mm)", 1, "restart"),
+    { w: 4050, text: "CLOCK POSITION (UT mm)", span: 4, header: true },
+    fixed("REMARKS", 6, "restart"),
+  ];
 
   const sub: CellSpec[] = [
     fixed("", 0, "continue"),
     fixed("", 1, "continue"),
-    fixed("", 2, "continue"),
-    ...clock,
-    fixed("", 7, "continue"),
+    ...UT_CLOCKS.map((text, i) => ({ w: UT_WIDTHS[2 + i]!, text, header: true })),
+    fixed("", 6, "continue"),
   ];
 
   const tags = [
     "component_id",
-    "cp_mv",
     "wall_mm",
     "clock_12",
     "clock_3",
@@ -330,11 +363,11 @@ const buildCpMember = (xml: string) => {
     "remarks",
   ];
   const data = tags.map((tag, i) => ({
-    w: CP_MEMBER_WIDTHS[i]!,
+    w: UT_WIDTHS[i]!,
     text: i === 0 ? `{#rows}{${tag}}` : i === tags.length - 1 ? `{${tag}}{/rows}` : `{${tag}}`,
   }));
 
-  return rebuildTable(xml, "COMPONENT", CP_MEMBER_WIDTHS, [row(head), row(sub), row(data)]);
+  return rebuildTable(xml, "COMPONENT", UT_WIDTHS, [row(head), row(sub), row(data)]);
 };
 
 /* ---------- FMD ---------- */
@@ -457,6 +490,7 @@ const BUILDERS: Record<string, (xml: string) => string> = {
   gvi: patchGvi,
   cp_anode: buildCpAnode,
   cp_member: buildCpMember,
+  ut: buildUt,
   fmd: buildFmd,
   scour: patchScour,
 };
