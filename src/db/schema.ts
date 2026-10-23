@@ -1531,3 +1531,32 @@ export const excelExport = pgTable(
     ),
   })
 );
+
+/* =========================================================
+   CLIP MKV CACHE
+========================================================= */
+// One merged .mkv per ingest. The row dies with its ingest, so a teardown that
+// removes the prefix takes the cache reference with it.
+export const clipMkvCache = pgTable(
+  "clip_mkv_cache",
+  {
+    ingestId: integer("ingest_id")
+      .primaryKey()
+      .references(() => recordingIngest.ingestId, { onDelete: "cascade" }),
+
+    // a hit needs the same ingest AND the same segment count
+    segmentCount: integer("segment_count").notNull(),
+    objectKey: text("object_key").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    // a read updates this first, so the sweep never removes a live file
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxClipMkvCacheLastUsed: index("idx_clip_mkv_cache_last_used").on(table.lastUsedAt),
+  })
+);

@@ -25,6 +25,7 @@ import {
   type ExcelExportView,
 } from "../../db/services/excel-export.service";
 import type { InspectionTypeCode } from "../../types/api";
+import { collectClips } from "./clips";
 import { collectImages } from "./images";
 import { readmeEntry, writePackage, type PackageEntry } from "./package";
 import { exportFilename, writeWorkbook, type MediaThumb } from "./workbook";
@@ -143,13 +144,19 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
     sheet.rows.map((entry) => ({ resultId: entry.resultId, type: sheet.type })),
   );
 
-  const plan =
+  const imagePlan =
     row.media === "images" || row.media === "clips"
       ? await collectImages(resultTypes, scratch, signal)
       : { files: [], rows: [], errors: [] };
 
+  // clip merges run after the images, one at a time, inside the clips lane
+  const clipPlan =
+    row.media === "clips"
+      ? await collectClips(resultTypes, scratch, signal)
+      : { files: [], thumbs: new Map<number, MediaThumb>(), rows: [], errors: [] };
+
   const imageThumbs = new Map<number, MediaThumb[]>();
-  for (const file of plan.files) {
+  for (const file of imagePlan.files) {
     const list = imageThumbs.get(file.resultId) ?? [];
     list.push({ thumbnail: file.thumbnail, target: file.target });
     imageThumbs.set(file.resultId, list);
@@ -157,8 +164,9 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
 
   const workbookBody = await excelWorkerDeps.build(data, {
     mediaLevel: row.media,
-    mediaRows: plan.rows,
+    mediaRows: [...imagePlan.rows, ...clipPlan.rows],
     imageThumbs,
+    clipThumbs: clipPlan.thumbs,
   });
 
   // the workbook must be a stream like everything else, so it lands on disk
@@ -166,7 +174,7 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
   const workbookFile = path.join(scratch, "workbook.xlsx");
   await Bun.write(workbookFile, workbookBody);
 
-  const mediaFiles = plan.files.flatMap((file) => {
+  const mediaFiles = imagePlan.files.flatMap((file) => {
     const entries: PackageEntry[] = [
       { name: file.raw.name, open: () => Readable.from(Bun.file(file.raw.file).stream()) },
     ];
@@ -180,18 +188,25 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
     return entries;
   });
 
+  // a merged clip streams out of scratch like an image does
+  const clipFiles: PackageEntry[] = clipPlan.files.map((file) => ({
+    name: file.name,
+    open: () => Readable.from(Bun.file(file.file).stream()),
+  }));
+
   const entries: PackageEntry[] = [
-    readmeEntry(readmeLines(row, mediaFiles.length)),
+    readmeEntry(readmeLines(row, mediaFiles.length + clipFiles.length)),
     ...mediaFiles,
+    ...clipFiles,
     { name: "workbook.xlsx", open: () => Readable.from(Bun.file(workbookFile).stream()) },
   ];
 
-  // a missing image is a delivered package with a stated gap, not a failure
+  // a missing image or clip is a delivered package with a stated gap
   return {
     kind: "zip",
     entries,
     name: exportFilename(data.projectTitle, row.media),
-    errors: plan.errors,
+    errors: [...imagePlan.errors, ...clipPlan.errors],
   };
 };
 

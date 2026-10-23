@@ -77,6 +77,9 @@ export const listIngestSegmentRecords = async (
       durationMs: recordingIngestSegment.durationMs,
       discontinuity: recordingIngestSegment.discontinuity,
       objectKey: recordingIngestSegment.objectKey,
+      // the export checks every fetched segment against these two
+      checksumSha256: recordingIngestSegment.checksumSha256,
+      sizeBytes: recordingIngestSegment.sizeBytes,
     })
     .from(recordingIngestSegment)
     .where(

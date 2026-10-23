@@ -32,25 +32,9 @@ import { ok } from "../../lib/response";
 import type { Action, Subject } from "../../lib/auth/permissions";
 import { excelCreateSchema, excelPreviewSchema, type ExcelExportListItem } from "../../types/api";
 import { EXPORT_TTL_MS } from "../../db/services/excel-export.service";
+import { estimateExportSizes } from "./estimate";
 import { exportFilename } from "./workbook";
 import { kickExcelExportWorker } from "./worker";
-
-const MIB = 1024 ** 2;
-
-// ponytail: fixed costs stand in for a sampled average until the media phases
-// measure real bytes. The clip term becomes an exact segment sum in T12.
-const BYTES_PER_ROW = 500;
-const BYTES_PER_IMAGE = 300 * 1024;
-const BYTES_PER_CLIP = 15 * MIB;
-
-// Rough package size per media level, and whether it passes the ZIP64 line.
-const estimateFor = (results: number, media: ExcelMediaLevel) => {
-  const workbook = 20 * 1024 + results * BYTES_PER_ROW;
-  const images = workbook + results * 2 * BYTES_PER_IMAGE;
-  const clips = images + results * BYTES_PER_CLIP;
-  const bytes = media === "raw" ? workbook : media === "images" ? images : clips;
-  return { bytes: Math.round(bytes), zip64: bytes > 4 * 1024 ** 3 };
-};
 
 const toListItem = (row: Awaited<ReturnType<typeof getExcelExport>>): ExcelExportListItem => ({
   id: row.id,
@@ -113,17 +97,10 @@ export const excelExportRoutes = (database?: DbOrTx) => {
       previewExcelExport(projectId, types, parsed, caller.organizationId, database),
     ]);
 
-    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    // real numbers: cached clip sizes, sampled image bytes, rows x fixed cost
+    const estimates = await estimateExportSizes(projectId, parsed, caller.organizationId, database);
 
-    return ok(c, {
-      counts,
-      preview,
-      estimates: {
-        raw: estimateFor(total, "raw"),
-        images: estimateFor(total, "images"),
-        clips: estimateFor(total, "clips"),
-      },
-    });
+    return ok(c, { counts, preview, estimates });
   });
 
   // Queue the export: the row lands now, the package lands when a lane runs it.

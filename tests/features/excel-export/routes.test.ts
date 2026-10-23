@@ -108,7 +108,10 @@ describe("excel export routes", () => {
     expect(body.counts.GVI).toBe(1);
     expect(body.preview.sheets[0]!.rows).toHaveLength(1);
     expect(body.estimates.raw!.bytes).toBeGreaterThan(0);
-    expect(body.estimates.clips!.bytes).toBeGreaterThan(body.estimates.images!.bytes);
+    // no media on this result, so every level adds nothing above the workbook
+    expect(body.estimates.images!.bytes).toBeGreaterThanOrEqual(body.estimates.raw!.bytes);
+    expect(body.estimates.clips!.bytes).toBeGreaterThanOrEqual(body.estimates.images!.bytes);
+    expect(body.estimates.clips!.zip64).toBe(false);
   });
 
   it("exports no rows for a target from another project", async () => {
