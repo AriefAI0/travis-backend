@@ -349,6 +349,7 @@ describe("video.service", () => {
       durationMs: 30_000,
       startEpochMs: 1_760_000_320_000,
       endEpochMs: 1_760_000_350_000,
+      eventMarkers: [],
       thumbnailKey: null,
     });
 
@@ -416,6 +417,7 @@ describe("video.service", () => {
       durationMs: null,
       startEpochMs: 1_760_000_120_000,
       endEpochMs: null,
+      eventMarkers: [],
       thumbnailKey: null,
     });
 

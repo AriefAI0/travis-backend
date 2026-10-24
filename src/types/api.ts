@@ -509,6 +509,10 @@ export type ClipEventMarkerInput = {
   positionMs: number;
 };
 
+export type ClipEventMarker = ClipEventMarkerInput & {
+  markerId: number;
+};
+
 export type ItemResultSidebarClip = {
   clipId: number;
   resultId: number;
@@ -521,6 +525,7 @@ export type ItemResultSidebarClip = {
   durationMs: number | null;
   startEpochMs: number;
   endEpochMs: number | null;
+  eventMarkers: ClipEventMarker[];
 };
 
 export type ItemResultSidebarImage = {

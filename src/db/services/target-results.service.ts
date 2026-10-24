@@ -102,6 +102,7 @@ const buildSessions = async (results: ResultRow[], lookups: EvidenceLookups) => 
                     durationMs: clipPlayback.durationMs,
                     startEpochMs: clipPlayback.startEpochMs,
                     endEpochMs: clipPlayback.endEpochMs,
+                    eventMarkers: clipPlayback.eventMarkers,
                     videoUrl: playableClipIds.has(clipPlayback.clipId)
                       ? playbackUrl({ kind: "clip", id: clipPlayback.clipId })
                       : null,

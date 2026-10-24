@@ -1,5 +1,5 @@
 import { db, type DbOrTx } from "../client";
-import type { MasterVideoPlaybackData } from "../../types/api";
+import type { ClipEventMarker, MasterVideoPlaybackData } from "../../types/api";
 import { mintTimelineThumbnailUrl } from "./result-media.service";
 import { and, asc, count, eq, sql } from "drizzle-orm";
 import {
@@ -15,6 +15,7 @@ import {
   listFirstTimelineThumbnailKeysBySessionIds,
   listTimelineThumbnailRecordsBySessionId,
 } from "../repositories/timeline-thumbnail.repository";
+import { listClipEventMarkerRecordsByClipIds } from "../repositories/clip-event-marker.repository";
 import {
   createVideoClipRecord,
   deleteVideoClipById,
@@ -72,6 +73,8 @@ export type VideoClipPlayback = {
   durationMs: number | null;
   startEpochMs: number;
   endEpochMs: number | null;
+  // point markers owned by this clip, in timeline order
+  eventMarkers: ClipEventMarker[];
   // object key of the clip's card still; null until the still job has run
   thumbnailKey: string | null;
 };
@@ -496,7 +499,10 @@ export const listVideoClipsByResultId = async (
   database?: DbOrTx,
 ) => listVideoClipRecordsByResultId(resultId, database);
 
-const toVideoClipPlayback = (playbackRow: VideoClipPlaybackRow): VideoClipPlayback => {
+const toVideoClipPlayback = (
+  playbackRow: VideoClipPlaybackRow,
+  eventMarkers: ClipEventMarker[],
+): VideoClipPlayback => {
   const durationMs =
     playbackRow.endOffsetMs === null
       ? null
@@ -504,6 +510,7 @@ const toVideoClipPlayback = (playbackRow: VideoClipPlaybackRow): VideoClipPlayba
 
   return {
     ...playbackRow,
+    eventMarkers,
     masterDurationMs:
       playbackRow.sessionEndEpoch === null || playbackRow.sessionStartEpoch === null
         ? null
@@ -535,10 +542,26 @@ export const listVideoClipPlaybackByResultIds = async (
     resultIds,
     database,
   );
+  const markerRows = await listClipEventMarkerRecordsByClipIds(
+    playbackRows.map((row) => row.clipId),
+    database,
+  );
+
+  const markersByClipId = new Map<number, ClipEventMarker[]>();
+  for (const marker of markerRows) {
+    const bucket = markersByClipId.get(marker.clipId) ?? [];
+    bucket.push(marker);
+    markersByClipId.set(marker.clipId, bucket);
+  }
 
   for (const playbackRow of playbackRows) {
     const bucket = clipsByResultId.get(playbackRow.resultId) ?? [];
-    bucket.push(toVideoClipPlayback(playbackRow));
+    bucket.push(
+      toVideoClipPlayback(
+        playbackRow,
+        markersByClipId.get(playbackRow.clipId) ?? [],
+      ),
+    );
     clipsByResultId.set(playbackRow.resultId, bucket);
   }
 
@@ -555,7 +578,14 @@ export const getVideoClipPlaybackById = async (
   database?: DbOrTx,
 ): Promise<VideoClipPlayback | null> => {
   const playbackRow = await findVideoClipPlaybackRowById(clipId, database);
-  return playbackRow ? toVideoClipPlayback(playbackRow) : null;
+  if (!playbackRow) {
+    return null;
+  }
+  const eventMarkers = await listClipEventMarkerRecordsByClipIds(
+    [clipId],
+    database,
+  );
+  return toVideoClipPlayback(playbackRow, eventMarkers);
 };
 
 export const updateVideoClip = async (
