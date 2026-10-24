@@ -33,7 +33,7 @@ import type { Action, Subject } from "../../lib/auth/permissions";
 import { excelCreateSchema, excelPreviewSchema, type ExcelExportListItem } from "../../types/api";
 import { EXPORT_TTL_MS } from "../../db/services/excel-export.service";
 import { estimateExportSizes } from "./estimate";
-import { bareWorkbook, exportFilename, exportStem, shippedStem } from "./workbook";
+import { bareWorkbook, exportFilename, shippedStem, typeFilename } from "./workbook";
 import { kickExcelExportWorker } from "./worker";
 
 const toListItem = (row: Awaited<ReturnType<typeof getExcelExport>>): ExcelExportListItem => ({
@@ -194,12 +194,17 @@ export const excelExportRoutes = (database?: DbOrTx) => {
     );
     const typesWithRows = (row.types as string[]).filter((type) => (counts[type] ?? 0) > 0);
     const bare = bareWorkbook(row.name, typesWithRows.length);
+    // a bare workbook leads with its type and the build time. A zero-row
+    // export falls back to the first requested type, never a made-up one.
+    const bareType = typesWithRows[0] ?? (row.types as string[])[0] ?? "export";
     // a typed name names the zip and its root; a blank one keeps the project
     // and the day
-    const stem = bare
-      ? exportStem(project?.title ?? "export", row.createdAt)
-      : shippedStem(row.name, project?.title ?? "export", row.createdAt);
-    const filename = exportFilename(stem, bare ? "xlsx" : "zip");
+    const filename = bare
+      ? typeFilename(bareType, row.createdAt)
+      : exportFilename(
+          shippedStem(row.name, project?.title ?? "export", row.createdAt),
+          "zip",
+        );
     const url = await mintDownloadUrl(env.BUCKET_MEDIA, row.packageKey, filename, ttl);
 
     log.debug("excel export download url minted", { id: row.id, ttl });

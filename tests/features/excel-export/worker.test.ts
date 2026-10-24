@@ -59,6 +59,10 @@ const rowFor = (overrides: Partial<ExcelExportRow> = {}): ExcelExportRow =>
     ...overrides,
   }) as ExcelExportRow;
 
+// The worker stamps its own build time, so assert the shape, not one second.
+const workbookPattern = (type: string): RegExp =>
+  new RegExp(`/${type}/${type}_\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2}_UTC\\.xlsx$`);
+
 let stored: Map<string, Buffer>;
 let removed: string[];
 let events: string[];
@@ -108,12 +112,11 @@ describe("excel export worker", () => {
 
     await runExcelExport(current);
 
-    const day = new Date().toISOString().slice(0, 10);
     expect(current.status).toBe("ready");
     // the typed name gets its folder, so the package is a zip
     expect(stored.size).toBe(0);
     expect(packaged[0]).toBe("site_b/README.txt");
-    expect(packaged).toContain(`site_b/GVI/GVI_alpha_${day}.xlsx`);
+    expect(packaged.some((entry) => workbookPattern("GVI").test(entry))).toBe(true);
   });
 
   it("leaves a cancelling export cancelled and stores nothing", async () => {
@@ -150,13 +153,12 @@ describe("excel export worker", () => {
 
     await runExcelExport(current);
 
-    const day = new Date().toISOString().slice(0, 10);
     expect(current.status).toBe("ready");
     expect(current.packageSize).toBe(42);
     expect(stored.size).toBe(0);
     // the typed name names the root, never the workbook
     expect(packaged[0]).toBe("site_b/README.txt");
-    expect(packaged).toContain(`site_b/GVI/GVI_alpha_${day}.xlsx`);
+    expect(packaged.some((entry) => workbookPattern("GVI").test(entry))).toBe(true);
   });
 
   it("puts one workbook per type in a zip when two types ship", async () => {
@@ -165,15 +167,13 @@ describe("excel export worker", () => {
 
     await runExcelExport(current);
 
-    // the typed name names the root only. Files keep project and date.
-    const day = new Date().toISOString().slice(0, 10);
-
+    // the typed name names the root only. Files take their build stamp.
     expect(current.status).toBe("ready");
     expect(packaged).toHaveLength(3);
     // everything sits inside one top folder, so Extract All stays tidy
     expect(packaged[0]).toBe("site_b/README.txt");
-    expect(packaged).toContain(`site_b/GVI/GVI_alpha_${day}.xlsx`);
-    expect(packaged).toContain(`site_b/CVI/CVI_alpha_${day}.xlsx`);
+    expect(packaged.some((entry) => workbookPattern("GVI").test(entry))).toBe(true);
+    expect(packaged.some((entry) => workbookPattern("CVI").test(entry))).toBe(true);
   });
 
   it("skips a type with no rows", async () => {

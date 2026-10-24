@@ -190,7 +190,7 @@ const readmeLines = (data: ExcelExportData, root: string, files: number, errors:
   `Media files: ${files}`,
   "",
   `One top folder, then one folder per ticked inspection type:`,
-  `  ${root}/<TYPE>/<TYPE>_<project>_<date>.xlsx   the workbook`,
+  `  ${root}/<TYPE>/<TYPE>_<timestamp>_UTC.xlsx   the workbook`,
   `  ${root}/<TYPE>/images/<result folder>/        one folder per result`,
   `  ${root}/<TYPE>/clips/<result folder>/         one folder per result`,
   "",
@@ -253,7 +253,6 @@ const countByResult = (files: { resultId: number }[]) => {
 const workbookEntries = async (
   sheets: ExcelSheet[],
   root: string,
-  fileStem: string,
   generatedAt: Date,
   media?: Map<number, MediaCells>,
 ): Promise<PackageEntry[]> => {
@@ -261,7 +260,7 @@ const workbookEntries = async (
   for (const sheet of sheets) {
     const body = await excelWorkerDeps.build(sheet, { generatedAt, media });
     entries.push(
-      bufferEntry(`${root}/${sheet.type}/${typeFilename(sheet.type, fileStem)}`, body),
+      bufferEntry(`${root}/${sheet.type}/${typeFilename(sheet.type, generatedAt)}`, body),
     );
   }
   return entries;
@@ -287,7 +286,7 @@ const buildPackage = async (
   const withRows = data.sheets.filter((sheet) => sheet.rows.length > 0);
   const sheets = withRows.length > 0 ? withRows : data.sheets.slice(0, 1);
   const generatedAt = new Date();
-  // the typed name names only the zip root. Files keep project and date.
+  // the typed name names only the zip root. Files take their build stamp.
   const root = shippedStem(row.name, data.projectTitle, generatedAt);
   const fileStem = exportStem(data.projectTitle, generatedAt);
 
@@ -300,7 +299,7 @@ const buildPackage = async (
       return {
         kind: "xlsx",
         body,
-        name: typeFilename(sheet.type, fileStem),
+        name: typeFilename(sheet.type, generatedAt),
         errors: [],
       };
     }
@@ -309,7 +308,7 @@ const buildPackage = async (
       kind: "zip",
       entries: [
         textEntry(`${root}/README.txt`, `${readmeLines(data, root, 0, []).join("\n")}\n`),
-        ...(await workbookEntries(sheets, root, fileStem, generatedAt)),
+        ...(await workbookEntries(sheets, root, generatedAt)),
       ],
       name: exportFilename(fileStem, "zip"),
       errors: [],
@@ -376,7 +375,7 @@ const buildPackage = async (
     textEntry(`${root}/README.txt`, `${readmeLines(data, root, imagePlan.rows.length + clipPlan.rows.length, errors).join("\n")}\n`),
     ...mediaFiles,
     ...clipFiles,
-    ...(await workbookEntries(sheets, root, fileStem, generatedAt, media)),
+    ...(await workbookEntries(sheets, root, generatedAt, media)),
   ];
 
   // a missing image or clip is a delivered package with a stated gap

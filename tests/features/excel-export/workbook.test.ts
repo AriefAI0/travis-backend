@@ -163,13 +163,20 @@ describe("excel workbook", () => {
     expect((header as string[]).includes("Images folder")).toBe(false);
   });
 
-  it("names the file after the type, so two can open at once", () => {
-    expect(typeFilename("GVI", "travity_field_a_2026-10-01")).toBe(
-      "GVI_travity_field_a_2026-10-01.xlsx",
-    );
-    expect(typeFilename("CVI", "travity_field_a_2026-10-01")).not.toBe(
-      typeFilename("GVI", "travity_field_a_2026-10-01"),
-    );
+  it("names the file after the type and the build time", () => {
+    expect(typeFilename("GVI", recorded)).toBe("GVI_2026-10-01_08-30-00_UTC.xlsx");
+    expect(typeFilename("CVI", recorded)).not.toBe(typeFilename("GVI", recorded));
+
+    // every canonical type keeps its own name, and no project word leaks in
+    const types = [
+      "GVI", "CVI", "DVI", "MGI", "CP", "FMD", "SCOUR",
+      "BSI", "CGB", "RISER", "CAISSON", "SEABED", "PIPELINE",
+    ];
+    for (const type of types) {
+      const name = typeFilename(type, recorded);
+      expect(name.startsWith(`${type}_`)).toBe(true);
+      expect(name.endsWith("_UTC.xlsx")).toBe(true);
+    }
   });
 
   it("ships a typed name alone, with no date beside it", () => {

@@ -42,9 +42,15 @@ export const exportFilename = (stem: string, kind: "xlsx" | "zip"): string => `$
 export const bareWorkbook = (name: string, typesWithRows: number): boolean =>
   !name.trim() && typesWithRows <= 1;
 
-// `GVI_travity_field_a_2026-10-24.xlsx`: the type leads, because Excel refuses
-// to open two files with one name at once.
-export const typeFilename = (type: string, stem: string): string => `${type}_${stem}.xlsx`;
+// UTC build stamp for a file name: Windows rejects a colon.
+export const buildStamp = (generatedAt: Date): string =>
+  `${generatedAt.toISOString().slice(0, 19).replace("T", "_").replace(/:/g, "-")}_UTC`;
+
+// `GVI_2026-10-24_14-30-45_UTC.xlsx`: the type leads, because Excel refuses
+// to open two files with one name at once. The build time keeps two exports
+// of one type apart.
+export const typeFilename = (type: string, generatedAt: Date): string =>
+  `${type}_${buildStamp(generatedAt)}.xlsx`;
 
 export type WorkbookOptions = {
   generatedAt?: Date;

@@ -209,7 +209,12 @@ describe("excel export routes", () => {
     // the worker is not running here, so land the row by hand
     await testDb
       .update(schema.excelExport)
-      .set({ status: "ready", packageKey: "excel-exports/light/one.xlsx", packageSize: 10 })
+      .set({
+        status: "ready",
+        packageKey: "excel-exports/light/one.xlsx",
+        packageSize: 10,
+        createdAt: new Date("2026-10-01T08:30:00Z"),
+      })
       .where(eq(schema.excelExport.id, id));
 
     const res = await request(`/api/v1/excel-exports/${id}/download-url`);
@@ -217,7 +222,8 @@ describe("excel export routes", () => {
 
     const body = await readData<{ url: string; filename: string }>(res);
     expect(body.url).toContain("excel-exports/light/one.xlsx");
-    expect(body.filename).toMatch(/\.xlsx$/);
+    // a bare workbook leads with its type and the build time
+    expect(body.filename).toBe("GVI_2026-10-01_08-30-00_UTC.xlsx");
   });
 
   it("names the zip after the typed name", async () => {
