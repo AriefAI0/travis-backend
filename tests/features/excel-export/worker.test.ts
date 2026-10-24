@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import type { ExcelExportData } from "../../../src/db/services/excel-export-data.service";
 import type { ExcelExportRow } from "../../../src/db/repositories/excel-export.repository";
 import {
+  createWorkerWake,
   excelWorkerDeps,
   mediaCellsFor,
   progressReporter,
@@ -310,5 +311,37 @@ describe("excel export worker", () => {
       clipFolder: "",
       clips: 0,
     });
+  });
+});
+
+describe("worker wake", () => {
+  // A kick lands while the claim query is still running: it must survive.
+  it("keeps a kick that arrives during a claim", async () => {
+    const wake = createWorkerWake(10_000);
+    const seen = wake.version();
+
+    wake.kick();
+    await wake.wait(seen);
+
+    expect(wake.version()).toBe(seen + 1);
+  });
+
+  it("wakes a lane already waiting on the queue", async () => {
+    const wake = createWorkerWake(10_000);
+    const seen = wake.version();
+    const waiting = wake.wait(seen);
+
+    wake.kick();
+    await waiting;
+  });
+
+  // No kick: the bounded check re-reads the queue instead of spinning.
+  it("checks the queue again when the fallback fires", async () => {
+    const wake = createWorkerWake(5);
+    const started = Date.now();
+
+    await wake.wait(wake.version());
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(4);
   });
 });

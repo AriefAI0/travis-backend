@@ -490,29 +490,53 @@ export const runExcelExport = async (claimed: ExcelExportView) => {
 
 /* ---------- lanes ---------- */
 
-let wake: () => void = () => {};
-let woken = new Promise<void>((resolve) => {
-  wake = resolve;
-});
+// Bounded check for a wake missed between claim and sleep. Not a poll loop:
+// the wait ends on the first kick, and checks the queue only on timeout.
+const WAKE_CHECK_MS = 5_000;
 
-// Wakes every lane; a queue that arrived while a lane slept runs now.
-export const kickExcelExportWorker = () => {
-  const resolve = wake;
-  woken = new Promise<void>((resolveNext) => {
-    wake = resolveNext;
-  });
-  resolve();
+// A kick bumps a version. A lane waits from the version it last saw, so a kick
+// that lands during a claim or a run still moves the next step.
+export const createWorkerWake = (fallbackMs = WAKE_CHECK_MS) => {
+  let version = 0;
+  const waiters = new Set<() => void>();
+
+  const kick = () => {
+    version += 1;
+    for (const wake of waiters) wake();
+    waiters.clear();
+  };
+
+  const wait = (seen: number): Promise<void> => {
+    if (version > seen) return Promise.resolve();
+    return new Promise((resolve) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const wake = () => {
+        clearTimeout(timer);
+        waiters.delete(wake);
+        resolve();
+      };
+      timer = setTimeout(wake, fallbackMs);
+      waiters.add(wake);
+    });
+  };
+
+  return { kick, version: () => version, wait };
 };
 
-const waitForWork = () => woken;
+const wakeSignal = createWorkerWake();
 
-// One lane: claim while rows wait, sleep when the queue is empty.
-const laneLoop = async (lane: (typeof LANES)[number]) => {
+// Wakes every lane; a queue that arrived while a lane slept runs now.
+export const kickExcelExportWorker = () => wakeSignal.kick();
+
+// One lane: claim while rows wait, check again when a kick moved the version.
+export const laneLoop = async (lane: (typeof LANES)[number]) => {
+  let seen = wakeSignal.version();
   for (;;) {
     try {
       const claimed = await excelWorkerDeps.claim(lane, packageKeyFor(lane, "xlsx"));
       if (!claimed) {
-        await waitForWork();
+        await wakeSignal.wait(seen);
+        seen = wakeSignal.version();
         continue;
       }
       await runExcelExport(claimed);
