@@ -60,6 +60,7 @@ export const testDb: TestDb = drizzle(pool, { schema: fullSchema });
 // FK dependency order: children first (app deleteOrder + typed details).
 // The auth block leads: every one of those rows hangs off auth_user.
 const deleteOrder = [
+  schema.clipExportJob,
   schema.clipMkvCache,
   schema.recordingIngestSegment,
   schema.recordingIngest,

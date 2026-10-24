@@ -716,6 +716,17 @@ export type ResultEvidence = {
   images: ItemResultSidebarImage[];
 };
 
+// Durable MKV export state for one clip.
+export type ClipExportState = {
+  clipId: number;
+  state: "processing" | "ready" | "failed";
+  filename: string | null;
+  sizeBytes: number | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
 /**
  * One result's form state, straight off the row — no detail-table joins.
  * Continue uses it to prefill a new row: `submittedPayload` is the app's own

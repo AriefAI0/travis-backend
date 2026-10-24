@@ -9,6 +9,7 @@ import { failInterruptedDatasheets } from "./db/services/datasheet.service";
 import { startIngestSweep } from "./features/recording/ingest-sweep";
 import { startThumbnailSweep } from "./features/recording/jobs/thumbnails";
 import { recoverExcelExports } from "./db/services/excel-export.service";
+import { recoverClipExports } from "./db/services/clip-export.service";
 import { startExcelExportWorker } from "./features/excel-export/worker";
 
 // flow: buckets + org > sweeps > serve.
@@ -34,6 +35,10 @@ await recoverExcelExports().catch((err) =>
 );
 await startExcelExportWorker().catch((err) =>
   log.error("excel export worker failed", { err: String(err) }),
+);
+// A clip export cut short by a restart goes back to work on its own row.
+await recoverClipExports().catch((err) =>
+  log.error("clip export recovery failed", { err: String(err) }),
 );
 
 // The report editor page is a route on the app, not a Bun HTML import: the

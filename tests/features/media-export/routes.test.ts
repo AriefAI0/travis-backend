@@ -58,24 +58,27 @@ describe("export stubs", () => {
     expect(nonsense.status).toBe(501);
   });
 
-  test("the stub is a factory with no database work", () => {
+  test("the stub surface keeps its two 501 routes beside the real clip ones", () => {
     expect(typeof exportRoutes).toBe("function");
-    expect(exportRoutes().routes.length).toBe(2);
+    // 2 v2 stubs + 3 real routes, each with its 2 auth middlewares
+    expect(exportRoutes().routes.length).toBe(11);
   });
 });
 
 describe("export stubs reserve nothing real", () => {
-  // Acceptance: no export row and no worker exists. A table would show up as
-  // an export-named drizzle table in the one domain schema.
-  test("the domain schema holds no export table", () => {
+  // Acceptance: the v2 stub reserves nothing. The real clip export owns one
+  // job table, beside the excel export's.
+  test("the domain schema holds only the two export tables", () => {
     const tableNames = Object.entries(schema)
       .filter(([, value]) => is(value, PgTable))
       .map(([name]) => name.toLowerCase());
 
     // Guard the filter itself: a silent match-all-nothing would pass the rest.
     expect(tableNames.length).toBeGreaterThan(20);
-    // The excel export owns the one export table. This stub still adds none.
-    expect(tableNames.filter((name) => name.includes("export"))).toEqual(["excelexport"]);
+    expect(tableNames.filter((name) => name.includes("export")).sort()).toEqual([
+      "clipexportjob",
+      "excelexport",
+    ]);
   });
 
   // Acceptance: the replaced surfaces are untouched by this stub.

@@ -1579,3 +1579,39 @@ export const clipMkvCache = pgTable(
     idxClipMkvCacheLastUsed: index("idx_clip_mkv_cache_last_used").on(table.lastUsedAt),
   })
 );
+
+// One durable export job per clip: the HTTP handler queues, the row carries the
+// state a polling client reads after a restart.
+export const clipExportStatus = pgEnum("clip_export_status", [
+  "processing",
+  "ready",
+  "failed",
+]);
+
+export const clipExportJob = pgTable(
+  "clip_export_job",
+  {
+    jobId: integer("job_id").primaryKey().generatedByDefaultAsIdentity(),
+    clipId: integer("clip_id")
+      .notNull()
+      .unique()
+      .references(() => videoClip.clipId, { onDelete: "cascade" }),
+
+    status: clipExportStatus("status").notNull().default("processing"),
+    objectKey: text("object_key"),
+    filename: text("filename"),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    error: text("error"),
+
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+
+    ...createdAt,
+    ...updatedAt,
+  },
+  (table) => ({
+    idxClipExportJobStatus: index("idx_clip_export_job_status").on(table.status),
+  })
+);
