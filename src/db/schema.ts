@@ -1501,6 +1501,9 @@ export const excelExport = pgTable(
     media: excelExportMedia("media").notNull(),
     lane: excelExportLane("lane").notNull(),
 
+    // the user's label for the export: names the folder and the bell card
+    name: text("name").notNull().default(""),
+
     status: excelExportStatus("status").notNull().default("queued"),
     phase: text("phase").notNull().default(""),
     itemsTotal: integer("items_total").notNull().default(0),

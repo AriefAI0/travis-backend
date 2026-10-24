@@ -1,0 +1,1 @@
+ALTER TABLE "excel_export" ADD COLUMN "name" text DEFAULT '' NOT NULL;

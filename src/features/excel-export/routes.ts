@@ -42,6 +42,7 @@ const toListItem = (row: Awaited<ReturnType<typeof getExcelExport>>): ExcelExpor
   projectId: row.projectId,
   types: row.types,
   media: row.media,
+  name: row.name,
   status: row.status,
   phase: row.phase,
   itemsTotal: row.itemsTotal,
@@ -110,12 +111,12 @@ export const excelExportRoutes = (database?: DbOrTx) => {
     const projectId = parseId(c, "projectId");
     await requireProject(projectId, caller);
 
-    const { types, targets, media } = await parseBody(c, excelCreateSchema);
+    const { types, targets, media, name } = await parseBody(c, excelCreateSchema);
     // the selection is validated here, so a bad key fails before the row exists
     parseDatasheetTargets(targets);
 
     const row = await createExcelExport(
-      { projectId, types, targets, media },
+      { projectId, types, targets, media, name },
       caller.organizationId,
       callerKey(caller),
       database,
@@ -184,7 +185,9 @@ export const excelExportRoutes = (database?: DbOrTx) => {
     }
 
     const project = await findProjectById(row.projectId, caller.organizationId, database);
-    const filename = exportFilename(project?.title ?? "export", row.media as ExcelMediaLevel);
+    // the user's name drives the shipped name, exactly as the worker built it
+    const title = row.name.trim() || project?.title || "export";
+    const filename = exportFilename(title, row.media as ExcelMediaLevel);
     const url = await mintDownloadUrl(env.BUCKET_MEDIA, row.packageKey, filename, ttl);
 
     log.debug("excel export download url minted", { id: row.id, ttl });

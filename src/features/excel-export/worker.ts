@@ -126,6 +126,7 @@ const readmeLines = (data: ExcelExportData, root: string, files: number, errors:
   "Travis excel export",
   "",
   `Project: ${data.projectTitle}`,
+  `Export name: ${root}`,
   `Document: ${data.documentId || "-"}`,
   `Generated: ${new Date().toISOString()}`,
   `Media files: ${files}`,
@@ -218,8 +219,11 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
   const withRows = data.sheets.filter((sheet) => sheet.rows.length > 0);
   const sheets = withRows.length > 0 ? withRows : data.sheets.slice(0, 1);
   const generatedAt = new Date();
+  // the user's name for the export, else the project title, drives every
+  // shipped file and folder name
+  const title = row.name.trim() || data.projectTitle;
   // every entry sits inside one top folder, so Extract All stays tidy
-  const root = exportStem(data.projectTitle, generatedAt);
+  const root = exportStem(title, generatedAt);
 
   if (row.media === "raw") {
     // one type opens straight from the download, no zip around it
@@ -229,7 +233,7 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
       return {
         kind: "xlsx",
         body,
-        name: typeFilename(sheet.type, data.projectTitle, generatedAt),
+        name: typeFilename(sheet.type, title, generatedAt),
         errors: [],
       };
     }
@@ -238,9 +242,9 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
       kind: "zip",
       entries: [
         textEntry(`${root}/README.txt`, `${readmeLines(data, root, 0, []).join("\n")}\n`),
-        ...(await workbookEntries(sheets, data.projectTitle, generatedAt, root)),
+        ...(await workbookEntries(sheets, title, generatedAt, root)),
       ],
-      name: exportFilename(data.projectTitle, "raw", generatedAt),
+      name: exportFilename(title, "raw", generatedAt),
       errors: [],
     };
   }
@@ -291,14 +295,14 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
     textEntry(`${root}/README.txt`, `${readmeLines(data, root, imagePlan.rows.length + clipPlan.rows.length, errors).join("\n")}\n`),
     ...mediaFiles,
     ...clipFiles,
-    ...(await workbookEntries(sheets, data.projectTitle, generatedAt, root, media)),
+    ...(await workbookEntries(sheets, title, generatedAt, root, media)),
   ];
 
   // a missing image or clip is a delivered package with a stated gap
   return {
     kind: "zip",
     entries,
-    name: exportFilename(data.projectTitle, row.media, generatedAt),
+    name: exportFilename(title, row.media, generatedAt),
     errors,
   };
 };

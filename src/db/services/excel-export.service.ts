@@ -44,6 +44,8 @@ export type ExcelExportRequest = {
   types: InspectionTypeCode[];
   targets: string[];
   media: ExcelMediaLevel;
+  // the user's label; empty falls back to the project title
+  name?: string;
 };
 
 export type ExcelExportView = ExcelExportRow;
@@ -52,12 +54,14 @@ export type ExcelExportView = ExcelExportRow;
 export const laneFor = (media: ExcelMediaLevel): "light" | "clips" =>
   media === "clips" ? "clips" : "light";
 
-// The request identity: same project, media, and selection is the same export.
+// The request identity: same project, name, media, and selection is the same
+// export. The name rides along, so renaming an export makes it its own row.
 export const requestHashOf = (input: ExcelExportRequest) =>
   createHash("sha256")
     .update(
       JSON.stringify({
         projectId: input.projectId,
+        name: input.name ?? "",
         media: input.media,
         types: [...input.types].sort(),
         targets: [...input.targets].sort(),
@@ -106,6 +110,7 @@ export const createExcelExport = async (
         targets: input.targets,
         media: input.media,
         lane,
+        name: input.name ?? "",
         requestHash,
         expiresAt: new Date(Date.now() + EXPORT_TTL_MS),
       },

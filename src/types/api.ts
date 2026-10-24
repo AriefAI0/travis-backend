@@ -1628,6 +1628,8 @@ export const excelPreviewSchema = z.object({
 
 export const excelCreateSchema = excelPreviewSchema.extend({
   media: z.enum(excelMediaLevels).default("raw"),
+  // the user's label for the export: names the folder and the bell card
+  name: z.string().trim().max(80).default(""),
 });
 
 // One export row as the list and the detail route hand it out.
@@ -1636,6 +1638,7 @@ export type ExcelExportListItem = {
   projectId: number;
   types: string[];
   media: string;
+  name: string;
   status: string;
   phase: string;
   itemsTotal: number;

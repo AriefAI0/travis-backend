@@ -40,6 +40,7 @@ const rowFor = (overrides: Partial<ExcelExportRow> = {}): ExcelExportRow =>
     types: ["GVI"],
     targets: ["partCode:300"],
     media: "raw",
+    name: "",
     lane: "light",
     status: "running",
     phase: "",
@@ -141,20 +142,21 @@ describe("excel export worker", () => {
   });
 
   it("puts one workbook per type in a zip when two types ship", async () => {
-    current = rowFor({ types: ["GVI", "CVI"] });
+    current = rowFor({ types: ["GVI", "CVI"], name: "Site B" });
     excelWorkerDeps.gather = async () => secondType(oneRow);
 
     await runExcelExport(current);
 
     const day = new Date().toISOString().slice(0, 10);
-    const root = `alpha_${day}`;
+    // the user's name replaces the project title in every shipped name
+    const root = `site_b_${day}`;
 
     expect(current.status).toBe("ready");
     expect(packaged).toHaveLength(3);
     // everything sits inside one top folder, so Extract All stays tidy
     expect(packaged[0]).toBe(`${root}/README.txt`);
-    expect(packaged).toContain(`${root}/GVI/GVI_alpha_${day}.xlsx`);
-    expect(packaged).toContain(`${root}/CVI/CVI_alpha_${day}.xlsx`);
+    expect(packaged).toContain(`${root}/GVI/GVI_site_b_${day}.xlsx`);
+    expect(packaged).toContain(`${root}/CVI/CVI_site_b_${day}.xlsx`);
   });
 
   it("skips a type with no rows", async () => {
