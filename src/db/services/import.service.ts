@@ -23,6 +23,7 @@ import {
   previewTaskStructureDelete,
   type TaskStructureNodeRef,
 } from "./task-structure.service";
+import { writeAudit } from "./audit.service";
 
 /* ---------- the tree the import walks ---------- */
 
@@ -323,6 +324,21 @@ export const importProjectTaskStructure = async (
 
       if (created === 0) summary.rows.matched += 1;
       else summary.rows.imported += 1;
+    }
+
+    // one summary event covers plans added under existing structure
+    if (!dryRun && summary.inspections.planned > 0) {
+      await writeAudit(
+        {
+          organizationId: caller.organizationId,
+          userId: caller.userId,
+          action: "create",
+          resourceType: "PlannedInspection",
+          resourceId: input.projectId,
+          after: { projectId: input.projectId, planned: summary.inspections.planned },
+        },
+        tx,
+      );
     }
 
     if (dryRun) throw dryRunRollback;

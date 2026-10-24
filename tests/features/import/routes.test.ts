@@ -103,6 +103,12 @@ describe("task structure import", () => {
     const after = await tree();
     expect(after.groups).toHaveLength(1);
     expect(after.planned).toHaveLength(2);
+
+    // the repeat planned nothing, so it writes no second summary event
+    const plannedAudits = (await testDb.select().from(auditLog)).filter(
+      (one) => one.resourceType === "PlannedInspection",
+    );
+    expect(plannedAudits).toHaveLength(1);
   });
 
   // The preview promises the real run's numbers, so both are read from one walk.
@@ -136,10 +142,13 @@ describe("task structure import", () => {
     expect(written.map((one) => one.resourceType).sort()).toEqual([
       "Description",
       "PartCode",
+      "PlannedInspection",
       "TaskCode",
       "TaskGroup",
       "Type",
     ]);
+    // one summary tells other clients that plans changed under existing nodes
+    expect(written.filter((one) => one.resourceType === "PlannedInspection")).toHaveLength(1);
   });
 
   it("creates a task code alone when the row names no description", async () => {
