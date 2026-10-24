@@ -245,6 +245,7 @@ export type CviPositionDetail = {
   utMm: number | null;
   findings: string | null;
   sortOrder: number;
+  createdAt: string;
 };
 
 export type CviMemberDetail = {
@@ -275,6 +276,7 @@ export type DviPositionDetail = {
   clockPosition: string;
   utMm: number | null;
   findings: string | null;
+  createdAt: string;
 };
 
 export type DviDetail = {

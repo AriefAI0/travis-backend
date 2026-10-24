@@ -1560,11 +1560,12 @@ export const getCviDetailByResultId = async (
     memberType,
     positions: positions
       .filter((position) => position.memberType === memberType)
-      .map(({ clockPosition, utMm, findings, sortOrder }) => ({
+      .map(({ clockPosition, utMm, findings, sortOrder, createdAt }) => ({
         clockPosition,
         utMm,
         findings,
         sortOrder,
+        createdAt: toIsoString(createdAt),
       })),
   }));
 
@@ -1607,7 +1608,11 @@ export const getDviDetailByResultId = async (
 
   return {
     ...resultDvi,
-    positions,
+    // spread keeps the row shape, the override narrows createdAt to a string
+    positions: positions.map((position) => ({
+      ...position,
+      createdAt: toIsoString(position.createdAt),
+    })),
     createdAt: toIsoString(resultDvi.createdAt),
     updatedAt: toIsoString(resultDvi.updatedAt),
   };
