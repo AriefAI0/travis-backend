@@ -94,6 +94,24 @@ export const requireCan = (
     await next();
   });
 
+// Admin correction gate. A preset is not a durable role, so the ability rows
+// decide: manage User or manage Permission marks an administrator.
+export const requireAdministrator = (
+  c: Context<{ Variables: AuthVariables }>,
+): void => {
+  const ability = c.get("ability");
+  if (
+    !ability?.can("manage", "User") &&
+    !ability?.can("manage", "Permission")
+  ) {
+    throw new AppError(
+      403,
+      "forbidden",
+      "Not allowed to correct a completed result",
+    );
+  }
+};
+
 // The caller behind requireUser: the org for scoping, the user for the audit
 // row. Every guarded handler builds one of these rather than reading the
 // context twice.

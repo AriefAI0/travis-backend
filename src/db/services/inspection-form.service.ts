@@ -1,13 +1,17 @@
 import { AppError } from "../../lib/error";
 import type { Caller } from "../../lib/caller";
+import type { InspectionFormFieldRow, InspectionFormView } from "../../types/api";
 import { db, type DbOrTx } from "../client";
 import {
   createInspectionFormFieldRecords,
   createInspectionFormRecord,
   findCurrentInspectionForm,
+  findInspectionFormById,
   listInspectionFormFieldRecordsByFormId,
 } from "../repositories/inspection-form.repository";
 import { writeAudit } from "./audit.service";
+
+export type { InspectionFormFieldRow, InspectionFormView };
 
 export type FormDataType = "integer" | "decimal" | "text" | "boolean";
 
@@ -16,22 +20,6 @@ export type CustomFieldInput = {
   dataType: FormDataType;
   required?: boolean;
   displayOrder: number;
-};
-
-export type InspectionFormFieldRow = {
-  inspectionFormFieldId: number;
-  label: string;
-  dataType: string;
-  required: boolean;
-  isBuiltin: boolean;
-  displayOrder: number;
-};
-
-export type InspectionFormView = {
-  inspectionFormId: number;
-  inspectionTypeCode: string;
-  version: number;
-  fields: InspectionFormFieldRow[];
 };
 
 /* fixed built-in fields per inspection type, matching the tool forms;
@@ -175,6 +163,67 @@ export const getCurrentInspectionForm = async (
       displayOrder: field.displayOrder,
     })),
   };
+};
+
+// one frozen form version, used to read and correct a completed result
+export const getInspectionFormVersion = async (
+  inspectionFormId: number,
+  database?: DbOrTx,
+): Promise<InspectionFormView | null> => {
+  const form = await findInspectionFormById(inspectionFormId, database);
+  if (!form) return null;
+
+  const fields = await listInspectionFormFieldRecordsByFormId(inspectionFormId, database);
+  return {
+    inspectionFormId: form.inspectionFormId,
+    inspectionTypeCode: form.inspectionTypeCode,
+    version: form.version,
+    fields: fields.map((field) => ({
+      inspectionFormFieldId: field.inspectionFormFieldId,
+      label: field.label,
+      dataType: field.dataType,
+      required: field.required,
+      isBuiltin: field.isBuiltin,
+      displayOrder: field.displayOrder,
+    })),
+  };
+};
+
+// check custom values against a pinned form version; returns the cleaned map
+export const validateInspectionCustomValues = async (
+  inspectionFormId: number,
+  customValues: Record<string, unknown>,
+  database?: DbOrTx,
+): Promise<Record<string, unknown>> => {
+  const fields = await listInspectionFormFieldRecordsByFormId(inspectionFormId, database);
+  const byId = new Map(fields.map((field) => [String(field.inspectionFormFieldId), field]));
+  const values: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(customValues)) {
+    const field = byId.get(key);
+    if (!field || field.isBuiltin) {
+      throw new AppError(400, "custom_value_invalid", `customValues: unknown field ${key}`);
+    }
+    if (value === null || value === undefined) continue;
+    const matches =
+      (field.dataType === "integer" && Number.isInteger(value)) ||
+      (field.dataType === "decimal" && typeof value === "number" && Number.isFinite(value)) ||
+      (field.dataType === "text" && typeof value === "string") ||
+      (field.dataType === "boolean" && typeof value === "boolean");
+    if (!matches) {
+      throw new AppError(400, "custom_value_invalid", `customValues: ${field.label} expects ${field.dataType}`);
+    }
+    values[key] = value;
+  }
+
+  for (const field of fields) {
+    if (field.isBuiltin || !field.required) continue;
+    const value = values[String(field.inspectionFormFieldId)];
+    if (value === undefined || value === "") {
+      throw new AppError(400, "custom_value_missing", `customValues: ${field.label} is required`);
+    }
+  }
+  return values;
 };
 
 // save-on-confirm: one new version per request; old versions stay frozen

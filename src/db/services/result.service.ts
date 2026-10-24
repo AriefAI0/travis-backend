@@ -3,10 +3,19 @@ import type { CpDetail, CviDetail, DviDetail, FmdDetail, ScourDetail, GviDetail,
   ResultFormState,
   CpPayloadInput, CviPayloadInput, DviPayloadInput, FmdPayloadInput, MgiPayloadInput, GviPayloadInput, ScourPayloadInput, BsiPayloadInput,
   CgbPayloadInput, RiserPayloadInput, CiPayloadInput, SeabedPayloadInput, PiPayloadInput } from "../../types/api";
+import { eq } from "drizzle-orm";
+
 import { inspectionPayloadSchema, type InspectionPayload } from "../../types/api";
 import { formatResultValue } from "../../types/result-format";
 import { db, type DbOrTx } from "../client";
-import { AppError } from "../../lib/error";
+import { AppError, notFound } from "../../lib/error";
+import type { Caller } from "../../lib/caller";
+import { findProjectById } from "../repositories/project.repository";
+import { writeAudit } from "./audit.service";
+import {
+  getInspectionFormVersion,
+  validateInspectionCustomValues,
+} from "./inspection-form.service";
 import { listResultImageSummariesByResultIds, mintTimelineThumbnailUrl } from "./result-media.service";
 import { listPlayableClipIds, playbackUrl } from "./recording-playback.service";
 import { listSessionsByIds } from "./session.service";
@@ -18,6 +27,7 @@ import {
   listResultRecords,
   listResultRecordsByProjectId,
   listResultRecordsBySessionId,
+  lockResultRow,
   maxResultDisplayNumberBySessionId,
   updateResultById,
 } from "../repositories/result.repository";
@@ -29,7 +39,27 @@ import {
   listResultImageRecordsByResultId,
   updateResultImageById,
 } from "../repositories/result-image.repository";
-import { result, resultImage, resultBsiClampMissingBolt, resultBsiClampMissingWasher, resultBsiHingeMissingBolt, resultBsiHingeMissingWasher } from "../schema";
+import {
+  result,
+  resultImage,
+  resultBsiClampMissingBolt,
+  resultBsiClampMissingWasher,
+  resultBsiHingeMissingBolt,
+  resultBsiHingeMissingWasher,
+  resultMgi,
+  resultCp,
+  resultFmd,
+  resultScour,
+  resultGvi,
+  resultCvi,
+  resultDvi,
+  resultBsi,
+  resultCgb,
+  resultRiser,
+  resultCi,
+  resultSeabed,
+  resultPipeline,
+} from "../schema";
 
 
 export type CreateResultImageInput = {
@@ -901,13 +931,25 @@ export const createResult = async (
 export const getResultById = async (resultId: number, database?: DbOrTx) =>
   findResultById(resultId, database);
 
-/** Form-state read for Continue; null when the result does not exist. */
+/** Form-state read for Continue and the admin editor; null when gone. */
 export const getResultFormState = async (
   resultId: number,
   database?: DbOrTx,
 ): Promise<ResultFormState | null> => {
   const row = await findResultById(resultId, database);
   if (!row) return null;
+
+  const inspectionForm =
+    row.inspectionFormId == null
+      ? null
+      : await getInspectionFormVersion(row.inspectionFormId, database);
+  if (row.inspectionFormId != null && !inspectionForm) {
+    throw new AppError(
+      409,
+      "form_version_missing",
+      `result ${resultId} pins form ${row.inspectionFormId}, which does not exist`,
+    );
+  }
 
   return {
     resultId: row.resultId,
@@ -919,7 +961,135 @@ export const getResultFormState = async (
     masterEndMs: row.masterEndMs,
     submittedPayload: row.submittedPayload,
     resultClass: row.resultClass,
+    inspectionFormId: row.inspectionFormId,
+    inspectionForm,
+    updatedAt: toIsoString(row.updatedAt),
   };
+};
+
+export type CorrectResultInput = {
+  payload: unknown;
+  remarks?: string | null;
+  customValues?: Record<string, unknown>;
+  expectedUpdatedAt: string;
+};
+
+// Clear the previous typed children before the new payload writes them.
+// Parent-table deletes cascade every per-type finding row.
+const clearTypedDetail = async (resultId: number, tx: DbOrTx): Promise<void> => {
+  await tx.delete(resultMgi).where(eq(resultMgi.resultId, resultId));
+  await tx.delete(resultCp).where(eq(resultCp.resultId, resultId));
+  await tx.delete(resultFmd).where(eq(resultFmd.resultId, resultId));
+  await tx.delete(resultScour).where(eq(resultScour.resultId, resultId));
+  await tx.delete(resultGvi).where(eq(resultGvi.resultId, resultId));
+  await tx.delete(resultCvi).where(eq(resultCvi.resultId, resultId));
+  await tx.delete(resultDvi).where(eq(resultDvi.resultId, resultId));
+  await tx.delete(resultBsi).where(eq(resultBsi.resultId, resultId));
+  await tx.delete(resultCgb).where(eq(resultCgb.resultId, resultId));
+  await tx.delete(resultRiser).where(eq(resultRiser.resultId, resultId));
+  await tx.delete(resultCi).where(eq(resultCi.resultId, resultId));
+  await tx.delete(resultSeabed).where(eq(resultSeabed.resultId, resultId));
+  await tx.delete(resultPipeline).where(eq(resultPipeline.resultId, resultId));
+};
+
+// flow: fetch > org > lock > completed > stale check > validate > replace > audit
+export const correctResult = async (
+  resultId: number,
+  input: CorrectResultInput,
+  caller: Caller,
+  database?: DbOrTx,
+): Promise<ResultFormState> => {
+  const run = async (tx: DbOrTx): Promise<ResultFormState> => {
+    const initial = await getResultById(resultId, tx);
+    if (!initial) throw notFound(`result ${resultId}`);
+    if (!(await findProjectById(initial.projectId, caller.organizationId, tx))) {
+      throw notFound(`result ${resultId}`);
+    }
+    if (initial.archivedAt !== null) throw notFound(`result ${resultId}`);
+
+    const locked = await lockResultRow(resultId, tx);
+    if (!locked) throw notFound(`result ${resultId}`);
+    const row = await getResultById(resultId, tx);
+    if (!row) throw notFound(`result ${resultId}`);
+
+    if (row.masterEndMs === null) {
+      throw new AppError(
+        409,
+        "result_not_completed",
+        `result ${resultId} is an open inspection`,
+      );
+    }
+    if (row.inspectionFormId === null) {
+      throw new AppError(
+        409,
+        "form_version_missing",
+        `result ${resultId} has no pinned inspection form`,
+      );
+    }
+
+    const expected = new Date(input.expectedUpdatedAt);
+    if (Number.isNaN(expected.getTime())) {
+      throw new AppError(
+        400,
+        "validation_error",
+        `expectedUpdatedAt: ${input.expectedUpdatedAt} is not an ISO date`,
+      );
+    }
+    if (row.updatedAt.getTime() !== expected.getTime()) {
+      throw new AppError(
+        409,
+        "result_conflict",
+        `result ${resultId} changed at ${toIsoString(row.updatedAt)}`,
+        { currentUpdatedAt: toIsoString(row.updatedAt) },
+      );
+    }
+
+    parseInspectionPayload(row.inspectionTypeCode, input.payload, resultId);
+    const form = await getInspectionFormVersion(row.inspectionFormId, tx);
+    if (!form) {
+      throw new AppError(
+        409,
+        "form_version_missing",
+        `result ${resultId} pins form ${row.inspectionFormId}, which does not exist`,
+      );
+    }
+    const storedValues = (row.customValues as Record<string, unknown> | null) ?? {};
+    const values = await validateInspectionCustomValues(
+      row.inspectionFormId,
+      input.customValues ?? storedValues,
+      tx,
+    );
+
+    await clearTypedDetail(resultId, tx);
+    const update: Partial<typeof result.$inferInsert> = {
+      submittedPayload: input.payload,
+      customValues: values,
+    };
+    if (input.remarks !== undefined) update.remarks = input.remarks;
+    const updated = await updateResult(resultId, update, tx);
+    if (!updated) throw new Error(`failed to update result ${resultId}`);
+
+    await writeTypedDetail(row.inspectionTypeCode, input.payload, resultId, tx);
+
+    await writeAudit(
+      {
+        organizationId: caller.organizationId,
+        userId: caller.userId,
+        action: "modify",
+        resourceType: "Result",
+        resourceId: resultId,
+        before: row,
+        after: updated,
+      },
+      tx,
+    );
+
+    const saved = await getResultFormState(resultId, tx);
+    if (!saved) throw new Error(`failed to read result ${resultId} after correction`);
+    return saved;
+  };
+
+  return database ? run(database) : db.transaction(run);
 };
 
 const toIsoString = (value: Date) => value.toISOString();

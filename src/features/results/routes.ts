@@ -17,6 +17,7 @@ import {
   getRiserDetailByResultId,
   getScourDetailByResultId,
   getSeabedDetailByResultId,
+  correctResult,
   listProjectSummary,
 } from "../../db/services/result.service";
 import { listResultImageSummariesByResultIds } from "../../db/services/result-media.service";
@@ -30,14 +31,25 @@ import { getTargetResultSidebar, getTargetResultsBatch } from "../../db/services
 import { projectIdOfTarget } from "../../db/services/task-structure.service";
 import { findResultImageById } from "../../db/repositories/result-image.repository";
 import { findProjectById } from "../../db/repositories/project.repository";
-import { callerOf, requireCan, requireUser, type AuthVariables } from "../../lib/auth/middleware";
+import {
+  callerOf,
+  requireAdministrator,
+  requireCan,
+  requireUser,
+  type AuthVariables,
+} from "../../lib/auth/middleware";
 import type { Caller } from "../../lib/caller";
 import { notFound } from "../../lib/error";
 import { parseBody, parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
-import { createResultImageSchema, resultIdsSchema, targetIdsSchema } from "../../types/api";
+import {
+  createResultImageSchema,
+  resultCorrectionSchema,
+  resultIdsSchema,
+  targetIdsSchema,
+} from "../../types/api";
 
-// read-only views: sidebar, summary, evidence, typed details.
+// read views plus the admin correction and its evidence writes.
 // App parity: "no data" is data:null, never 404 — and that includes a row in
 // another org, so an id can never be probed for existence.
 //
@@ -167,12 +179,27 @@ export const resultRoutes = (database?: DbOrTx) => {
     return ok(c, await getResultEvidence(resultId, database));
   });
 
-  // row-only form state for Continue — null when the result is gone
+  // row form state for Continue and the admin editor — null when gone
   routes.get("/api/v1/results/:id/form-state", requireCan("read", "Result"), async (c) => {
     const resultId = parseId(c, "id");
     if (!(await resultVisible(resultId, callerOf(c)))) return ok(c, null);
 
     return ok(c, await getResultFormState(resultId, database));
+  });
+
+  // Admin correction of one completed result. Visibility is checked first so
+  // another org's id reads as absent, never as forbidden.
+  routes.patch("/api/v1/results/:resultId", async (c) => {
+    const resultId = parseId(c, "resultId");
+    const caller = callerOf(c);
+    const row = await getResultById(resultId, database);
+    if (!row || !(await projectVisible(row.projectId, caller))) {
+      throw notFound("Result");
+    }
+    requireAdministrator(c);
+
+    const input = await parseBody(c, resultCorrectionSchema);
+    return ok(c, await correctResult(resultId, input, caller, database));
   });
 
   // typed details: null when the result has no detail of that type

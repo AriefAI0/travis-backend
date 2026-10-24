@@ -6,7 +6,6 @@ import { db, type DbOrTx } from "../client";
 import { AppError, notFound } from "../../lib/error";
 import { removeMediaPrefix } from "../../lib/minio_storage/cleanup";
 import { listIngestRecordsByClipIds } from "../repositories/recording-ingest.repository";
-import { listInspectionFormFieldRecordsByFormId } from "../repositories/inspection-form.repository";
 import { listVideoClipRecordsBySessionId } from "../repositories/video-clip.repository";
 // Internal read: these ids come from a result row the route already scoped.
 import { findSessionByIdInternal } from "./session.service";
@@ -23,7 +22,10 @@ import {
   updateResult,
   writeTypedDetail,
 } from "./result.service";
-import { getCurrentInspectionForm } from "./inspection-form.service";
+import {
+  getCurrentInspectionForm,
+  validateInspectionCustomValues,
+} from "./inspection-form.service";
 import { writeAudit } from "./audit.service";
 import { findProjectById } from "../repositories/project.repository";
 import type { Caller } from "../../lib/caller";
@@ -143,43 +145,6 @@ const resolveInspectionTarget = async (
   return { projectId: group.projectId, descriptionId: null, partCodeId: code.partCodeId };
 };
 
-// check custom values against the pinned form version; returns the cleaned map
-const validateCustomValues = async (
-  inspectionFormId: number,
-  customValues: Record<string, unknown>,
-  database?: DbOrTx,
-): Promise<Record<string, unknown>> => {
-  const fields = await listInspectionFormFieldRecordsByFormId(inspectionFormId, database);
-  const byId = new Map(fields.map((field) => [String(field.inspectionFormFieldId), field]));
-  const values: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(customValues)) {
-    const field = byId.get(key);
-    if (!field || field.isBuiltin) {
-      throw new AppError(400, "custom_value_invalid", `customValues: unknown field ${key}`);
-    }
-    if (value === null || value === undefined) continue;
-    const matches =
-      (field.dataType === "integer" && Number.isInteger(value)) ||
-      (field.dataType === "decimal" && typeof value === "number" && Number.isFinite(value)) ||
-      (field.dataType === "text" && typeof value === "string") ||
-      (field.dataType === "boolean" && typeof value === "boolean");
-    if (!matches) {
-      throw new AppError(400, "custom_value_invalid", `customValues: ${field.label} expects ${field.dataType}`);
-    }
-    values[key] = value;
-  }
-
-  for (const field of fields) {
-    if (field.isBuiltin || !field.required) continue;
-    const value = values[String(field.inspectionFormFieldId)];
-    if (value === undefined || value === "") {
-      throw new AppError(400, "custom_value_missing", `customValues: ${field.label} is required`);
-    }
-  }
-  return values;
-};
-
 // active rows of a session: layer set and end anchor still null
 const listActiveRows = async (sessionId: number, database?: DbOrTx) => {
   const rows = await listResultsBySessionId(sessionId, database);
@@ -297,7 +262,11 @@ export const stopInspection = async (
       result.inspectionTypeCode,
       tx,
     );
-    const values = await validateCustomValues(form.inspectionFormId, input.customValues ?? {}, tx);
+    const values = await validateInspectionCustomValues(
+      form.inspectionFormId,
+      input.customValues ?? {},
+      tx,
+    );
 
     // Parse before any write: a dry run and a real stop must fail identically,
     // or the app would offer a Submit that the real stop then rejects.

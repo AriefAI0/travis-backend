@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "bun:test";
 import { appFor } from "../../helpers/app";
-import { createTestUser } from "../../helpers/auth";
+import { bearer, createTestUser } from "../../helpers/auth";
 import {
   closeTestDatabase,
   ensureTestDatabase,
@@ -11,12 +11,20 @@ import {
 } from "../../helpers/db";
 import { json } from "../../helpers/json";
 import { resultRoutes } from "../../../src/features/results/routes";
+import { getCurrentInspectionForm } from "../../../src/db/services/inspection-form.service";
 import * as schema from "../../../src/db/schema";
 
 const app = appFor(testDb, resultRoutes);
 
 // minted per test in beforeEach; every request below carries it
 let adminToken = "";
+const GVI_PAYLOAD = {
+  kind: "gvi",
+  version: 1,
+  depthEl: 12.5,
+  gviCP: [{ value: 120, remark: "", method: "contact" }],
+  condition: "ok",
+};
 
 // full chain: project > session > asset > component > item > sessionItem > result
 const seedResultContext = async () => {
@@ -53,6 +61,23 @@ const seedResultContext = async () => {
     projectId: 1,
     sessionId: 101,
   });
+};
+
+// completed GVI row with its pinned form; returns the stale-check timestamp
+const completeSeed = async () => {
+  const form = await getCurrentInspectionForm(1, "GVI", testDb);
+  await testDb
+    .update(schema.result)
+    .set({
+      masterEndMs: 4000,
+      inspectionFormId: form.inspectionFormId,
+      submittedPayload: GVI_PAYLOAD,
+    })
+    .where(eq(schema.result.resultId, 5001));
+  const row = await testDb.query.result.findFirst({
+    where: eq(schema.result.resultId, 5001),
+  });
+  return { updatedAt: row!.updatedAt.toISOString(), form };
 };
 
 // read-only views; "no data" is data:null or empty arrays, never 404
@@ -103,6 +128,9 @@ describe("results routes", () => {
       submittedPayload: null,
       // the class is chosen at submit; an open row sits on the column default
       resultClass: "normal",
+      inspectionFormId: null,
+      inspectionForm: null,
+      updatedAt: expect.any(String),
     });
 
     const missing = await authRequest("/api/v1/results/99999/form-state");
@@ -129,6 +157,60 @@ describe("results routes", () => {
     expect(data.submittedPayload).toEqual(payload);
     expect(data.customValues).toEqual({ 7: "note" });
     expect(data.remarks).toBe("deck");
+    expect(data.inspectionFormId).toBeNull();
+    expect(data.inspectionForm).toBeNull();
+    expect(typeof data.updatedAt).toBe("string");
+  });
+
+  it("refuses correction for a visible non-admin caller", async () => {
+    await seedResultContext();
+    const { updatedAt } = await completeSeed();
+    const operator = await createTestUser({ preset: "Operator" });
+
+    const res = await app.request("/api/v1/results/5001", {
+      method: "PATCH",
+      headers: { ...bearer(operator.token), "content-type": "application/json" },
+      body: JSON.stringify(correctionBody(updatedAt)),
+    });
+    expect(res.status).toBe(403);
+    expect((await json(res)).code).toBe("forbidden");
+  });
+
+  it("returns not_found for an inaccessible result before the admin gate", async () => {
+    const operator = await createTestUser({ preset: "Operator" });
+    const res = await app.request("/api/v1/results/99999", {
+      method: "PATCH",
+      headers: { ...bearer(operator.token), "content-type": "application/json" },
+      body: JSON.stringify(correctionBody(new Date().toISOString())),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses correction on an open result", async () => {
+    await seedResultContext();
+    const res = await authRequest("/api/v1/results/5001", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(correctionBody(new Date().toISOString())),
+    });
+    expect(res.status).toBe(409);
+    expect((await json(res)).code).toBe("result_not_completed");
+  });
+
+  it("refuses correction on an archived result", async () => {
+    await seedResultContext();
+    const { updatedAt } = await completeSeed();
+    await testDb
+      .update(schema.result)
+      .set({ archivedAt: new Date() })
+      .where(eq(schema.result.resultId, 5001));
+
+    const res = await authRequest("/api/v1/results/5001", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(correctionBody(updatedAt)),
+    });
+    expect(res.status).toBe(404);
   });
 
   it("project recordings + summary for a seeded project", async () => {
@@ -162,6 +244,13 @@ describe("results routes", () => {
     expect(res.status).toBe(400);
     expect((await json(res)).code).toBe("validation_error");
   });
+});
+
+const correctionBody = (expectedUpdatedAt: string) => ({
+  payload: GVI_PAYLOAD,
+  remarks: "corrected",
+  customValues: {},
+  expectedUpdatedAt,
 });
 
 // every request carries the Admin token minted in beforeEach

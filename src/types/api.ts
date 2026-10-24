@@ -721,6 +721,22 @@ export type ResultEvidence = {
  * Continue uses it to prefill a new row: `submittedPayload` is the app's own
  * stop payload, so the new tool instance seeds from the same shape it sends.
  */
+export type InspectionFormFieldRow = {
+  inspectionFormFieldId: number;
+  label: string;
+  dataType: string;
+  required: boolean;
+  isBuiltin: boolean;
+  displayOrder: number;
+};
+
+export type InspectionFormView = {
+  inspectionFormId: number;
+  inspectionTypeCode: string;
+  version: number;
+  fields: InspectionFormFieldRow[];
+};
+
 export type ResultFormState = {
   resultId: number;
   remarks: string | null;
@@ -731,6 +747,9 @@ export type ResultFormState = {
   masterEndMs: number | null;
   submittedPayload: unknown;
   resultClass: "normal" | "anomaly";
+  inspectionFormId: number | null;
+  inspectionForm: InspectionFormView | null;
+  updatedAt: string;
 };
 
 /* =========================================================
@@ -1089,6 +1108,15 @@ export const stopInspectionSchema = z.object({
   resultClass: z.enum(["normal", "anomaly"]).optional(),
   // validate everything a real stop would, then write nothing
   dryRun: z.boolean().optional(),
+});
+
+// Admin correction of a completed result. The row lock turns a stale
+// expectedUpdatedAt into a 409 instead of a lost edit.
+export const resultCorrectionSchema = z.object({
+  remarks: optionalText,
+  payload: z.unknown(),
+  customValues: z.record(z.string(), z.unknown()).optional(),
+  expectedUpdatedAt: z.string().min(1),
 });
 
 // sessions — service normalize only honors name today
