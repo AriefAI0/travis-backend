@@ -46,6 +46,18 @@ export const bufferEntry = (name: string, body: Buffer): PackageEntry => ({
   open: () => Readable.from([body]),
 });
 
+// `<resultId>_<task code>_<slug>`: the folder one result's files live in.
+// The slug is lowercase and cut at 40, so a deep Windows path stays short.
+export const resultFolder = (resultId: number, taskCode: string, description: string) => {
+  const slug = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40);
+  return [resultId, slug(taskCode), slug(description)].filter(Boolean).join("_");
+};
+
 // A plain-text entry, written straight into the zip.
 export const textEntry = (name: string, body: string): PackageEntry => ({
   name,

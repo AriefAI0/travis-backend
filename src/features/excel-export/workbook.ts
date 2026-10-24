@@ -40,7 +40,26 @@ export const typeFilename = (type: string, projectTitle: string, day = new Date(
 
 export type WorkbookOptions = {
   generatedAt?: Date;
+  // absent on a raw export: no media ships, so no media columns
+  media?: Map<number, MediaCells>;
 };
+
+// A result's shipped media, as the sheet names it. A path runs from the
+// workbook, which sits beside the images and clips folders.
+export type MediaCells = {
+  imageFolder: string;
+  images: number;
+  clipFolder: string;
+  clips: number;
+};
+
+// Plain folder references close the sheet. No link, no picture.
+const MEDIA_COLUMNS: ExcelColumn[] = [
+  { key: "image_folder", label: "Images folder", type: "text" },
+  { key: "images", label: "Images", type: "number" },
+  { key: "clip_folder", label: "Clips folder", type: "text" },
+  { key: "clips", label: "Clips", type: "number" },
+];
 
 // Excel refuses a sheet name past 31 chars and forbids these characters.
 const sheetName = (name: string) =>
@@ -102,6 +121,28 @@ export const writeTypeWorkbook = async (
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "travis";
   workbook.created = options.generatedAt ?? new Date();
-  addDataSheet(workbook, sheet.sheet, sheet.columns, sheet.rows);
+
+  const media = options.media;
+  const columns = media ? [...sheet.columns, ...MEDIA_COLUMNS] : sheet.columns;
+  // every row of a result names its folders, so a filter never hides them
+  const rows = media
+    ? sheet.rows.map((row) => {
+        const cells = media.get(row.resultId);
+        return cells
+          ? {
+              ...row,
+              cells: {
+                ...row.cells,
+                image_folder: cells.imageFolder,
+                images: cells.images,
+                clip_folder: cells.clipFolder,
+                clips: cells.clips,
+              },
+            }
+          : row;
+      })
+    : sheet.rows;
+
+  addDataSheet(workbook, sheet.sheet, columns, rows);
   return Buffer.from(await workbook.xlsx.writeBuffer());
 };

@@ -31,12 +31,12 @@ import {
 import type { InspectionTypeCode } from "../../types/api";
 import { collectClips } from "./clips";
 import { collectImages } from "./images";
-import { bufferEntry, readmeEntry, writePackage, type PackageEntry } from "./package";
+import { bufferEntry, readmeEntry, resultFolder, writePackage, type PackageEntry } from "./package";
 import {
   exportFilename,
   typeFilename,
   writeTypeWorkbook,
-  type WorkbookOptions,
+  type MediaCells,
 } from "./workbook";
 
 const LANES = ["light", "clips"] as const;
@@ -140,17 +140,52 @@ const readmeLines = (data: ExcelExportData, files: number, errors: string[]) => 
 ];
 
 // One entry per result. Flat rows repeat a result, so media fetches once.
-export const resultTypesOf = (data: ExcelExportData) => {
+export type ResultTarget = { resultId: number; type: InspectionTypeCode; folder: string };
+
+export const resultTypesOf = (data: ExcelExportData): ResultTarget[] => {
   const seen = new Set<number>();
-  const list: { resultId: number; type: InspectionTypeCode }[] = [];
+  const list: ResultTarget[] = [];
   for (const sheet of data.sheets) {
     for (const row of sheet.rows) {
       if (seen.has(row.resultId)) continue;
       seen.add(row.resultId);
-      list.push({ resultId: row.resultId, type: sheet.type });
+      list.push({
+        resultId: row.resultId,
+        type: sheet.type,
+        folder: resultFolder(row.resultId, String(row.cells.task_code ?? ""), String(row.cells.description ?? "")),
+      });
     }
   }
   return list;
+};
+
+// The folder references each result's rows carry, counted from what shipped.
+export const mediaCellsFor = (
+  targets: ResultTarget[],
+  images: Map<number, number>,
+  clips: Map<number, number>,
+): Map<number, MediaCells> =>
+  new Map(
+    targets.map((target) => {
+      const imageCount = images.get(target.resultId) ?? 0;
+      const clipCount = clips.get(target.resultId) ?? 0;
+      return [
+        target.resultId,
+        {
+          imageFolder: imageCount > 0 ? `images/${target.folder}` : "",
+          images: imageCount,
+          clipFolder: clipCount > 0 ? `clips/${target.folder}` : "",
+          clips: clipCount,
+        },
+      ] as const;
+    }),
+  );
+
+// A count of shipped files per result.
+const countByResult = (files: { resultId: number }[]) => {
+  const counts = new Map<number, number>();
+  for (const file of files) counts.set(file.resultId, (counts.get(file.resultId) ?? 0) + 1);
+  return counts;
 };
 
 // One workbook per type, named inside its type folder.
@@ -158,10 +193,11 @@ const workbookEntries = async (
   sheets: ExcelSheet[],
   projectTitle: string,
   generatedAt: Date,
+  media?: Map<number, MediaCells>,
 ): Promise<PackageEntry[]> => {
   const entries: PackageEntry[] = [];
   for (const sheet of sheets) {
-    const body = await excelWorkerDeps.build(sheet, { generatedAt });
+    const body = await excelWorkerDeps.build(sheet, { generatedAt, media });
     entries.push(bufferEntry(`${sheet.type}/${typeFilename(sheet.type, projectTitle, generatedAt)}`, body));
   }
   return entries;
@@ -217,7 +253,14 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
   const clipPlan =
     row.media === "clips"
       ? await collectClips(resultTypes, scratch, signal)
-      : { files: [], thumbs: new Map(), rows: [], errors: [] };
+      : { files: [], rows: [], errors: [] };
+
+  // the sheet names each result's folders and counts what shipped
+  const media = mediaCellsFor(
+    resultTypes,
+    countByResult(imagePlan.files),
+    countByResult(clipPlan.files),
+  );
 
   const mediaFiles = imagePlan.files.flatMap((file) => {
     const entries: PackageEntry[] = [
@@ -244,7 +287,7 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
     readmeEntry(readmeLines(data, imagePlan.rows.length + clipPlan.rows.length, errors)),
     ...mediaFiles,
     ...clipFiles,
-    ...(await workbookEntries(sheets, data.projectTitle, generatedAt)),
+    ...(await workbookEntries(sheets, data.projectTitle, generatedAt, media)),
   ];
 
   // a missing image or clip is a delivered package with a stated gap

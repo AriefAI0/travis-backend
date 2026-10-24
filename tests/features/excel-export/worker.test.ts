@@ -5,10 +5,12 @@ import type { ExcelExportRow } from "../../../src/db/repositories/excel-export.r
 import {
   emitProgress,
   excelWorkerDeps,
+  mediaCellsFor,
   resetExcelWorkerDeps,
   resultTypesOf,
   runExcelExport,
 } from "../../../src/features/excel-export/worker";
+import { resultFolder } from "../../../src/features/excel-export/package";
 
 // One GVI type with one reading, so a raw export ships a bare workbook.
 const oneRow: ExcelExportData = {
@@ -188,18 +190,39 @@ describe("excel export worker", () => {
           sheet: "GVI",
           columns: [],
           rows: [
+            { resultId: 5001, cells: { task_code: "GVI-101", description: "Anode A-12, port leg" } },
             { resultId: 5001, cells: {} },
             { resultId: 5001, cells: {} },
-            { resultId: 5001, cells: {} },
-            { resultId: 5002, cells: {} },
+            { resultId: 5002, cells: { task_code: "GVI-102", description: "Chord C-4" } },
           ],
         },
       ],
     };
 
     expect(resultTypesOf(repeated)).toEqual([
-      { resultId: 5001, type: "GVI" },
-      { resultId: 5002, type: "GVI" },
+      { resultId: 5001, type: "GVI", folder: "5001_gvi-101_anode-a-12-port-leg" },
+      { resultId: 5002, type: "GVI", folder: "5002_gvi-102_chord-c-4" },
     ]);
+  });
+
+  it("keeps a long result folder inside the Windows path budget", () => {
+    const folder = resultFolder(1042, "GVI-101", "x".repeat(200));
+    const longest = `CVI/images/${folder}/99_annotated.webp`;
+
+    expect(folder.length).toBeLessThanOrEqual(4 + 1 + 7 + 1 + 40);
+    expect(longest.length).toBeLessThan(160);
+  });
+
+  it("names a folder only for the media a result ships", () => {
+    const targets = [{ resultId: 5001, type: "GVI" as const, folder: "5001_gvi-101_leg" }];
+
+    const cells = mediaCellsFor(targets, new Map([[5001, 2]]), new Map());
+
+    expect(cells.get(5001)).toEqual({
+      imageFolder: "images/5001_gvi-101_leg",
+      images: 2,
+      clipFolder: "",
+      clips: 0,
+    });
   });
 });

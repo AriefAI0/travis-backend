@@ -129,6 +129,34 @@ describe("excel workbook", () => {
     });
   });
 
+  it("names each result's media folders in plain cells", async () => {
+    const folder = "5003_cvi-101_node-n-7";
+    const buffer = await writeTypeWorkbook(cvi, {
+      generatedAt: recorded,
+      media: new Map([
+        [5003, { imageFolder: `images/${folder}`, images: 2, clipFolder: `clips/${folder}`, clips: 1 }],
+      ]),
+    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
+    const sheet = workbook.getWorksheet("CVI")!;
+    const header = sheet.getRow(1).values as unknown[];
+
+    expect(header.slice(-4)).toEqual(["Images folder", "Images", "Clips folder", "Clips"]);
+    const first = sheet.getRow(2).values as unknown[];
+    expect(first.slice(-4)).toEqual([`images/${folder}`, 2, `clips/${folder}`, 1]);
+    // the second reading of the same result names the folders too
+    const second = sheet.getRow(3).values as unknown[];
+    expect(second.slice(-4)).toEqual([`images/${folder}`, 2, `clips/${folder}`, 1]);
+  });
+
+  it("adds no media columns to a raw workbook", async () => {
+    const workbook = await read(gvi);
+    const header = workbook.getWorksheet("GVI")!.getRow(1).values as unknown[];
+
+    expect((header as string[]).includes("Images folder")).toBe(false);
+  });
+
   it("names the file after the type, so two can open at once", () => {
     expect(typeFilename("GVI", "Travity Field A", recorded)).toBe("GVI_travity_field_a_2026-10-01.xlsx");
     expect(typeFilename("CVI", "Travity Field A", recorded)).not.toBe(

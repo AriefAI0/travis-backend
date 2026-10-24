@@ -1,15 +1,14 @@
-// Result images for the "+ Images" level: fetch both copies, scale one
-// thumbnail, and name everything the way the zip ships it.
+// Result images for the "+ Images" level: fetch both copies and name everything
+// the way the zip ships it.
 //
-// Four fetches run at a time and one ffmpeg at a time, so a lane never floods
-// MinIO or the CPU. A missing object becomes an error row, never a silent gap.
-// flow: result ids > image summaries > 4-wide fetch > 160 px jpeg > names
+// Four fetches run at a time, so a lane never floods MinIO. A missing object
+// becomes an error row, never a silent gap.
+// flow: result ids > image summaries > 4-wide fetch > named files
 
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { env } from "../../config/env";
-import { runFfmpegBounded } from "../../lib/ffmpeg";
 import { log } from "../../lib/logger";
 import { minio } from "../../lib/minio_storage/clients";
 import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
@@ -20,17 +19,12 @@ import type { MediaRow } from "./package";
 const FETCH_CONCURRENCY = 4;
 const FETCH_ATTEMPTS = 3;
 
-// One ffmpeg per lane: the caller runs collectImages once at a time.
-const THUMBNAIL_BOX = 160;
-const THUMBNAIL_TIMEOUT_MS = 30_000;
+export type ImageTarget = { resultId: number; type: string; folder: string };
 
 export type ImageFile = {
   resultId: number;
   type: string;
   index: number;
-  // the file the cell links to: the annotated copy when it exists
-  target: string;
-  thumbnail: string;
   raw: { key: string; name: string; file: string };
   annotated: { key: string; name: string; file: string } | null;
 };
@@ -79,59 +73,41 @@ const download = async (key: string, destination: string) => {
   });
 };
 
-// One ffmpeg per image: scale inside a 160 px box, JPEG out. webp lands here too
-// because Excel reads a JPEG and refuses a webp drawing part.
-const makeThumbnail = async (source: string, target: string, signal?: AbortSignal) => {
-  await runFfmpegBounded(
-    env.FFMPEG_PATH,
-    [
-      "-y", "-v", "error",
-      "-i", source,
-      "-vf", `scale=${THUMBNAIL_BOX}:${THUMBNAIL_BOX}:force_original_aspect_ratio=decrease`,
-      "-frames:v", "1",
-      "-f", "image2",
-      target,
-    ],
-    THUMBNAIL_TIMEOUT_MS,
-    { signal },
-  );
-};
-
-// flow: summaries > plan files > fetch copies > thumbnails > media rows
+// flow: summaries > plan files > fetch copies > media rows
 export const collectImages = async (
-  resultTypes: { resultId: number; type: string }[],
+  targets: ImageTarget[],
   scratchDirectory: string,
   signal?: AbortSignal,
 ): Promise<ImagePlan> => {
   const files: ImageFile[] = [];
   const errors: string[] = [];
 
-  if (resultTypes.length === 0) return { files, rows: [], errors };
+  if (targets.length === 0) return { files, rows: [], errors };
 
   const summaries = await listResultImageSummariesByResultIds(
-    resultTypes.map((entry) => entry.resultId),
+    targets.map((entry) => entry.resultId),
   );
 
   // plan first, so a naming clash shows before any byte moves
-  for (const { resultId, type } of resultTypes) {
+  for (const { resultId, type, folder } of targets) {
     const images = summaries.get(resultId) ?? [];
     images.forEach((image, index) => {
       const leaves = imageEvidenceLeaves(image.storageStem, image.imageId, image.contentType);
       const ext = leaves.raw.key.split(".").pop() ?? "png";
-      const stem = `images/${type}/${resultId}_${index + 1}`;
+      const n = String(index + 1).padStart(2, "0");
+      const stem = `images/${type}/${folder}/${n}`;
+      const scratch = `${type}-${resultId}-${n}`;
 
       files.push({
         resultId,
         type,
         index: index + 1,
-        target: `${stem}${image.hasAnnotated ? "_annotated" : ""}.${ext}`,
-        thumbnail: path.join(scratchDirectory, `${type}-${resultId}-${index + 1}.thumb.jpg`),
-        raw: { key: leaves.raw.key, name: `${stem}.${ext}`, file: path.join(scratchDirectory, `${type}-${resultId}-${index + 1}.${ext}`) },
+        raw: { key: leaves.raw.key, name: `${stem}.${ext}`, file: path.join(scratchDirectory, `${scratch}.${ext}`) },
         annotated: image.hasAnnotated
           ? {
               key: leaves.annotated.key,
               name: `${stem}_annotated.${ext}`,
-              file: path.join(scratchDirectory, `${type}-${resultId}-${index + 1}.annotated.${ext}`),
+              file: path.join(scratchDirectory, `${scratch}.annotated.${ext}`),
             }
           : null,
       });
@@ -147,34 +123,26 @@ export const collectImages = async (
     files.map((file, index) => ({ file, index })),
     FETCH_CONCURRENCY,
     async ({ file, index }) => {
+      if (signal?.aborted) return;
       try {
         // the annotated twin first: it is what the inspector signed off on.
         // An upload that landed empty or unreadable falls back to the raw copy
         // rather than costing the row its picture.
-        let thumbed = false;
         if (file.annotated) {
           try {
             await download(file.annotated.key, file.annotated.file);
-            await makeThumbnail(file.annotated.file, file.thumbnail, signal);
-            thumbed = true;
+            // an upload that landed empty is as unusable as a missing one
+            if ((await Bun.file(file.annotated.file).size) === 0) {
+              throw new Error("empty annotated copy");
+            }
           } catch {
             log.warn("excel export annotated copy unusable", {
               resultId: file.resultId,
               index: file.index,
             });
+            file.annotated = null;
           }
         }
-
-        if (!thumbed) {
-          await download(file.raw.key, file.raw.file);
-          await makeThumbnail(file.raw.file, file.thumbnail, signal);
-          // the cell links to what actually shipped
-          file.target = file.raw.name;
-          file.annotated = null;
-          return;
-        }
-
-        // both copies ship, so the raw half is fetched either way
         await download(file.raw.key, file.raw.file);
       } catch (error) {
         failed.add(index);
