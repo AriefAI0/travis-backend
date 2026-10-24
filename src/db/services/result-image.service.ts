@@ -6,7 +6,14 @@ import {
 } from "../../lib/minio_storage/paths";
 import { AppError } from "../../lib/error";
 import type { Caller } from "../../lib/caller";
-import { mintPutUrl } from "../../lib/minio_storage/mint";
+import { mintGetUrl, mintPutUrl } from "../../lib/minio_storage/mint";
+import {
+  matchesImageMagic,
+  MAX_ADMIN_IMAGE_BYTES,
+  readObjectHead,
+  removeExactMediaKeys,
+} from "../../lib/minio_storage/result-image-objects";
+import { minio } from "../../lib/minio_storage/clients";
 import { db, type DbOrTx } from "../client";
 import { writeAudit } from "./audit.service";
 import {
@@ -28,6 +35,8 @@ export type ImageUploadTicket = {
   variant: "raw" | "annotated";
   url: string;
   expiresInSeconds: number;
+  // admin uploads only: the object must pass this cap before finalize
+  maxBytes?: number;
 };
 
 const PUT_TTL_SECONDS = 900;
@@ -124,6 +133,7 @@ export const createImageUploadTicket = async (
   input: { resultId: number; contentType: string; remarks?: string | null },
   caller: Caller,
   database?: DbOrTx,
+  options: { status?: "pending" | "ready"; maxBytes?: number } = {},
 ): Promise<ImageUploadTicket> => {
   if (!imageExtension(input.contentType)) {
     throw new AppError(400, "bad_request", `unsupported contentType ${input.contentType}`);
@@ -138,6 +148,7 @@ export const createImageUploadTicket = async (
         resultId: resultRow.resultId,
         storageStem: stem,
         contentType: input.contentType,
+        status: options.status ?? "ready",
         remarks: input.remarks?.trim() || null,
       },
       tx,
@@ -172,7 +183,32 @@ export const createImageUploadTicket = async (
     variant: "raw",
     url: await mintPutUrl(leaf.bucket, leaf.key),
     expiresInSeconds: PUT_TTL_SECONDS,
+    ...(options.maxBytes ? { maxBytes: options.maxBytes } : {}),
   };
+};
+
+// Admin upload: one pending row on a completed result, then a finalize check.
+export const createAdminImageUploadTicket = async (
+  input: { resultId: number; contentType: string; remarks?: string | null },
+  caller: Caller,
+  database?: DbOrTx,
+): Promise<ImageUploadTicket> => {
+  const resultRow = await requireResult(input.resultId, database);
+  if (resultRow.archivedAt !== null) {
+    throw new AppError(404, "not_found", `result ${input.resultId} not found`);
+  }
+  if (resultRow.masterEndMs === null) {
+    throw new AppError(
+      409,
+      "result_not_completed",
+      `result ${input.resultId} is an open inspection`,
+    );
+  }
+
+  return createImageUploadTicket(input, caller, database, {
+    status: "pending",
+    maxBytes: MAX_ADMIN_IMAGE_BYTES,
+  });
 };
 
 // flow: image row > flag + audit in one transaction > annotated PUT url
@@ -219,31 +255,179 @@ export const createAnnotatedUploadTicket = async (
   };
 };
 
-// remove the row; the objects are swept separately (no delete-on-read path)
-export const removeResultImage = async (
+type ImageRow = Awaited<ReturnType<typeof requireImage>>;
+
+// Delete one image row and record it. Objects are already gone.
+const deleteImageRow = async (imageRow: ImageRow, caller: Caller, tx: DbOrTx) => {
+  const deleted = await deleteResultImageById(imageRow.imageId, tx);
+  await touchResult(imageRow.resultId, tx);
+
+  await writeAudit(
+    {
+      organizationId: caller.organizationId,
+      userId: caller.userId,
+      action: "remove",
+      resourceType: "ResultImage",
+      resourceId: imageRow.imageId,
+      before: imageRow,
+    },
+    tx,
+  );
+
+  return deleted;
+};
+
+// Invalid bytes never become evidence: remove the object, then the row.
+const rejectUpload = async (
+  imageRow: ImageRow,
+  caller: Caller,
+  message: string,
+  database?: DbOrTx,
+): Promise<never> => {
+  const leaf = imageEvidenceLeaves(
+    imageRow.storageStem,
+    imageRow.imageId,
+    imageRow.contentType,
+  ).raw;
+
+  try {
+    await removeExactMediaKeys([leaf.key]);
+  } catch (error) {
+    throw new AppError(
+      500,
+      "image_cleanup_failed",
+      `image ${imageRow.imageId} failed validation and its object could not be removed: ${String(error)}`,
+    );
+  }
+
+  const commit = async (tx: DbOrTx) => deleteImageRow(imageRow, caller, tx);
+  if (database) {
+    await commit(database);
+  } else {
+    await db.transaction(commit);
+  }
+
+  throw new AppError(
+    400,
+    "image_invalid",
+    `image ${imageRow.imageId}: ${message}`,
+  );
+};
+
+// flow: row > object stat > byte head > status ready, one short transaction
+export const finalizeAdminImageUpload = async (
   imageId: number,
   caller: Caller,
   database?: DbOrTx,
 ) => {
+  const imageRow = await requireImage(imageId, database);
+  if (imageRow.status === "ready") return imageRow;
+  if (imageRow.status === "rejected") {
+    throw new AppError(409, "image_rejected", `image ${imageId} was rejected`);
+  }
+
+  const leaf = imageEvidenceLeaves(
+    imageRow.storageStem,
+    imageRow.imageId,
+    imageRow.contentType,
+  ).raw;
+
+  let size = 0;
+  try {
+    const stat = await minio.statObject(leaf.bucket, leaf.key);
+    size = Number(stat.size);
+  } catch {
+    throw new AppError(
+      409,
+      "image_not_uploaded",
+      `image ${imageId} has no stored object at ${leaf.key}`,
+    );
+  }
+
+  if (size <= 0 || size > MAX_ADMIN_IMAGE_BYTES) {
+    return rejectUpload(
+      imageRow,
+      caller,
+      `object size ${size} must be between 1 and ${MAX_ADMIN_IMAGE_BYTES} bytes`,
+      database,
+    );
+  }
+
+  const head = await readObjectHead(leaf.bucket, leaf.key);
+  if (!matchesImageMagic(head, imageRow.contentType)) {
+    return rejectUpload(
+      imageRow,
+      caller,
+      `bytes do not match ${imageRow.contentType}`,
+      database,
+    );
+  }
+
   const commit = async (tx: DbOrTx) => {
-    const imageRow = await requireImage(imageId, tx);
-    const deleted = await deleteResultImageById(imageId, tx);
+    const updated = await updateResultImageById(imageId, { status: "ready" }, tx);
+    if (!updated) throw new Error(`failed to finalize image ${imageId}`);
     await touchResult(imageRow.resultId, tx);
 
     await writeAudit(
       {
         organizationId: caller.organizationId,
         userId: caller.userId,
-        action: "remove",
+        action: "modify",
         resourceType: "ResultImage",
         resourceId: imageId,
         before: imageRow,
+        after: updated,
       },
       tx,
     );
 
-    return deleted;
+    return updated;
   };
 
+  return database ? commit(database) : db.transaction(commit);
+};
+
+// Current variant and the stored leaf name, minted fresh on every request.
+export const getImageDownloadUrl = async (
+  imageId: number,
+  database?: DbOrTx,
+): Promise<{ imageId: number; filename: string; contentType: string; url: string }> => {
+  const imageRow = await requireImage(imageId, database);
+  if (imageRow.status !== "ready") {
+    throw new AppError(409, "image_not_ready", `image ${imageId} is not ready`);
+  }
+
+  const leaves = imageEvidenceLeaves(
+    imageRow.storageStem,
+    imageRow.imageId,
+    imageRow.contentType,
+  );
+  const leaf = imageRow.hasAnnotated ? leaves.annotated : leaves.raw;
+  const filename = leaf.key.split("/").pop() ?? `image-${imageId}`;
+
+  return {
+    imageId,
+    filename,
+    contentType: imageRow.contentType,
+    url: await mintGetUrl(leaf.bucket, leaf.key),
+  };
+};
+
+// Permanent removal: exact raw and annotated objects go first. A failed object
+// removal leaves the row so the admin can retry.
+export const removeResultImage = async (
+  imageId: number,
+  caller: Caller,
+  database?: DbOrTx,
+) => {
+  const imageRow = await requireImage(imageId, database);
+  const leaves = imageEvidenceLeaves(
+    imageRow.storageStem,
+    imageRow.imageId,
+    imageRow.contentType,
+  );
+  await removeExactMediaKeys([leaves.raw.key, leaves.annotated.key]);
+
+  const commit = async (tx: DbOrTx) => deleteImageRow(imageRow, caller, tx);
   return database ? commit(database) : db.transaction(commit);
 };

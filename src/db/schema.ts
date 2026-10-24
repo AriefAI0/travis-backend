@@ -1251,6 +1251,12 @@ export const videoClip = pgTable(
 /* =========================================================
    RESULT IMAGE
 ========================================================= */
+export const resultImageStatus = pgEnum("result_image_status", [
+  "pending",
+  "ready",
+  "rejected",
+]);
+
 export const resultImage = pgTable(
   "result_image",
   {
@@ -1263,6 +1269,8 @@ export const resultImage = pgTable(
     storageStem: text("storage_stem").notNull(),
     contentType: text("content_type").notNull().default("image/png"),
     hasAnnotated: boolean("has_annotated").notNull().default(false),
+    // operator snapshots are ready at insert; admin uploads wait for finalize
+    status: resultImageStatus("status").notNull().default("ready"),
     remarks: text("remarks"),
   },
   (table) => ({

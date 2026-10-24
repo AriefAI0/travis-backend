@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 
+import { closeTestDatabase, ensureTestDatabase } from "../../helpers/db";
 import type { ExcelExportData } from "../../../src/db/services/excel-export-data.service";
 import type { ExcelExportRow } from "../../../src/db/repositories/excel-export.repository";
 import {
@@ -69,6 +70,9 @@ let events: string[];
 let packaged: string[];
 let current: ExcelExportRow;
 
+beforeAll(ensureTestDatabase);
+afterAll(closeTestDatabase);
+
 beforeEach(() => {
   resetExcelWorkerDeps();
   stored = new Map();
@@ -79,6 +83,10 @@ beforeEach(() => {
 
   excelWorkerDeps.read = async () => current;
   excelWorkerDeps.gather = async () => oneRow;
+  excelWorkerDeps.collectImages = async (_targets, _scratch, _signal, onProgress) => {
+    await onProgress?.(0, 0);
+    return { files: [], rows: [], errors: [] };
+  };
   excelWorkerDeps.build = async () => Buffer.from("workbook");
   excelWorkerDeps.package = async (key, entries) => {
     packaged = entries.map((entry) => entry.name);

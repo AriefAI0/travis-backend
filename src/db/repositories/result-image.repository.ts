@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { db, type DbOrTx } from "../client";
 import { resultImage } from "../schema";
@@ -15,8 +15,12 @@ export const createResultImageRecord = async (
   return createdResultImages[0] ?? null;
 };
 
+// ordinary reads never see a pending or rejected upload
+const readyOnly = eq(resultImage.status, "ready");
+
 export const listResultImageRecords = async (database: DbOrTx = db) =>
   database.query.resultImage.findMany({
+    where: readyOnly,
     orderBy: asc(resultImage.imageId),
   });
 
@@ -33,7 +37,7 @@ export const listResultImageRecordsByResultId = async (
   database: DbOrTx = db,
 ) =>
   database.query.resultImage.findMany({
-    where: eq(resultImage.resultId, resultId),
+    where: and(eq(resultImage.resultId, resultId), readyOnly),
     orderBy: asc(resultImage.imageId),
   });
 
@@ -47,7 +51,7 @@ export const listResultImageRecordsByResultIds = async (
   }
 
   return database.query.resultImage.findMany({
-    where: inArray(resultImage.resultId, resultIds),
+    where: and(inArray(resultImage.resultId, resultIds), readyOnly),
     orderBy: [asc(resultImage.resultId), asc(resultImage.imageId)],
   });
 };

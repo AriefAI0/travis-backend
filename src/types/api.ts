@@ -1145,6 +1145,11 @@ export const createResultImageSchema = z
   })
   .strict();
 
+// A named image is removed for good; the explicit flag stops a stray DELETE.
+export const permanentRemoveImageSchema = z
+  .object({ confirmPermanentRemove: z.literal(true) })
+  .strict();
+
 // query params (string -> coerced)
 const queryId = z.coerce.number().int().positive();
 export const playbackQuerySchema = z.object({ projectId: queryId });

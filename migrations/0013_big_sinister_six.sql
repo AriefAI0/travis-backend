@@ -1,0 +1,2 @@
+CREATE TYPE "public"."result_image_status" AS ENUM('pending', 'ready', 'rejected');--> statement-breakpoint
+ALTER TABLE "result_image" ADD COLUMN "status" "result_image_status" DEFAULT 'ready' NOT NULL;

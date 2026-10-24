@@ -130,6 +130,7 @@ export type ExcelWorkerDeps = {
   move: typeof moveExcelExport;
   read: (id: string, organizationId: number, ownerUserId: string) => Promise<ExcelExportView>;
   gather: typeof gatherExcelExport;
+  collectImages: typeof collectImages;
   build: typeof writeTypeWorkbook;
   package: typeof writePackage;
   putObject: (key: string, body: Buffer) => Promise<void>;
@@ -142,6 +143,7 @@ const defaultDeps: ExcelWorkerDeps = {
   move: moveExcelExport,
   read: getExcelExport,
   gather: gatherExcelExport,
+  collectImages,
   build: writeTypeWorkbook,
   package: writePackage,
   putObject: async (key, body) =>
@@ -334,7 +336,7 @@ const buildPackage = async (
 
   const imagePlan =
     row.media === "images" || row.media === "clips"
-      ? await collectImages(resultTypes, scratch, signal, onImage)
+      ? await excelWorkerDeps.collectImages(resultTypes, scratch, signal, onImage)
       : { files: [], rows: [], errors: [] };
 
   // clip merges run after the images, one at a time, inside the clips lane

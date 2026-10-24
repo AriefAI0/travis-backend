@@ -204,15 +204,98 @@ describe("evidence image routes", () => {
     expect(res.status).toBe(404);
   });
 
+  it("admin upload stays pending, hidden, and needs a real object to finalize", async () => {
+    await seedResultContext();
+    await testDb
+      .update(schema.result)
+      .set({ masterEndMs: 4000 })
+      .where(eq(schema.result.resultId, 5001));
+
+    const res = await asAdminRequest("/api/v1/results/5001/images/admin", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contentType: "image/png" }),
+    });
+    expect(res.status).toBe(201);
+    const ticket = (await json<{ data: Ticket & { maxBytes: number } }>(res)).data;
+    expect(ticket.maxBytes).toBe(20 * 1024 * 1024);
+    expect(ticket.variant).toBe("raw");
+
+    const row = (await testDb.select().from(schema.resultImage))[0]!;
+    expect(row.status).toBe("pending");
+
+    const sidebar = await json(await authRequest("/api/v1/descriptions/100/results"));
+    expect(sidebar.data.sessions[0].results[0].images).toHaveLength(0);
+
+    const download = await authRequest(`/api/v1/images/${ticket.imageId}/download-url`);
+    expect(download.status).toBe(409);
+
+    const finalize = await asAdminRequest(`/api/v1/images/${ticket.imageId}/finalize`, {
+      method: "POST",
+    });
+    expect(finalize.status).toBe(409);
+    expect((await json(finalize)).code).toBe("image_not_uploaded");
+    expect((await testDb.select().from(schema.resultImage))[0]!.status).toBe("pending");
+  });
+
+  it("admin upload refuses an open result and a non-admin caller", async () => {
+    await seedResultContext();
+
+    const open = await asAdminRequest("/api/v1/results/5001/images/admin", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contentType: "image/png" }),
+    });
+    expect(open.status).toBe(409);
+
+    await testDb
+      .update(schema.result)
+      .set({ masterEndMs: 4000 })
+      .where(eq(schema.result.resultId, 5001));
+    const operator = await authRequest("/api/v1/results/5001/images/admin", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contentType: "image/png" }),
+    });
+    expect(operator.status).toBe(403);
+  });
+
+  it("download-url names the stored image leaf", async () => {
+    await seedResultContext();
+    const { data } = await json<{ data: Ticket }>(await createImage({ contentType: "image/jpeg" }));
+
+    const res = await authRequest(`/api/v1/images/${data.imageId}/download-url`);
+    expect(res.status).toBe(200);
+    const body = (await json(res)).data as Record<string, string>;
+    expect(body.filename).toBe(`${data.imageId}.jpg`);
+    expect(body.contentType).toBe("image/jpeg");
+    expect(body.url).toContain(`/${data.imageId}.jpg`);
+  });
+
   it("delete removes the row and 404s on repeat", async () => {
     await seedResultContext();
     const { data } = await json<{ data: Ticket }>(await createImage({ contentType: "image/png" }));
 
-    const gone = await asAdminRequest(`/api/v1/images/${data.imageId}`, { method: "DELETE" });
+    const noConfirm = await asAdminRequest(`/api/v1/images/${data.imageId}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(noConfirm.status).toBe(400);
+
+    const gone = await asAdminRequest(`/api/v1/images/${data.imageId}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirmPermanentRemove: true }),
+    });
     expect(gone.status).toBe(200);
     expect(await testDb.select().from(schema.resultImage)).toHaveLength(0);
 
-    const again = await asAdminRequest(`/api/v1/images/${data.imageId}`, { method: "DELETE" });
+    const again = await asAdminRequest(`/api/v1/images/${data.imageId}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirmPermanentRemove: true }),
+    });
     expect(again.status).toBe(404);
   });
 

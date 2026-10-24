@@ -22,8 +22,11 @@ import {
 } from "../../db/services/result.service";
 import { listResultImageSummariesByResultIds } from "../../db/services/result-media.service";
 import {
+  createAdminImageUploadTicket,
   createAnnotatedUploadTicket,
   createImageUploadTicket,
+  finalizeAdminImageUpload,
+  getImageDownloadUrl,
   removeResultImage,
 } from "../../db/services/result-image.service";
 import { listSessionRecordingsByProjectId } from "../../db/services/video.service";
@@ -44,6 +47,7 @@ import { parseBody, parseId } from "../../lib/parse";
 import { ok } from "../../lib/response";
 import {
   createResultImageSchema,
+  permanentRemoveImageSchema,
   resultCorrectionSchema,
   resultIdsSchema,
   targetIdsSchema,
@@ -259,6 +263,35 @@ export const resultRoutes = (database?: DbOrTx) => {
     },
   );
 
+  // Admin evidence add: the row stays pending until the object passes checks.
+  routes.post("/api/v1/results/:resultId/images/admin", async (c) => {
+    const resultId = parseId(c, "resultId");
+    const caller = callerOf(c);
+    if (!(await resultVisible(resultId, caller))) throw notFound("Result");
+    requireAdministrator(c);
+
+    const body = await parseBody(c, createResultImageSchema);
+    return ok(c, await createAdminImageUploadTicket({ resultId, ...body }, caller, database), 201);
+  });
+
+  // Validate the uploaded object, then make the image visible.
+  routes.post("/api/v1/images/:imageId/finalize", async (c) => {
+    const imageId = parseId(c, "imageId");
+    const caller = callerOf(c);
+    if (!(await imageVisible(imageId, caller))) throw notFound("Image");
+    requireAdministrator(c);
+
+    return ok(c, await finalizeAdminImageUpload(imageId, caller, database));
+  });
+
+  // Fresh URL for copy, save, or download; the variant is resolved per request.
+  routes.get("/api/v1/images/:imageId/download-url", requireCan("read", "Result"), async (c) => {
+    const imageId = parseId(c, "imageId");
+    if (!(await imageVisible(imageId, callerOf(c)))) throw notFound("Image");
+
+    return ok(c, await getImageDownloadUrl(imageId, database));
+  });
+
   // annotated twin of an EXISTING image — same imageId, second upload
   routes.post("/api/v1/images/:imageId/annotated", requireCan("modify", "Result"), async (c) => {
     const imageId = parseId(c, "imageId");
@@ -268,10 +301,13 @@ export const resultRoutes = (database?: DbOrTx) => {
     return ok(c, await createAnnotatedUploadTicket(imageId, caller, database), 201);
   });
 
-  routes.delete("/api/v1/images/:imageId", requireCan("remove", "Result"), async (c) => {
+  // Permanent removal of one image and its raw/annotated objects.
+  routes.delete("/api/v1/images/:imageId", async (c) => {
     const imageId = parseId(c, "imageId");
     const caller = callerOf(c);
     if (!(await imageVisible(imageId, caller))) throw notFound("Image");
+    requireAdministrator(c);
+    await parseBody(c, permanentRemoveImageSchema);
 
     return ok(c, await removeResultImage(imageId, caller, database));
   });
