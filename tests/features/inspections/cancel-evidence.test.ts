@@ -85,6 +85,7 @@ const seedInspection = async () => {
     sessionId: 101,
     startOffsetMs: 0,
   });
+  await testDb.insert(schema.clipEventMarker).values({ clipId: 7, positionMs: 700 });
   await testDb.insert(schema.recordingIngest).values({
     kind: "clip",
     clipId: 7,
@@ -142,6 +143,7 @@ describe("inspection cancel evidence cleanup", () => {
     expect(rowCountAtRemoval).toEqual([0]);
     // the clip sweep still runs
     expect(sweptPrefixes).toEqual(["1/1/101/2026/10/25/clips/7"]);
+    expect(await testDb.query.clipEventMarker.findMany()).toEqual([]);
   });
 
   it("surfaces a storage error after the commit and never claims the row survived", async () => {

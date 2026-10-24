@@ -380,6 +380,25 @@ describe("admin result correction", () => {
     });
   }
 
+  it("keeps clip markers when a completed result is corrected", async () => {
+    const scenario = SCENARIOS.find((item) => item.type === "GVI")!;
+    const { resultId, updatedAt } = await seedCompleted(scenario.type, scenario.payload);
+    await testDb.insert(schema.videoClip).values({
+      clipId: 9901,
+      resultId,
+      sessionId: 101,
+      startOffsetMs: 0,
+      endOffsetMs: 4000,
+    });
+    await testDb.insert(schema.clipEventMarker).values({ clipId: 9901, positionMs: 2100 });
+
+    const res = await patchResult(resultId, correction(scenario.payload, updatedAt));
+    expect(res.status).toBe(200);
+
+    const markers = await testDb.query.clipEventMarker.findMany();
+    expect(markers.map((marker) => marker.positionMs)).toEqual([2100]);
+  });
+
   it("rejects a stale write without changing the saved payload", async () => {
     const scenario = SCENARIOS.find((item) => item.type === "GVI")!;
     const { resultId, updatedAt } = await seedCompleted(scenario.type, scenario.payload);
