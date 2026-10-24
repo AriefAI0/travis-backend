@@ -69,6 +69,31 @@ const addResult = async (values: {
     remarks: values.remarks ?? null,
   });
 
+// A pipeline finding: the schema makes every category field not-null.
+const pipelineFinding = (resultId: number, overrides: Partial<typeof schema.resultPipelineFinding.$inferInsert> = {}) =>
+  ({
+    resultId,
+    damageDimensions: "",
+    debrisDescription: "",
+    stabilizationType: "",
+    burialStart: "",
+    burialEnd: "",
+    freespansStart: "",
+    freespansEnd: "",
+    freespansLength: "",
+    freespansHeight: "",
+    leakType: "",
+    leakDescription: "",
+    crossingGapDistance: "",
+    crossingDamageMovement: "",
+    featuresType: "",
+    anodeCpValue: "",
+    anodeDepletion: "",
+    anodeKp: "",
+    remarks: "",
+    ...overrides,
+  }) as typeof schema.resultPipelineFinding.$inferInsert;
+
 const targets = (...keys: string[]) => parseDatasheetTargets(keys);
 
 describe("excel export data", () => {
@@ -343,6 +368,15 @@ describe("excel export data", () => {
     for (const entry of EXCEL_CONTRACT) {
       expect(entry.sheet.length).toBeLessThanOrEqual(31);
     }
+
+    // every type answers as one flat sheet, whether or not it has rows
+    await seedTree();
+    const allTypes = EXCEL_CONTRACT.map((entry) => entry.type);
+    const data = await gatherExcelExport(1, allTypes, targets("partCode:300"), testOrgId, testDb);
+    expect(data.sheets.map((sheet) => sheet.type)).toEqual(allTypes);
+    for (const sheet of data.sheets) {
+      expect("children" in sheet).toBe(false);
+    }
   });
 });
 
@@ -474,17 +508,36 @@ const PANEL_LABELS: Record<string, string[]> = {
     "Remark",
   ],
   SEABED: ["Range (m)", "Fixes", "Debris", "Debris Type", "Remark"],
-  // PIPELINE keeps its contract labels until T4.
+  // PIPELINE ships every finding column.
   PIPELINE: [
     "Location",
-    "Depth EL",
+    "Depth EL (-)",
     "Orientation",
     "Category",
-    "Damage type",
-    "Debris",
-    "Anode CP mV",
-    "Anode depletion",
-    "Anode KP",
+    "Damage Type",
+    "Estimated Dimension",
+    "Debris Type",
+    "Debris Description",
+    "Riser Bend Condition",
+    "Stabilization Type",
+    "Stabilization Condition",
+    "Burial Start",
+    "Burial End",
+    "Freespans Start",
+    "Freespans End",
+    "Approximate Length",
+    "Maximum Height",
+    "Leak Type",
+    "Leak Description",
+    "Crossing Type",
+    "Contact",
+    "Gap Distance",
+    "Damage / Movement",
+    "Feature Type",
+    "Condition",
+    "CP Value (mV)",
+    "Depletion (%)",
+    "KP",
     "Remarks",
   ],
 };
@@ -651,6 +704,60 @@ describe("panel labels and text", () => {
       growth_type: "Soft",
       species_other_text: "plumose anemone",
       coverage_percent: 35,
+    });
+  });
+
+  it("ships every pipeline finding column under panel text", async () => {
+    await seedTree();
+    await addResult({ resultId: 5020, type: "PIPELINE" });
+    await testDb.insert(schema.resultPipeline).values({
+      resultId: 5020,
+      location: "KP 0.150",
+      depthEl: "-62",
+      orientation: "12_oclock",
+    });
+    await testDb.insert(schema.resultPipelineFinding).values([
+      pipelineFinding(5020, { category: "damage", damageType: "bare_metal", damageDimensions: "200x80 mm" }),
+      pipelineFinding(5020, {
+        category: "freespans",
+        freespansStart: "KP 0.181",
+        freespansEnd: "KP 0.184",
+        freespansLength: "3.0 m",
+        freespansHeight: "0.4 m",
+      }),
+      pipelineFinding(5020, {
+        category: "anode",
+        anodeCpValue: "-1010",
+        anodeDepletion: "20",
+        anodeKp: "KP 0.152",
+      }),
+      pipelineFinding(5020, { category: "Crossings", crossingType: "over", crossingContact: "not_touching" }),
+    ]);
+
+    const [sheet] = (await gatherExcelExport(1, ["PIPELINE"], targets("partCode:300"), testOrgId, testDb)).sheets;
+
+    expect(sheet!.rows).toHaveLength(4);
+    expect(sheet!.rows[0]!.cells).toMatchObject({
+      location: "KP 0.150",
+      depth_el: -62,
+      orientation: "12 O'Clock",
+      pipeline_category: "Damage",
+      pipeline_damage: "Bare Metal Exposed",
+      damage_dimensions: "200x80 mm",
+    });
+    expect(sheet!.rows[0]!.cells.crossing_type ?? "").toBe("");
+    expect(sheet!.rows[1]!.cells).toMatchObject({
+      pipeline_category: "Freespans",
+      freespans_start: "KP 0.181",
+      freespans_length: "3.0 m",
+    });
+    // a numeric anode reading stays a number
+    expect(sheet!.rows[2]!.cells).toMatchObject({ pipeline_category: "Anode", anode_cp_value: -1010 });
+    expect(typeof sheet!.rows[2]!.cells.anode_cp_value).toBe("number");
+    expect(sheet!.rows[3]!.cells).toMatchObject({
+      pipeline_category: "Crossing",
+      crossing_type: "Over",
+      crossing_contact: "Not Touching",
     });
   });
 });

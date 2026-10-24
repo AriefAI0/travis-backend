@@ -263,14 +263,33 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
     sheet: "PIPELINE",
     columns: [
       col("location", "Location"),
-      num("depth_el", "Depth EL"),
+      num("depth_el", "Depth EL (-)"),
       col("orientation", "Orientation"),
       col("pipeline_category", "Category"),
-      col("pipeline_damage", "Damage type"),
-      col("pipeline_debris", "Debris"),
-      num("anode_cp_value", "Anode CP mV"),
-      col("anode_depletion", "Anode depletion"),
-      col("anode_kp", "Anode KP"),
+      col("pipeline_damage", "Damage Type"),
+      col("damage_dimensions", "Estimated Dimension"),
+      col("pipeline_debris", "Debris Type"),
+      col("debris_description", "Debris Description"),
+      col("riser_bend_condition", "Riser Bend Condition"),
+      col("stabilization_type", "Stabilization Type"),
+      col("stabilization_condition", "Stabilization Condition"),
+      col("burial_start", "Burial Start"),
+      col("burial_end", "Burial End"),
+      col("freespans_start", "Freespans Start"),
+      col("freespans_end", "Freespans End"),
+      col("freespans_length", "Approximate Length"),
+      col("freespans_height", "Maximum Height"),
+      col("leak_type", "Leak Type"),
+      col("leak_description", "Leak Description"),
+      col("crossing_type", "Crossing Type"),
+      col("crossing_contact", "Contact"),
+      col("crossing_gap_distance", "Gap Distance"),
+      col("crossing_damage_movement", "Damage / Movement"),
+      col("features_type", "Feature Type"),
+      col("features_condition", "Condition"),
+      col("anode_cp_value", "CP Value (mV)"),
+      col("anode_depletion", "Depletion (%)"),
+      col("anode_kp", "KP"),
       col("remarks", "Remarks"),
     ],
   },
@@ -305,6 +324,11 @@ const number = (value: unknown): number | null => {
 };
 const label = (map: Record<string, string>, value: string | null) =>
   value ? (map[value] ?? value) : "";
+// A text field that usually holds a number: typed when it parses, else text.
+const numericText = (value: unknown): ExcelCell => {
+  const parsed = number(value);
+  return parsed === null ? txt(value) : parsed;
+};
 const bool = (value: boolean | null) => (value === null ? "" : value ? "Yes" : "No");
 const joined = (parts: string[]) => parts.filter(Boolean).join(", ");
 
@@ -330,6 +354,50 @@ const PANEL_COATING_STATE: Record<string, string> = {
 };
 const PANEL_GROWTH: Record<string, string> = { soft: "Soft", hard: "Hard" };
 const PANEL_CLASS: Record<string, string> = { normal: "Normal", anomaly: "Anomaly" };
+
+// PIPELINE: one map per enum, wording from PiTool.tsx.
+const PANEL_PI_CATEGORY: Record<string, string> = {
+  damage: "Damage",
+  debris: "Debris",
+  riser_bend: "Riser Bend",
+  stabilization: "Stabilization",
+  burial: "Burial",
+  freespans: "Freespans",
+  leak_observation: "Leak Observation",
+  Crossings: "Crossing",
+  features: "Features",
+  anode: "Anode",
+};
+const PANEL_PI_DAMAGE: Record<string, string> = {
+  crack: "Crack",
+  dent: "Dent",
+  groove: "Groove",
+  bare_metal: "Bare Metal Exposed",
+  bitumen_exposed: "Bitumen Exposed",
+  reinforcement_bar_exposed: "Reinforcement Bar Exposed",
+};
+const PANEL_PI_DEBRIS: Record<string, string> = { hard: "Hard", soft: "Soft" };
+const PANEL_PI_RISER_BEND: Record<string, string> = {
+  seabed_support: "Seabed Support",
+  stabilization: "Stabilization",
+  in_suspension: "In Suspension",
+};
+const PANEL_PI_STABILIZATION: Record<string, string> = {
+  supporting: "Supporting",
+  not_supporting: "Not Supporting",
+};
+const PANEL_PI_CROSSING: Record<string, string> = { over: "Over", under: "Under" };
+const PANEL_PI_CONTACT: Record<string, string> = {
+  touching: "Touching",
+  not_touching: "Not Touching",
+};
+const PANEL_PI_FEATURES: Record<string, string> = { good: "Good", bad: "Bad", damage: "Damage" };
+const PANEL_ORIENTATION: Record<string, string> = {
+  "12_oclock": "12 O'Clock",
+  "3_oclock": "3 O'Clock",
+  "6_oclock": "6 O'Clock",
+  "9_oclock": "9 O'Clock",
+};
 
 // A presence flag reads as the panel's two choices.
 const presence = (value: boolean | null) => (value === null ? "" : value ? "Present" : "Missing");
@@ -648,14 +716,34 @@ const shapeResult = async (
         cells: {
           location: txt(detail.location),
           depth_el: number(detail.depthEl),
-          orientation: txt(detail.orientation),
+          orientation: label(PANEL_ORIENTATION, detail.orientation),
         },
+        // one row per finding, under every column its category can fill
         readings: detail.findings.map((finding) => ({
           cells: {
-            pipeline_category: txt(finding.category),
-            pipeline_damage: txt(finding.damageType),
-            pipeline_debris: txt(finding.debrisType),
-            anode_cp_value: number(finding.anodeCpValue),
+            pipeline_category: label(PANEL_PI_CATEGORY, finding.category),
+            pipeline_damage: label(PANEL_PI_DAMAGE, finding.damageType),
+            damage_dimensions: txt(finding.damageDimensions),
+            pipeline_debris: label(PANEL_PI_DEBRIS, finding.debrisType),
+            debris_description: txt(finding.debrisDescription),
+            riser_bend_condition: label(PANEL_PI_RISER_BEND, finding.riserBendCondition),
+            stabilization_type: txt(finding.stabilizationType),
+            stabilization_condition: label(PANEL_PI_STABILIZATION, finding.stabilizationCondition),
+            burial_start: txt(finding.burialStart),
+            burial_end: txt(finding.burialEnd),
+            freespans_start: txt(finding.freespansStart),
+            freespans_end: txt(finding.freespansEnd),
+            freespans_length: txt(finding.freespansLength),
+            freespans_height: txt(finding.freespansHeight),
+            leak_type: txt(finding.leakType),
+            leak_description: txt(finding.leakDescription),
+            crossing_type: label(PANEL_PI_CROSSING, finding.crossingType),
+            crossing_contact: label(PANEL_PI_CONTACT, finding.crossingContact),
+            crossing_gap_distance: txt(finding.crossingGapDistance),
+            crossing_damage_movement: txt(finding.crossingDamageMovement),
+            features_type: txt(finding.featuresType),
+            features_condition: label(PANEL_PI_FEATURES, finding.featuresCondition),
+            anode_cp_value: numericText(finding.anodeCpValue),
             anode_depletion: txt(finding.anodeDepletion),
             anode_kp: txt(finding.anodeKp),
             remarks: txt(finding.remarks),
