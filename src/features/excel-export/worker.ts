@@ -31,9 +31,10 @@ import {
 import type { InspectionTypeCode } from "../../types/api";
 import { collectClips } from "./clips";
 import { collectImages } from "./images";
-import { bufferEntry, readmeEntry, resultFolder, writePackage, type PackageEntry } from "./package";
+import { bufferEntry, textEntry, resultFolder, writePackage, type PackageEntry } from "./package";
 import {
   exportFilename,
+  exportStem,
   typeFilename,
   writeTypeWorkbook,
   type MediaCells,
@@ -119,9 +120,9 @@ type BuiltPackage =
 
 const MIB = 1024 ** 2;
 
-// The README that ships before any media: the layout, the gaps, and the tools
-// that open a ZIP64 archive.
-const readmeLines = (data: ExcelExportData, files: number, errors: string[]) => [
+// The README that ships first: the layout, the gaps, and the tools that open
+// a ZIP64 archive.
+const readmeLines = (data: ExcelExportData, root: string, files: number, errors: string[]) => [
   "Travis excel export",
   "",
   `Project: ${data.projectTitle}`,
@@ -129,10 +130,10 @@ const readmeLines = (data: ExcelExportData, files: number, errors: string[]) => 
   `Generated: ${new Date().toISOString()}`,
   `Media files: ${files}`,
   "",
-  "One folder per inspection type:",
-  "  GVI/GVI_<project>_<date>.xlsx   the workbook",
-  "  GVI/images/                     one folder per result",
-  "  GVI/clips/                      one folder per result",
+  `One top folder, then one folder per ticked inspection type:`,
+  `  ${root}/<TYPE>/<TYPE>_<project>_<date>.xlsx   the workbook`,
+  `  ${root}/<TYPE>/images/<result folder>/        one folder per result`,
+  `  ${root}/<TYPE>/clips/<result folder>/         one folder per result`,
   "",
   ...(errors.length > 0 ? ["Missing files:", ...errors.map((line) => `- ${line}`), ""] : []),
   "Windows Explorer and 7-Zip open this archive.",
@@ -188,17 +189,18 @@ const countByResult = (files: { resultId: number }[]) => {
   return counts;
 };
 
-// One workbook per type, named inside its type folder.
+// One workbook per type, inside its type folder under the export's top folder.
 const workbookEntries = async (
   sheets: ExcelSheet[],
   projectTitle: string,
   generatedAt: Date,
+  root: string,
   media?: Map<number, MediaCells>,
 ): Promise<PackageEntry[]> => {
   const entries: PackageEntry[] = [];
   for (const sheet of sheets) {
     const body = await excelWorkerDeps.build(sheet, { generatedAt, media });
-    entries.push(bufferEntry(`${sheet.type}/${typeFilename(sheet.type, projectTitle, generatedAt)}`, body));
+    entries.push(bufferEntry(`${root}/${sheet.type}/${typeFilename(sheet.type, projectTitle, generatedAt)}`, body));
   }
   return entries;
 };
@@ -216,6 +218,8 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
   const withRows = data.sheets.filter((sheet) => sheet.rows.length > 0);
   const sheets = withRows.length > 0 ? withRows : data.sheets.slice(0, 1);
   const generatedAt = new Date();
+  // every entry sits inside one top folder, so Extract All stays tidy
+  const root = exportStem(data.projectTitle, generatedAt);
 
   if (row.media === "raw") {
     // one type opens straight from the download, no zip around it
@@ -233,8 +237,8 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
     return {
       kind: "zip",
       entries: [
-        readmeEntry(readmeLines(data, 0, [])),
-        ...(await workbookEntries(sheets, data.projectTitle, generatedAt)),
+        textEntry(`${root}/README.txt`, `${readmeLines(data, root, 0, []).join("\n")}\n`),
+        ...(await workbookEntries(sheets, data.projectTitle, generatedAt, root)),
       ],
       name: exportFilename(data.projectTitle, "raw", generatedAt),
       errors: [],
@@ -264,12 +268,12 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
 
   const mediaFiles = imagePlan.files.flatMap((file) => {
     const entries: PackageEntry[] = [
-      { name: file.raw.name, open: () => Readable.from(Bun.file(file.raw.file).stream()) },
+      { name: `${root}/${file.raw.name}`, open: () => Readable.from(Bun.file(file.raw.file).stream()) },
     ];
     const annotated = file.annotated;
     if (annotated) {
       entries.push({
-        name: annotated.name,
+        name: `${root}/${annotated.name}`,
         open: () => Readable.from(Bun.file(annotated.file).stream()),
       });
     }
@@ -278,16 +282,16 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
 
   // a merged clip streams out of scratch like an image does
   const clipFiles: PackageEntry[] = clipPlan.files.map((file) => ({
-    name: file.name,
+    name: `${root}/${file.name}`,
     open: () => Readable.from(Bun.file(file.file).stream()),
   }));
 
   const errors = [...imagePlan.errors, ...clipPlan.errors];
   const entries: PackageEntry[] = [
-    readmeEntry(readmeLines(data, imagePlan.rows.length + clipPlan.rows.length, errors)),
+    textEntry(`${root}/README.txt`, `${readmeLines(data, root, imagePlan.rows.length + clipPlan.rows.length, errors).join("\n")}\n`),
     ...mediaFiles,
     ...clipFiles,
-    ...(await workbookEntries(sheets, data.projectTitle, generatedAt, media)),
+    ...(await workbookEntries(sheets, data.projectTitle, generatedAt, root, media)),
   ];
 
   // a missing image or clip is a delivered package with a stated gap

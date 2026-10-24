@@ -146,11 +146,15 @@ describe("excel export worker", () => {
 
     await runExcelExport(current);
 
+    const day = new Date().toISOString().slice(0, 10);
+    const root = `alpha_${day}`;
+
     expect(current.status).toBe("ready");
     expect(packaged).toHaveLength(3);
-    expect(packaged[0]).toBe("README.txt");
-    expect(packaged.some((name) => name.startsWith("GVI/GVI_alpha_") && name.endsWith(".xlsx"))).toBe(true);
-    expect(packaged.some((name) => name.startsWith("CVI/CVI_alpha_") && name.endsWith(".xlsx"))).toBe(true);
+    // everything sits inside one top folder, so Extract All stays tidy
+    expect(packaged[0]).toBe(`${root}/README.txt`);
+    expect(packaged).toContain(`${root}/GVI/GVI_alpha_${day}.xlsx`);
+    expect(packaged).toContain(`${root}/CVI/CVI_alpha_${day}.xlsx`);
   });
 
   it("skips a type with no rows", async () => {

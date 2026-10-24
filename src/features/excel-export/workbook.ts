@@ -15,8 +15,9 @@ import {
 
 export type MediaLevel = "raw" | "images" | "clips";
 
-// The project and the day, safe as a file name.
-const stemOf = (projectTitle: string, day: Date) => {
+// The project and the day, safe as a file name. Names the zip and the one
+// top folder inside it.
+export const exportStem = (projectTitle: string, day: Date): string => {
   const stem =
     projectTitle
       .toLowerCase()
@@ -30,12 +31,12 @@ export const exportFilename = (
   projectTitle: string,
   media: MediaLevel,
   day = new Date(),
-): string => `${stemOf(projectTitle, day)}.${media === "raw" ? "xlsx" : "zip"}`;
+): string => `${exportStem(projectTitle, day)}.${media === "raw" ? "xlsx" : "zip"}`;
 
 // `GVI_travity_field_a_2026-10-24.xlsx`: the type leads, because Excel refuses
 // to open two files with one name at once.
 export const typeFilename = (type: string, projectTitle: string, day = new Date()): string =>
-  `${type}_${stemOf(projectTitle, day)}.xlsx`;
+  `${type}_${exportStem(projectTitle, day)}.xlsx`;
 
 export type WorkbookOptions = {
   generatedAt?: Date;

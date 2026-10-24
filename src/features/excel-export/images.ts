@@ -95,7 +95,8 @@ export const collectImages = async (
       const leaves = imageEvidenceLeaves(image.storageStem, image.imageId, image.contentType);
       const ext = leaves.raw.key.split(".").pop() ?? "png";
       const n = String(index + 1).padStart(2, "0");
-      const stem = `images/${type}/${folder}/${n}`;
+      // inside the type's own folder: <TYPE>/images/<result folder>/NN.ext
+      const stem = `${type}/images/${folder}/${n}`;
       const scratch = `${type}-${resultId}-${n}`;
 
       files.push({

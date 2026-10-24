@@ -56,7 +56,8 @@ export const collectClips = async (
     const folder = target?.folder ?? String(clip.resultId);
     const count = (numbered.get(clip.resultId) ?? 0) + 1;
     numbered.set(clip.resultId, count);
-    const name = `clips/${type}/${folder}/${String(count).padStart(2, "0")}.mkv`;
+    // inside the type's own folder: <TYPE>/clips/<result folder>/NN.mkv
+    const name = `${type}/clips/${folder}/${String(count).padStart(2, "0")}.mkv`;
 
     const merged = await mergeClip(clip.clipId, scratchDirectory, { signal });
     const ok = (merged.status === "ok" || merged.status === "partial") && merged.localFile !== null;
