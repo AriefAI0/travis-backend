@@ -62,6 +62,7 @@ export const testDb: TestDb = drizzle(pool, { schema: fullSchema });
 const deleteOrder = [
   schema.clipExportJob,
   schema.clipMkvCache,
+  schema.clipEventMarker,
   schema.recordingIngestSegment,
   schema.recordingIngest,
   schema.videoClip,

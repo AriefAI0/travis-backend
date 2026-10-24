@@ -1249,6 +1249,33 @@ export const videoClip = pgTable(
 );
 
 /* =========================================================
+   CLIP EVENT MARKER (unlabelled point on one clip timeline)
+========================================================= */
+export const clipEventMarker = pgTable(
+  "clip_event_marker",
+  {
+    markerId: integer("marker_id").primaryKey().generatedByDefaultAsIdentity(),
+
+    clipId: integer("clip_id")
+      .notNull()
+      .references(() => videoClip.clipId, { onDelete: "cascade" }),
+
+    positionMs: integer("position_ms").notNull(),
+  },
+  (table) => ({
+    idxClipEventMarkerClipPosition: index("idx_clip_event_marker_clip_position").on(
+      table.clipId,
+      table.positionMs,
+      table.markerId
+    ),
+    clipEventMarkerPositionCheck: check(
+      "clip_event_marker_position_check",
+      sql`${table.positionMs} >= 0`
+    ),
+  })
+);
+
+/* =========================================================
    RESULT IMAGE
 ========================================================= */
 export const resultImageStatus = pgEnum("result_image_status", [
