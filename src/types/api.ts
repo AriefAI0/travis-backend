@@ -1169,7 +1169,7 @@ export const cpPayloadSchema = z.object({
   kind: z.literal("cp"),
   version: z.literal(1),
   anodeType: z.string().min(1),
-  voltageMv: z.number(),
+  voltageMv: z.number().nullish(),
   depletion: z.string(),
   anodeWidth: z.number().nullish(),
   anodeHeight: z.number().nullish(),
