@@ -504,6 +504,11 @@ export type PiDetail = {
 };
 
 
+export type ClipEventMarkerInput = {
+  clipId: number;
+  positionMs: number;
+};
+
 export type ItemResultSidebarClip = {
   clipId: number;
   resultId: number;
@@ -1109,6 +1114,11 @@ export const startInspectionSchema = z
     (v) => (v.descriptionId !== undefined) !== (v.partCodeId !== undefined),
     { message: "exactly one of descriptionId or partCodeId is required" },
   );
+export const clipEventMarkerInputSchema = z.object({
+  clipId: id,
+  positionMs: z.number().int().nonnegative(),
+});
+
 export const stopInspectionSchema = z.object({
   remarks: optionalText,
   // typed detail payload — discriminated union checked in the service
@@ -1117,6 +1127,8 @@ export const stopInspectionSchema = z.object({
   masterEndMs: z.number().int().nonnegative(),
   // result-level class; omitted keeps the column default
   resultClass: z.enum(["normal", "anomaly"]).optional(),
+  // pending points from every take of this result
+  eventMarkers: z.array(clipEventMarkerInputSchema).optional(),
   // validate everything a real stop would, then write nothing
   dryRun: z.boolean().optional(),
 });

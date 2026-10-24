@@ -7,6 +7,10 @@ import { AppError, notFound } from "../../lib/error";
 import { removeMediaPrefix } from "../../lib/minio_storage/cleanup";
 import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
 import { removeExactMediaKeys } from "../../lib/minio_storage/result-image-objects";
+import {
+  createClipEventMarkerRecords,
+  type ClipEventMarkerInput,
+} from "../repositories/clip-event-marker.repository";
 import { listIngestRecordsByClipIds } from "../repositories/recording-ingest.repository";
 import { listResultImageRecordsByResultId } from "../repositories/result-image.repository";
 import { listVideoClipRecordsBySessionId } from "../repositories/video-clip.repository";
@@ -102,6 +106,8 @@ export type StopInspectionInput = {
   masterEndMs: number;
   /** normal | anomaly; omitted keeps the column default */
   resultClass?: "normal" | "anomaly";
+  /** point markers collected across this result's clips */
+  eventMarkers?: ClipEventMarkerInput[];
   /** validate the whole stop, write nothing — the app's Submit gate */
   dryRun?: boolean;
 };
@@ -235,8 +241,55 @@ export const startInspection = async (
   return database ? run(database) : db.transaction(run);
 };
 
-// flow: fetch > org guard > open guard > validate customs > update row >
-// write detail > audit — one tx
+// Check marker ownership and clamp known media duration.
+const resolveEventMarkers = async (
+  resultId: number,
+  markers: ClipEventMarkerInput[],
+  tx: DbOrTx,
+): Promise<ClipEventMarkerInput[]> => {
+  if (markers.length === 0) {
+    return [];
+  }
+
+  const clips = await listVideoClipsByResultId(resultId, tx);
+  const clipById = new Map(clips.map((clip) => [clip.clipId, clip]));
+
+  return markers.map((marker) => {
+    if (
+      !Number.isInteger(marker.clipId) ||
+      !Number.isInteger(marker.positionMs) ||
+      marker.positionMs < 0
+    ) {
+      throw new AppError(400, "invalid_clip_marker", "event marker is invalid");
+    }
+
+    const clip = clipById.get(marker.clipId);
+    if (!clip) {
+      throw new AppError(
+        400,
+        "clip_not_in_result",
+        `clip ${marker.clipId} does not belong to result ${resultId}`,
+      );
+    }
+
+    // A closed clip can lose its encoded tail, so clamp instead of refusing.
+    const knownDurationMs =
+      clip.endOffsetMs === null
+        ? null
+        : Math.max(0, clip.endOffsetMs - clip.startOffsetMs);
+
+    return {
+      clipId: marker.clipId,
+      positionMs:
+        knownDurationMs === null
+          ? marker.positionMs
+          : Math.min(marker.positionMs, knownDurationMs),
+    };
+  });
+};
+
+// flow: fetch > org guard > open guard > validate customs and markers >
+// update row > write detail and markers > audit — one tx
 export const stopInspection = async (
   resultId: number,
   input: StopInspectionInput,
@@ -274,6 +327,11 @@ export const stopInspection = async (
     // Parse before any write: a dry run and a real stop must fail identically,
     // or the app would offer a Submit that the real stop then rejects.
     parseInspectionPayload(result.inspectionTypeCode, input.payload, resultId);
+    const eventMarkers = await resolveEventMarkers(
+      resultId,
+      input.eventMarkers ?? [],
+      tx,
+    );
     if (input.dryRun) return result;
 
     const update: Record<string, unknown> = {
@@ -288,6 +346,7 @@ export const stopInspection = async (
     if (!updated) throw new Error(`failed to update result ${resultId}`);
 
     await writeTypedDetail(result.inspectionTypeCode, input.payload, resultId, tx);
+    await createClipEventMarkerRecords(eventMarkers, tx);
 
     await writeAudit(
       {

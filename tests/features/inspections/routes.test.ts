@@ -209,6 +209,108 @@ describe("inspections routes", () => {
     expect(doubleStop.status).toBe(409);
   });
 
+  it("saves clip markers atomically and clamps them to known footage", async () => {
+    await seedWorld();
+    const started = await startInspection({});
+    const resultId = (await json(started)).data.resultId as number;
+    await testDb.insert(schema.videoClip).values({
+      clipId: 9001,
+      resultId,
+      sessionId: 101,
+      startOffsetMs: 1000,
+      endOffsetMs: 5000,
+    });
+
+    const stopped = await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 5000,
+      eventMarkers: [
+        { clipId: 9001, positionMs: 500 },
+        { clipId: 9001, positionMs: 500 },
+        { clipId: 9001, positionMs: 9000 },
+      ],
+    });
+
+    expect(stopped.status).toBe(200);
+    const markers = await testDb.query.clipEventMarker.findMany({
+      orderBy: (marker, { asc }) => [asc(marker.markerId)],
+    });
+    expect(markers.map((marker) => marker.positionMs)).toEqual([500, 500, 4000]);
+  });
+
+  it("rejects a foreign clip marker before closing the result", async () => {
+    await seedWorld();
+    const started = await startInspection({});
+    const resultId = (await json(started)).data.resultId as number;
+    await testDb.insert(schema.result).values({
+      displayNumber: 5002,
+      resultId: 5002,
+      inspectionTypeCode: "GVI",
+      descriptionId: 30,
+      layer: 1,
+      masterStartMs: 0,
+      projectId: 1,
+      sessionId: 101,
+    });
+    await testDb.insert(schema.videoClip).values([
+      {
+        clipId: 9001,
+        resultId,
+        sessionId: 101,
+        startOffsetMs: 0,
+        endOffsetMs: 5000,
+      },
+      {
+        clipId: 9002,
+        resultId: 5002,
+        sessionId: 101,
+        startOffsetMs: 0,
+        endOffsetMs: 5000,
+      },
+    ]);
+
+    const rejected = await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 5000,
+      eventMarkers: [
+        { clipId: 9001, positionMs: 500 },
+        { clipId: 9002, positionMs: 500 },
+      ],
+    });
+
+    expect(rejected.status).toBe(400);
+    const untouched = await testDb.query.result.findFirst({
+      where: eq(schema.result.resultId, resultId),
+    });
+    expect(untouched?.masterEndMs).toBeNull();
+    expect(await testDb.query.clipEventMarker.findMany()).toEqual([]);
+  });
+
+  it("checks markers on a dry run without writing them", async () => {
+    await seedWorld();
+    const started = await startInspection({});
+    const resultId = (await json(started)).data.resultId as number;
+    await testDb.insert(schema.videoClip).values({
+      clipId: 9001,
+      resultId,
+      sessionId: 101,
+      startOffsetMs: 0,
+      endOffsetMs: 3000,
+    });
+
+    const pass = await post(`/api/v1/inspections/${resultId}/stop`, {
+      payload: GVI_PAYLOAD,
+      customValues: {},
+      masterEndMs: 5000,
+      eventMarkers: [{ clipId: 9001, positionMs: 500 }],
+      dryRun: true,
+    });
+    expect(pass.status).toBe(200);
+    expect(await testDb.query.clipEventMarker.findMany()).toEqual([]);
+  });
+
   it("cancels an open inspection and removes the row", async () => {
     await seedWorld();
     const started = await startInspection({});
