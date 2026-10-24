@@ -96,19 +96,35 @@ export const requireCan = (
 
 // Admin correction gate. A preset is not a durable role, so the ability rows
 // decide: manage User or manage Permission marks an administrator.
+export const isAdministrator = (ability: AppAbility | undefined): boolean =>
+  ability?.can("manage", "User") === true ||
+  ability?.can("manage", "Permission") === true;
+
 export const requireAdministrator = (
   c: Context<{ Variables: AuthVariables }>,
 ): void => {
-  const ability = c.get("ability");
-  if (
-    !ability?.can("manage", "User") &&
-    !ability?.can("manage", "Permission")
-  ) {
+  if (!isAdministrator(c.get("ability"))) {
     throw new AppError(
       403,
       "forbidden",
       "Not allowed to correct a completed result",
     );
+  }
+};
+
+// Inline ability gate. requireCan can only run as middleware, and a handler
+// that picks its subject from the row it just read needs the same refusal.
+export const requireAbility = (
+  c: Context<{ Variables: AuthVariables }>,
+  action: Action,
+  subject: Subject,
+): void => {
+  const ability = c.get("ability");
+  if (!ability) {
+    throw new AppError(401, "unauthorized", "Sign in to continue");
+  }
+  if (!ability.can(action, subject)) {
+    throw new AppError(403, "forbidden", `Not allowed to ${action} ${subject}`);
   }
 };
 

@@ -485,6 +485,171 @@ describe("evidence image routes", () => {
     expect(data.url).toContain(`${data.storageStem}/${data.imageId}.png`);
   });
 
+  /* ---------- permanent discard: lifecycle gate ---------- */
+
+  // One row, no upload: the discard route is the only thing under test here.
+  const seedImageRow = async (imageId: number, resultId: number) => {
+    await testDb.insert(schema.resultImage).values({
+      imageId,
+      resultId,
+      storageStem: `1-alpha-2026-10-24/session-1-2026-10-24-0016/results/${resultId}-jl-01/evidence-img`,
+      contentType: "image/png",
+    });
+  };
+
+  const discard = (imageId: number, token: string, confirmed = true) =>
+    app.request(`/api/v1/images/${imageId}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify(confirmed ? { confirmPermanentRemove: true } : {}),
+    });
+
+  const imageRowCount = async () => (await testDb.select().from(schema.resultImage)).length;
+
+  // A live result (4-2): an operator owns its capture until the form submits.
+  const completeResult = async (resultId: number) => {
+    await testDb
+      .update(schema.result)
+      .set({ masterEndMs: 4000 })
+      .where(eq(schema.result.resultId, resultId));
+  };
+
+  // An RA mark: project-scoped, no session, no layer, no recording anchors.
+  const seedRaResult = async (resultId: number) => {
+    await testDb.insert(schema.result).values({
+      displayNumber: 0,
+      resultId,
+      inspectionTypeCode: "RA",
+      isRa: true,
+      descriptionId: 100,
+      projectId: 1,
+      sessionId: null,
+    });
+  };
+
+  // A second organization: every read there must be invisible, not forbidden.
+  const seedOtherOrgResult = async (resultId: number) => {
+    // 99, because the seeded default org occupies a low id and organization
+    // is the one table the truncate order keeps
+    await testDb
+      .insert(schema.organization)
+      .values({ organizationId: 99, name: "Beta-99" })
+      .onConflictDoNothing();
+    await testDb.insert(schema.project).values({
+      organizationId: 99,
+      displayNumber: 1,
+      projectId: 2,
+      title: "Beta",
+    });
+    await testDb.insert(schema.result).values({
+      displayNumber: 1,
+      resultId,
+      inspectionTypeCode: "GVI",
+      descriptionId: 100,
+      projectId: 2,
+      sessionId: null,
+      layer: 1,
+    });
+  };
+
+  it("an operator with create Result discards an image from an open inspection", async () => {
+    await seedResultContext();
+    await seedImageRow(9101, 5001);
+
+    const res = await discard(9101, operatorToken);
+
+    expect(res.status).toBe(200);
+    expect(await imageRowCount()).toBe(0);
+  });
+
+  it("an operator with modify Result discards an image from an RA mark", async () => {
+    await seedResultContext();
+    await seedRaResult(6001);
+    await seedImageRow(9102, 6001);
+
+    const res = await discard(9102, operatorToken);
+
+    expect(res.status).toBe(200);
+    expect(await imageRowCount()).toBe(0);
+  });
+
+  it("an operator cannot discard an image from a completed result", async () => {
+    await seedResultContext();
+    await completeResult(5001);
+    await seedImageRow(9103, 5001);
+
+    const res = await discard(9103, operatorToken);
+
+    expect(res.status).toBe(403);
+    expect(await imageRowCount()).toBe(1);
+  });
+
+  it("an operator cannot discard an image from an archived result", async () => {
+    await seedResultContext();
+    await testDb
+      .update(schema.result)
+      .set({ archivedAt: new Date() })
+      .where(eq(schema.result.resultId, 5001));
+    await seedImageRow(9104, 5001);
+
+    const res = await discard(9104, operatorToken);
+
+    expect(res.status).toBe(403);
+    expect(await imageRowCount()).toBe(1);
+  });
+
+  it("an operator cannot discard an image from a legacy sessionless row", async () => {
+    await seedResultContext();
+    await testDb.insert(schema.result).values({
+      displayNumber: 0,
+      resultId: 6002,
+      inspectionTypeCode: "GVI",
+      descriptionId: 100,
+      projectId: 1,
+      sessionId: null,
+    });
+    await seedImageRow(9105, 6002);
+
+    const res = await discard(9105, operatorToken);
+
+    expect(res.status).toBe(403);
+    expect(await imageRowCount()).toBe(1);
+  });
+
+  it("an administrator still discards a completed-result image", async () => {
+    await seedResultContext();
+    await completeResult(5001);
+    await seedImageRow(9106, 5001);
+
+    const res = await discard(9106, adminToken);
+
+    expect(res.status).toBe(200);
+    expect(await imageRowCount()).toBe(0);
+  });
+
+  it("an image in another organization is not found before any 403", async () => {
+    await seedResultContext();
+    await seedOtherOrgResult(7001);
+    await seedImageRow(9107, 7001);
+
+    const asOperator = await discard(9107, operatorToken);
+    const asAdmin = await discard(9107, adminToken);
+
+    expect(asOperator.status).toBe(404);
+    expect(asAdmin.status).toBe(404);
+    expect(await imageRowCount()).toBe(1);
+  });
+
+  it("a discard without explicit confirmation keeps the row", async () => {
+    await seedResultContext();
+    await seedImageRow(9108, 5001);
+
+    const res = await discard(9108, operatorToken, false);
+
+    expect(res.status).toBe(400);
+    expect(await imageRowCount()).toBe(1);
+  });
+
   // The RA branch must not open the door for every sessionless row.
   it("a sessionless non-RA result still refuses an evidence image", async () => {
     await seedResultContext();

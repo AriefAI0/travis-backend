@@ -36,6 +36,8 @@ import { findResultImageById } from "../../db/repositories/result-image.reposito
 import { findProjectById } from "../../db/repositories/project.repository";
 import {
   callerOf,
+  isAdministrator,
+  requireAbility,
   requireAdministrator,
   requireCan,
   requireUser,
@@ -89,6 +91,13 @@ export const resultRoutes = (database?: DbOrTx) => {
   const imageVisible = async (imageId: number, caller: Caller) => {
     const row = await findResultImageById(imageId, database);
     return row !== null && (await resultVisible(row.resultId, caller));
+  };
+
+  // The row itself, for a handler that must read its parent after visibility.
+  const findVisibleImage = async (imageId: number, caller: Caller) => {
+    const row = await findResultImageById(imageId, database);
+    if (row === null || !(await resultVisible(row.resultId, caller))) return null;
+    return row;
   };
 
   const targetVisible = async (
@@ -302,11 +311,31 @@ export const resultRoutes = (database?: DbOrTx) => {
   });
 
   // Permanent removal of one image and its raw/annotated objects.
+  // flow: visible > lifecycle branch > confirmation > objects > row
+  // A live inspection is the operator's own capture. An RA mark is theirs while
+  // unarchived. Anything finished, archived, or legacy stays admin-only, and an
+  // administrator keeps every branch.
   routes.delete("/api/v1/images/:imageId", async (c) => {
     const imageId = parseId(c, "imageId");
     const caller = callerOf(c);
-    if (!(await imageVisible(imageId, caller))) throw notFound("Image");
-    requireAdministrator(c);
+    const image = await findVisibleImage(imageId, caller);
+    if (image === null) throw notFound("Image");
+
+    const parent = await getResultById(image.resultId, database);
+    const operatorAction =
+      parent !== null && parent.archivedAt === null
+        ? parent.isRa
+          ? ("modify" as const)
+          : parent.layer !== null && parent.masterEndMs === null
+            ? ("create" as const)
+            : null
+        : null;
+
+    if (!isAdministrator(c.get("ability"))) {
+      if (operatorAction === null) requireAdministrator(c);
+      else requireAbility(c, operatorAction, "Result");
+    }
+
     await parseBody(c, permanentRemoveImageSchema);
 
     return ok(c, await removeResultImage(imageId, caller, database));
