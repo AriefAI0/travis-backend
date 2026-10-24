@@ -102,6 +102,19 @@ describe("excel export worker", () => {
     expect(events).toContain("ready");
   });
 
+  it("zips a named raw single-type export under its name", async () => {
+    current = rowFor({ name: "Site B" });
+
+    await runExcelExport(current);
+
+    const day = new Date().toISOString().slice(0, 10);
+    expect(current.status).toBe("ready");
+    // the typed name gets its folder, so the package is a zip
+    expect(stored.size).toBe(0);
+    expect(packaged[0]).toBe("site_b/README.txt");
+    expect(packaged).toContain(`site_b/GVI/GVI_alpha_${day}.xlsx`);
+  });
+
   it("leaves a cancelling export cancelled and stores nothing", async () => {
     current = rowFor({ status: "cancelling" });
 

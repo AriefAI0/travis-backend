@@ -19,7 +19,6 @@ import {
   getExcelExport,
   listExcelExports,
   removeExcelExport,
-  type ExcelMediaLevel,
 } from "../../db/services/excel-export.service";
 import { callerOf, requireCan, requireUser, type AuthVariables } from "../../lib/auth/middleware";
 import type { Caller } from "../../lib/caller";
@@ -34,7 +33,7 @@ import type { Action, Subject } from "../../lib/auth/permissions";
 import { excelCreateSchema, excelPreviewSchema, type ExcelExportListItem } from "../../types/api";
 import { EXPORT_TTL_MS } from "../../db/services/excel-export.service";
 import { estimateExportSizes } from "./estimate";
-import { exportFilename, exportStem } from "./workbook";
+import { bareWorkbook, exportFilename, exportStem } from "./workbook";
 import { kickExcelExportWorker } from "./worker";
 
 const toListItem = (row: Awaited<ReturnType<typeof getExcelExport>>): ExcelExportListItem => ({
@@ -185,10 +184,20 @@ export const excelExportRoutes = (database?: DbOrTx) => {
     }
 
     const project = await findProjectById(row.projectId, caller.organizationId, database);
-    // the typed name names only the zip root. The downloaded file keeps the
-    // project-based name, exactly as it did before the name feature.
+    // a typed name always ships inside a zip folder. Only an unnamed raw
+    // export with at most one sheet opens straight from the download.
+    const counts = await countExcelResults(
+      row.projectId,
+      parseDatasheetTargets(row.targets),
+      caller.organizationId,
+      database,
+    );
+    const typesWithRows = (row.types as string[]).filter((type) => (counts[type] ?? 0) > 0);
+    const bare = bareWorkbook(row.name, typesWithRows.length);
+    // the typed name names only the zip root; the downloaded file keeps the
+    // project-based name
     const stem = exportStem(project?.title ?? "export", row.createdAt);
-    const filename = exportFilename(stem, row.media as ExcelMediaLevel);
+    const filename = exportFilename(stem, bare ? "xlsx" : "zip");
     const url = await mintDownloadUrl(env.BUCKET_MEDIA, row.packageKey, filename, ttl);
 
     log.debug("excel export download url minted", { id: row.id, ttl });

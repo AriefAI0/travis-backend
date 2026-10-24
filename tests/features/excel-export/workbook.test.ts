@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 
 import { IDENTITY_COLUMNS, type ExcelSheet } from "../../../src/db/services/excel-export-data.service";
 import {
+  bareWorkbook,
   exportFilename,
   shippedStem,
   typeFilename,
@@ -178,7 +179,14 @@ describe("excel workbook", () => {
 
   it("falls back to the project and the build day when the name is blank", () => {
     expect(shippedStem("   ", "Travity Field A", recorded)).toBe("travity_field_a_2026-10-01");
-    expect(exportFilename("site_b", "images")).toBe("site_b.zip");
-    expect(exportFilename("site_b", "raw")).toBe("site_b.xlsx");
+    expect(exportFilename("site_b", "zip")).toBe("site_b.zip");
+    expect(exportFilename("site_b", "xlsx")).toBe("site_b.xlsx");
+  });
+
+  it("ships a bare workbook only unnamed and single-sheet", () => {
+    expect(bareWorkbook("Site B", 1)).toBe(false);
+    expect(bareWorkbook("  ", 2)).toBe(false);
+    expect(bareWorkbook("", 1)).toBe(true);
+    expect(bareWorkbook("   ", 0)).toBe(true);
   });
 });

@@ -34,6 +34,7 @@ import { collectClips } from "./clips";
 import { collectImages } from "./images";
 import { bufferEntry, textEntry, resultFolder, writePackage, type PackageEntry } from "./package";
 import {
+  bareWorkbook,
   exportFilename,
   exportStem,
   shippedStem,
@@ -291,8 +292,9 @@ const buildPackage = async (
   const fileStem = exportStem(data.projectTitle, generatedAt);
 
   if (row.media === "raw") {
-    // one type opens straight from the download, no zip around it
-    if (sheets.length === 1) {
+    // a typed name always ships inside its folder, so it takes the zip; only
+    // an unnamed single-sheet export opens straight from the download
+    if (bareWorkbook(row.name, sheets.length)) {
       const sheet = sheets[0]!;
       const body = await excelWorkerDeps.build(sheet, { generatedAt });
       return {
@@ -309,7 +311,7 @@ const buildPackage = async (
         textEntry(`${root}/README.txt`, `${readmeLines(data, root, 0, []).join("\n")}\n`),
         ...(await workbookEntries(sheets, root, fileStem, generatedAt)),
       ],
-      name: exportFilename(fileStem, "raw"),
+      name: exportFilename(fileStem, "zip"),
       errors: [],
     };
   }
@@ -381,7 +383,7 @@ const buildPackage = async (
   return {
     kind: "zip",
     entries,
-    name: exportFilename(fileStem, row.media),
+    name: exportFilename(fileStem, "zip"),
     errors,
   };
 };

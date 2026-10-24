@@ -33,9 +33,14 @@ export const shippedStem = (name: string, projectTitle: string, day: Date): stri
   return typed ? sanitizeStem(typed) : exportStem(projectTitle, day);
 };
 
-// `travity_field_a_2026-10-24.xlsx` or `.zip`: the whole export's name.
-export const exportFilename = (stem: string, media: MediaLevel): string =>
-  `${stem}.${media === "raw" ? "xlsx" : "zip"}`;
+// `travity_field_a_2026-10-24.xlsx` or `.zip`: the whole export's name. Every
+// zip package takes `zip`; only a bare workbook takes `xlsx`.
+export const exportFilename = (stem: string, kind: "xlsx" | "zip"): string => `${stem}.${kind}`;
+
+// A raw export opens straight from the download only when no typed name asks
+// for a folder and at most one sheet ships.
+export const bareWorkbook = (name: string, typesWithRows: number): boolean =>
+  !name.trim() && typesWithRows <= 1;
 
 // `GVI_travity_field_a_2026-10-24.xlsx`: the type leads, because Excel refuses
 // to open two files with one name at once.

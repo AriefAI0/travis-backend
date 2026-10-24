@@ -239,8 +239,8 @@ describe("excel export routes", () => {
 
     const raw = await request(`/api/v1/excel-exports/${id}/download-url`);
     expect(raw.status).toBe(200);
-    // the typed name never enters the downloaded file name
-    expect((await readData<{ filename: string }>(raw)).filename).toBe("alpha_2026-10-01.xlsx");
+    // a typed name always ships a zip, and never enters the file name
+    expect((await readData<{ filename: string }>(raw)).filename).toBe("alpha_2026-10-01.zip");
 
     await testDb.update(schema.excelExport).set({ media: "images" }).where(eq(schema.excelExport.id, id));
     const zip = await request(`/api/v1/excel-exports/${id}/download-url`);
