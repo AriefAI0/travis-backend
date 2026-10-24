@@ -132,13 +132,17 @@ describe("excel export worker", () => {
   });
 
   it("packages an images export as a zip", async () => {
-    current = rowFor({ media: "images" });
+    current = rowFor({ media: "images", name: "Site B" });
 
     await runExcelExport(current);
 
+    const day = new Date().toISOString().slice(0, 10);
     expect(current.status).toBe("ready");
     expect(current.packageSize).toBe(42);
     expect(stored.size).toBe(0);
+    // the typed name names the root, never the workbook
+    expect(packaged[0]).toBe("site_b/README.txt");
+    expect(packaged).toContain(`site_b/GVI/GVI_alpha_${day}.xlsx`);
   });
 
   it("puts one workbook per type in a zip when two types ship", async () => {
@@ -147,15 +151,15 @@ describe("excel export worker", () => {
 
     await runExcelExport(current);
 
-    // the user's typed name is the whole stem, no date beside it
-    const root = "site_b";
+    // the typed name names the root only. Files keep project and date.
+    const day = new Date().toISOString().slice(0, 10);
 
     expect(current.status).toBe("ready");
     expect(packaged).toHaveLength(3);
     // everything sits inside one top folder, so Extract All stays tidy
-    expect(packaged[0]).toBe(`${root}/README.txt`);
-    expect(packaged).toContain(`${root}/GVI/GVI_site_b.xlsx`);
-    expect(packaged).toContain(`${root}/CVI/CVI_site_b.xlsx`);
+    expect(packaged[0]).toBe("site_b/README.txt");
+    expect(packaged).toContain(`site_b/GVI/GVI_alpha_${day}.xlsx`);
+    expect(packaged).toContain(`site_b/CVI/CVI_alpha_${day}.xlsx`);
   });
 
   it("skips a type with no rows", async () => {

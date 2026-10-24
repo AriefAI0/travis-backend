@@ -34,7 +34,7 @@ import type { Action, Subject } from "../../lib/auth/permissions";
 import { excelCreateSchema, excelPreviewSchema, type ExcelExportListItem } from "../../types/api";
 import { EXPORT_TTL_MS } from "../../db/services/excel-export.service";
 import { estimateExportSizes } from "./estimate";
-import { exportFilename, shippedStem } from "./workbook";
+import { exportFilename, exportStem } from "./workbook";
 import { kickExcelExportWorker } from "./worker";
 
 const toListItem = (row: Awaited<ReturnType<typeof getExcelExport>>): ExcelExportListItem => ({
@@ -185,9 +185,9 @@ export const excelExportRoutes = (database?: DbOrTx) => {
     }
 
     const project = await findProjectById(row.projectId, caller.organizationId, database);
-    // the shipped name, exactly as the worker built it: the typed name, else
-    // the project and the build day
-    const stem = shippedStem(row.name, project?.title ?? "export", row.createdAt);
+    // the typed name names only the zip root. The downloaded file keeps the
+    // project-based name, exactly as it did before the name feature.
+    const stem = exportStem(project?.title ?? "export", row.createdAt);
     const filename = exportFilename(stem, row.media as ExcelMediaLevel);
     const url = await mintDownloadUrl(env.BUCKET_MEDIA, row.packageKey, filename, ttl);
 

@@ -220,7 +220,7 @@ describe("excel export routes", () => {
     expect(body.filename).toMatch(/\.xlsx$/);
   });
 
-  it("names the download after the typed name", async () => {
+  it("keeps the project file name when a typed name is set", async () => {
     await seed();
     const created = await create({ types: ["GVI"], targets: ["partCode:300"], media: "raw" });
     const { id } = await readData<ExportBody>(created);
@@ -233,15 +233,19 @@ describe("excel export routes", () => {
         packageKey: "excel-exports/light/one.xlsx",
         packageSize: 10,
         name: "Site B",
+        createdAt: new Date("2026-10-01T00:00:00Z"),
       })
       .where(eq(schema.excelExport.id, id));
 
-    const res = await request(`/api/v1/excel-exports/${id}/download-url`);
-    expect(res.status).toBe(200);
+    const raw = await request(`/api/v1/excel-exports/${id}/download-url`);
+    expect(raw.status).toBe(200);
+    // the typed name never enters the downloaded file name
+    expect((await readData<{ filename: string }>(raw)).filename).toBe("alpha_2026-10-01.xlsx");
 
-    const body = await readData<{ url: string; filename: string }>(res);
-    // the typed name ships alone, exactly as the worker built it
-    expect(body.filename).toBe("site_b.xlsx");
+    await testDb.update(schema.excelExport).set({ media: "images" }).where(eq(schema.excelExport.id, id));
+    const zip = await request(`/api/v1/excel-exports/${id}/download-url`);
+    expect(zip.status).toBe(200);
+    expect((await readData<{ filename: string }>(zip)).filename).toBe("alpha_2026-10-01.zip");
   });
 
   it("answers 404 for an unknown project", async () => {
