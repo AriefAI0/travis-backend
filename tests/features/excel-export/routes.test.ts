@@ -220,6 +220,30 @@ describe("excel export routes", () => {
     expect(body.filename).toMatch(/\.xlsx$/);
   });
 
+  it("names the download after the typed name", async () => {
+    await seed();
+    const created = await create({ types: ["GVI"], targets: ["partCode:300"], media: "raw" });
+    const { id } = await readData<ExportBody>(created);
+
+    // the worker is not running here, so land the row by hand
+    await testDb
+      .update(schema.excelExport)
+      .set({
+        status: "ready",
+        packageKey: "excel-exports/light/one.xlsx",
+        packageSize: 10,
+        name: "Site B",
+      })
+      .where(eq(schema.excelExport.id, id));
+
+    const res = await request(`/api/v1/excel-exports/${id}/download-url`);
+    expect(res.status).toBe(200);
+
+    const body = await readData<{ url: string; filename: string }>(res);
+    // the typed name ships alone, exactly as the worker built it
+    expect(body.filename).toBe("site_b.xlsx");
+  });
+
   it("answers 404 for an unknown project", async () => {
     const res = await preview({ types: ["GVI"], targets: ["partCode:300"] });
     expect(res.status).toBe(404);

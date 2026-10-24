@@ -147,16 +147,15 @@ describe("excel export worker", () => {
 
     await runExcelExport(current);
 
-    const day = new Date().toISOString().slice(0, 10);
-    // the user's name replaces the project title in every shipped name
-    const root = `site_b_${day}`;
+    // the user's typed name is the whole stem, no date beside it
+    const root = "site_b";
 
     expect(current.status).toBe("ready");
     expect(packaged).toHaveLength(3);
     // everything sits inside one top folder, so Extract All stays tidy
     expect(packaged[0]).toBe(`${root}/README.txt`);
-    expect(packaged).toContain(`${root}/GVI/GVI_site_b_${day}.xlsx`);
-    expect(packaged).toContain(`${root}/CVI/CVI_site_b_${day}.xlsx`);
+    expect(packaged).toContain(`${root}/GVI/GVI_site_b.xlsx`);
+    expect(packaged).toContain(`${root}/CVI/CVI_site_b.xlsx`);
   });
 
   it("skips a type with no rows", async () => {

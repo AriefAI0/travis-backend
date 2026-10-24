@@ -34,7 +34,7 @@ import { collectImages } from "./images";
 import { bufferEntry, textEntry, resultFolder, writePackage, type PackageEntry } from "./package";
 import {
   exportFilename,
-  exportStem,
+  shippedStem,
   typeFilename,
   writeTypeWorkbook,
   type MediaCells,
@@ -132,7 +132,7 @@ const readmeLines = (data: ExcelExportData, root: string, files: number, errors:
   `Media files: ${files}`,
   "",
   `One top folder, then one folder per ticked inspection type:`,
-  `  ${root}/<TYPE>/<TYPE>_<project>_<date>.xlsx   the workbook`,
+  `  ${root}/<TYPE>/<TYPE>_<export name>.xlsx   the workbook`,
   `  ${root}/<TYPE>/images/<result folder>/        one folder per result`,
   `  ${root}/<TYPE>/clips/<result folder>/         one folder per result`,
   "",
@@ -190,18 +190,17 @@ const countByResult = (files: { resultId: number }[]) => {
   return counts;
 };
 
-// One workbook per type, inside its type folder under the export's top folder.
+// One workbook per type, inside its type folder under the export's stem.
 const workbookEntries = async (
   sheets: ExcelSheet[],
-  projectTitle: string,
+  stem: string,
   generatedAt: Date,
-  root: string,
   media?: Map<number, MediaCells>,
 ): Promise<PackageEntry[]> => {
   const entries: PackageEntry[] = [];
   for (const sheet of sheets) {
     const body = await excelWorkerDeps.build(sheet, { generatedAt, media });
-    entries.push(bufferEntry(`${root}/${sheet.type}/${typeFilename(sheet.type, projectTitle, generatedAt)}`, body));
+    entries.push(bufferEntry(`${stem}/${sheet.type}/${typeFilename(sheet.type, stem)}`, body));
   }
   return entries;
 };
@@ -219,11 +218,9 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
   const withRows = data.sheets.filter((sheet) => sheet.rows.length > 0);
   const sheets = withRows.length > 0 ? withRows : data.sheets.slice(0, 1);
   const generatedAt = new Date();
-  // the user's name for the export, else the project title, drives every
-  // shipped file and folder name
-  const title = row.name.trim() || data.projectTitle;
+  // the user's typed name is the whole stem; a blank one keeps project and day.
   // every entry sits inside one top folder, so Extract All stays tidy
-  const root = exportStem(title, generatedAt);
+  const root = shippedStem(row.name, data.projectTitle, generatedAt);
 
   if (row.media === "raw") {
     // one type opens straight from the download, no zip around it
@@ -233,7 +230,7 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
       return {
         kind: "xlsx",
         body,
-        name: typeFilename(sheet.type, title, generatedAt),
+        name: typeFilename(sheet.type, root),
         errors: [],
       };
     }
@@ -242,9 +239,9 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
       kind: "zip",
       entries: [
         textEntry(`${root}/README.txt`, `${readmeLines(data, root, 0, []).join("\n")}\n`),
-        ...(await workbookEntries(sheets, title, generatedAt, root)),
+        ...(await workbookEntries(sheets, root, generatedAt)),
       ],
-      name: exportFilename(title, "raw", generatedAt),
+      name: exportFilename(root, "raw"),
       errors: [],
     };
   }
@@ -295,14 +292,14 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
     textEntry(`${root}/README.txt`, `${readmeLines(data, root, imagePlan.rows.length + clipPlan.rows.length, errors).join("\n")}\n`),
     ...mediaFiles,
     ...clipFiles,
-    ...(await workbookEntries(sheets, title, generatedAt, root, media)),
+    ...(await workbookEntries(sheets, root, generatedAt, media)),
   ];
 
   // a missing image or clip is a delivered package with a stated gap
   return {
     kind: "zip",
     entries,
-    name: exportFilename(title, row.media, generatedAt),
+    name: exportFilename(root, row.media),
     errors,
   };
 };

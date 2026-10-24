@@ -34,7 +34,7 @@ import type { Action, Subject } from "../../lib/auth/permissions";
 import { excelCreateSchema, excelPreviewSchema, type ExcelExportListItem } from "../../types/api";
 import { EXPORT_TTL_MS } from "../../db/services/excel-export.service";
 import { estimateExportSizes } from "./estimate";
-import { exportFilename } from "./workbook";
+import { exportFilename, shippedStem } from "./workbook";
 import { kickExcelExportWorker } from "./worker";
 
 const toListItem = (row: Awaited<ReturnType<typeof getExcelExport>>): ExcelExportListItem => ({
@@ -185,9 +185,10 @@ export const excelExportRoutes = (database?: DbOrTx) => {
     }
 
     const project = await findProjectById(row.projectId, caller.organizationId, database);
-    // the user's name drives the shipped name, exactly as the worker built it
-    const title = row.name.trim() || project?.title || "export";
-    const filename = exportFilename(title, row.media as ExcelMediaLevel);
+    // the shipped name, exactly as the worker built it: the typed name, else
+    // the project and the build day
+    const stem = shippedStem(row.name, project?.title ?? "export", row.createdAt);
+    const filename = exportFilename(stem, row.media as ExcelMediaLevel);
     const url = await mintDownloadUrl(env.BUCKET_MEDIA, row.packageKey, filename, ttl);
 
     log.debug("excel export download url minted", { id: row.id, ttl });

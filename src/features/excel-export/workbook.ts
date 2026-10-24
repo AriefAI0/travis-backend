@@ -15,28 +15,31 @@ import {
 
 export type MediaLevel = "raw" | "images" | "clips";
 
-// The project and the day, safe as a file name. Names the zip and the one
-// top folder inside it.
-export const exportStem = (projectTitle: string, day: Date): string => {
-  const stem =
-    projectTitle
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_|_$/g, "") || "export";
-  return `${stem}_${day.toISOString().slice(0, 10)}`;
+// Safe as a file name: lowercase, runs of non-alphanumerics to `_`.
+const sanitizeStem = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "") || "export";
+
+// The project and the day, safe as a file name.
+export const exportStem = (projectTitle: string, day: Date): string =>
+  `${sanitizeStem(projectTitle)}_${day.toISOString().slice(0, 10)}`;
+
+// The stem that ships: a typed name stands alone, a blank one falls back to
+// the project and the build day.
+export const shippedStem = (name: string, projectTitle: string, day: Date): string => {
+  const typed = name.trim();
+  return typed ? sanitizeStem(typed) : exportStem(projectTitle, day);
 };
 
 // `travity_field_a_2026-10-24.xlsx` or `.zip`: the whole export's name.
-export const exportFilename = (
-  projectTitle: string,
-  media: MediaLevel,
-  day = new Date(),
-): string => `${exportStem(projectTitle, day)}.${media === "raw" ? "xlsx" : "zip"}`;
+export const exportFilename = (stem: string, media: MediaLevel): string =>
+  `${stem}.${media === "raw" ? "xlsx" : "zip"}`;
 
 // `GVI_travity_field_a_2026-10-24.xlsx`: the type leads, because Excel refuses
 // to open two files with one name at once.
-export const typeFilename = (type: string, projectTitle: string, day = new Date()): string =>
-  `${type}_${exportStem(projectTitle, day)}.xlsx`;
+export const typeFilename = (type: string, stem: string): string => `${type}_${stem}.xlsx`;
 
 export type WorkbookOptions = {
   generatedAt?: Date;

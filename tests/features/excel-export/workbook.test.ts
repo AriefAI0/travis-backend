@@ -2,7 +2,12 @@ import { describe, expect, it } from "bun:test";
 import ExcelJS from "exceljs";
 
 import { IDENTITY_COLUMNS, type ExcelSheet } from "../../../src/db/services/excel-export-data.service";
-import { typeFilename, writeTypeWorkbook } from "../../../src/features/excel-export/workbook";
+import {
+  exportFilename,
+  shippedStem,
+  typeFilename,
+  writeTypeWorkbook,
+} from "../../../src/features/excel-export/workbook";
 
 const recorded = new Date("2026-10-01T08:30:00Z");
 
@@ -158,9 +163,22 @@ describe("excel workbook", () => {
   });
 
   it("names the file after the type, so two can open at once", () => {
-    expect(typeFilename("GVI", "Travity Field A", recorded)).toBe("GVI_travity_field_a_2026-10-01.xlsx");
-    expect(typeFilename("CVI", "Travity Field A", recorded)).not.toBe(
-      typeFilename("GVI", "Travity Field A", recorded),
+    expect(typeFilename("GVI", "travity_field_a_2026-10-01")).toBe(
+      "GVI_travity_field_a_2026-10-01.xlsx",
     );
+    expect(typeFilename("CVI", "travity_field_a_2026-10-01")).not.toBe(
+      typeFilename("GVI", "travity_field_a_2026-10-01"),
+    );
+  });
+
+  it("ships a typed name alone, with no date beside it", () => {
+    expect(shippedStem("Site B!", "Travity Field A", recorded)).toBe("site_b");
+    expect(shippedStem("###", "Travity Field A", recorded)).toBe("export");
+  });
+
+  it("falls back to the project and the build day when the name is blank", () => {
+    expect(shippedStem("   ", "Travity Field A", recorded)).toBe("travity_field_a_2026-10-01");
+    expect(exportFilename("site_b", "images")).toBe("site_b.zip");
+    expect(exportFilename("site_b", "raw")).toBe("site_b.xlsx");
   });
 });
