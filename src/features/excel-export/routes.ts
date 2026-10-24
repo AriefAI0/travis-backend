@@ -23,6 +23,7 @@ import {
 } from "../../db/services/excel-export.service";
 import { callerOf, requireCan, requireUser, type AuthVariables } from "../../lib/auth/middleware";
 import type { Caller } from "../../lib/caller";
+import { publish } from "../../lib/events/bus";
 import { AppError } from "../../lib/error";
 import { env } from "../../config/env";
 import { log } from "../../lib/logger";
@@ -122,6 +123,15 @@ export const excelExportRoutes = (database?: DbOrTx) => {
 
     // a row that was already live is returned as is; only a new one wakes a lane
     if (row.status === "queued") kickExcelExportWorker();
+
+    // the bell hears about the row now, not only when a lane first moves it
+    publish({
+      organizationId: row.organizationId,
+      action: "create",
+      resourceType: "ExcelExport",
+      resourceId: row.id,
+      userId: row.ownerUserId,
+    });
 
     return ok(c, toListItem(row), 202);
   });
