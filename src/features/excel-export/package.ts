@@ -28,6 +28,24 @@ export type PackageEntry = {
 
 export type PackageResult = { bytes: number; key: string };
 
+// One file the export carried: a line the README can report.
+export type MediaRow = {
+  resultId: number;
+  type: string;
+  kind: "image" | "clip";
+  file: string;
+  status: string;
+};
+
+// A still for a clip, and the zip-relative file it shows.
+export type MediaThumb = { thumbnail: string; target: string };
+
+// A file built in memory, such as one type's workbook.
+export const bufferEntry = (name: string, body: Buffer): PackageEntry => ({
+  name,
+  open: () => Readable.from([body]),
+});
+
 // A plain-text entry, written straight into the zip.
 export const textEntry = (name: string, body: string): PackageEntry => ({
   name,

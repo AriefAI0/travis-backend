@@ -7,7 +7,7 @@
 // flow: wake > claim > gather > build > upload > compare-and-set
 
 import { randomUUID } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 
@@ -16,7 +16,11 @@ import { log } from "../../lib/logger";
 import { publish } from "../../lib/events/bus";
 import { minio } from "../../lib/minio_storage/clients";
 import { parseDatasheetTargets } from "../../db/services/datasheet-data.service";
-import { gatherExcelExport, type ExcelExportData } from "../../db/services/excel-export-data.service";
+import {
+  gatherExcelExport,
+  type ExcelExportData,
+  type ExcelSheet,
+} from "../../db/services/excel-export-data.service";
 import {
   claimExcelExport,
   getExcelExport,
@@ -27,8 +31,13 @@ import {
 import type { InspectionTypeCode } from "../../types/api";
 import { collectClips } from "./clips";
 import { collectImages } from "./images";
-import { readmeEntry, writePackage, type PackageEntry } from "./package";
-import { exportFilename, writeWorkbook, type MediaThumb } from "./workbook";
+import { bufferEntry, readmeEntry, writePackage, type PackageEntry } from "./package";
+import {
+  exportFilename,
+  typeFilename,
+  writeTypeWorkbook,
+  type WorkbookOptions,
+} from "./workbook";
 
 const LANES = ["light", "clips"] as const;
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -62,7 +71,7 @@ export type ExcelWorkerDeps = {
   move: typeof moveExcelExport;
   read: (id: string, organizationId: number, ownerUserId: string) => Promise<ExcelExportView>;
   gather: typeof gatherExcelExport;
-  build: typeof writeWorkbook;
+  build: typeof writeTypeWorkbook;
   package: typeof writePackage;
   putObject: (key: string, body: Buffer) => Promise<void>;
   removeObject: (key: string) => Promise<void>;
@@ -74,7 +83,7 @@ const defaultDeps: ExcelWorkerDeps = {
   move: moveExcelExport,
   read: getExcelExport,
   gather: gatherExcelExport,
-  build: writeWorkbook,
+  build: writeTypeWorkbook,
   package: writePackage,
   putObject: async (key, body) =>
     void (await minio.putObject(env.BUCKET_MEDIA, key, body, body.length, {
@@ -110,17 +119,22 @@ type BuiltPackage =
 
 const MIB = 1024 ** 2;
 
-// The README that ships before any media, naming the zip rules and the tools
+// The README that ships before any media: the layout, the gaps, and the tools
 // that open a ZIP64 archive.
-const readmeLines = (row: ExcelExportView, files: number) => [
+const readmeLines = (data: ExcelExportData, files: number, errors: string[]) => [
   "Travis excel export",
   "",
-  `Project: ${row.projectId}`,
-  `Results: ${row.itemsTotal}, media files: ${files}`,
+  `Project: ${data.projectTitle}`,
+  `Document: ${data.documentId || "-"}`,
+  `Generated: ${new Date().toISOString()}`,
+  `Media files: ${files}`,
   "",
-  "Extract this zip before opening the workbook: image and clip links point to",
-  "files beside it, and they break inside the archive.",
+  "One folder per inspection type:",
+  "  GVI/GVI_<project>_<date>.xlsx   the workbook",
+  "  GVI/images/                     one folder per result",
+  "  GVI/clips/                      one folder per result",
   "",
+  ...(errors.length > 0 ? ["Missing files:", ...errors.map((line) => `- ${line}`), ""] : []),
   "Windows Explorer and 7-Zip open this archive.",
   "macOS Archive Utility does not open a ZIP64 archive: use 7-Zip or Keka.",
 ];
@@ -139,7 +153,21 @@ export const resultTypesOf = (data: ExcelExportData) => {
   return list;
 };
 
-// flow: gather > (media: images > thumbnails) > workbook > zip entries
+// One workbook per type, named inside its type folder.
+const workbookEntries = async (
+  sheets: ExcelSheet[],
+  projectTitle: string,
+  generatedAt: Date,
+): Promise<PackageEntry[]> => {
+  const entries: PackageEntry[] = [];
+  for (const sheet of sheets) {
+    const body = await excelWorkerDeps.build(sheet, { generatedAt });
+    entries.push(bufferEntry(`${sheet.type}/${typeFilename(sheet.type, projectTitle, generatedAt)}`, body));
+  }
+  return entries;
+};
+
+// flow: gather > (media: images > thumbnails) > one workbook per type > entries
 const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<BuiltPackage> => {
   const data = await excelWorkerDeps.gather(
     row.projectId,
@@ -148,9 +176,33 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
     row.organizationId,
   );
 
+  // a type with no rows gets no folder. Nothing at all still ships one sheet.
+  const withRows = data.sheets.filter((sheet) => sheet.rows.length > 0);
+  const sheets = withRows.length > 0 ? withRows : data.sheets.slice(0, 1);
+  const generatedAt = new Date();
+
   if (row.media === "raw") {
-    const body = await excelWorkerDeps.build(data, { mediaLevel: "raw" });
-    return { kind: "xlsx", body, name: exportFilename(data.projectTitle, "raw"), errors: [] };
+    // one type opens straight from the download, no zip around it
+    if (sheets.length === 1) {
+      const sheet = sheets[0]!;
+      const body = await excelWorkerDeps.build(sheet, { generatedAt });
+      return {
+        kind: "xlsx",
+        body,
+        name: typeFilename(sheet.type, data.projectTitle, generatedAt),
+        errors: [],
+      };
+    }
+
+    return {
+      kind: "zip",
+      entries: [
+        readmeEntry(readmeLines(data, 0, [])),
+        ...(await workbookEntries(sheets, data.projectTitle, generatedAt)),
+      ],
+      name: exportFilename(data.projectTitle, "raw", generatedAt),
+      errors: [],
+    };
   }
 
   const scratch = path.join(env.EXCEL_EXPORT_SCRATCH_DIR, row.id);
@@ -165,26 +217,7 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
   const clipPlan =
     row.media === "clips"
       ? await collectClips(resultTypes, scratch, signal)
-      : { files: [], thumbs: new Map<number, MediaThumb>(), rows: [], errors: [] };
-
-  const imageThumbs = new Map<number, MediaThumb[]>();
-  for (const file of imagePlan.files) {
-    const list = imageThumbs.get(file.resultId) ?? [];
-    list.push({ thumbnail: file.thumbnail, target: file.target });
-    imageThumbs.set(file.resultId, list);
-  }
-
-  const workbookBody = await excelWorkerDeps.build(data, {
-    mediaLevel: row.media,
-    mediaRows: [...imagePlan.rows, ...clipPlan.rows],
-    imageThumbs,
-    clipThumbs: clipPlan.thumbs,
-  });
-
-  // the workbook must be a stream like everything else, so it lands on disk
-  await mkdir(scratch, { recursive: true });
-  const workbookFile = path.join(scratch, "workbook.xlsx");
-  await Bun.write(workbookFile, workbookBody);
+      : { files: [], thumbs: new Map(), rows: [], errors: [] };
 
   const mediaFiles = imagePlan.files.flatMap((file) => {
     const entries: PackageEntry[] = [
@@ -206,19 +239,20 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
     open: () => Readable.from(Bun.file(file.file).stream()),
   }));
 
+  const errors = [...imagePlan.errors, ...clipPlan.errors];
   const entries: PackageEntry[] = [
-    readmeEntry(readmeLines(row, mediaFiles.length + clipFiles.length)),
+    readmeEntry(readmeLines(data, imagePlan.rows.length + clipPlan.rows.length, errors)),
     ...mediaFiles,
     ...clipFiles,
-    { name: "workbook.xlsx", open: () => Readable.from(Bun.file(workbookFile).stream()) },
+    ...(await workbookEntries(sheets, data.projectTitle, generatedAt)),
   ];
 
   // a missing image or clip is a delivered package with a stated gap
   return {
     kind: "zip",
     entries,
-    name: exportFilename(data.projectTitle, row.media),
-    errors: [...imagePlan.errors, ...clipPlan.errors],
+    name: exportFilename(data.projectTitle, row.media, generatedAt),
+    errors,
   };
 };
 

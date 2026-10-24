@@ -10,7 +10,24 @@ import {
   runExcelExport,
 } from "../../../src/features/excel-export/worker";
 
-const emptyData: ExcelExportData = { projectTitle: "Alpha", documentId: "DOC-1", sheets: [] };
+// One GVI type with one reading, so a raw export ships a bare workbook.
+const oneRow: ExcelExportData = {
+  projectTitle: "Alpha",
+  documentId: "DOC-1",
+  sheets: [
+    {
+      type: "GVI",
+      sheet: "GVI",
+      columns: [],
+      rows: [{ resultId: 5001, cells: {} }],
+    },
+  ],
+};
+
+const secondType = (data: ExcelExportData): ExcelExportData => ({
+  ...data,
+  sheets: [...data.sheets, { type: "CVI", sheet: "CVI", columns: [], rows: [{ resultId: 5002, cells: {} }] }],
+});
 
 const rowFor = (overrides: Partial<ExcelExportRow> = {}): ExcelExportRow =>
   ({
@@ -41,6 +58,7 @@ const rowFor = (overrides: Partial<ExcelExportRow> = {}): ExcelExportRow =>
 let stored: Map<string, Buffer>;
 let removed: string[];
 let events: string[];
+let packaged: string[];
 let current: ExcelExportRow;
 
 beforeEach(() => {
@@ -48,12 +66,16 @@ beforeEach(() => {
   stored = new Map();
   removed = [];
   events = [];
+  packaged = [];
   current = rowFor();
 
   excelWorkerDeps.read = async () => current;
-  excelWorkerDeps.gather = async () => emptyData;
+  excelWorkerDeps.gather = async () => oneRow;
   excelWorkerDeps.build = async () => Buffer.from("workbook");
-  excelWorkerDeps.package = async (key) => ({ bytes: 42, key });
+  excelWorkerDeps.package = async (key, entries) => {
+    packaged = entries.map((entry) => entry.name);
+    return { bytes: 42, key };
+  };
   excelWorkerDeps.putObject = async (key, body) => void stored.set(key, body);
   excelWorkerDeps.removeObject = async (key) => {
     removed.push(key);
@@ -114,6 +136,34 @@ describe("excel export worker", () => {
     expect(current.status).toBe("ready");
     expect(current.packageSize).toBe(42);
     expect(stored.size).toBe(0);
+  });
+
+  it("puts one workbook per type in a zip when two types ship", async () => {
+    current = rowFor({ types: ["GVI", "CVI"] });
+    excelWorkerDeps.gather = async () => secondType(oneRow);
+
+    await runExcelExport(current);
+
+    expect(current.status).toBe("ready");
+    expect(packaged).toHaveLength(3);
+    expect(packaged[0]).toBe("README.txt");
+    expect(packaged.some((name) => name.startsWith("GVI/GVI_alpha_") && name.endsWith(".xlsx"))).toBe(true);
+    expect(packaged.some((name) => name.startsWith("CVI/CVI_alpha_") && name.endsWith(".xlsx"))).toBe(true);
+  });
+
+  it("skips a type with no rows", async () => {
+    current = rowFor({ types: ["GVI", "CVI"] });
+    excelWorkerDeps.gather = async () => ({
+      ...oneRow,
+      sheets: [...oneRow.sheets, { type: "CVI", sheet: "CVI", columns: [], rows: [] }],
+    });
+
+    await runExcelExport(current);
+
+    // one type with rows, so the bare workbook goes out and no zip is built
+    expect(current.status).toBe("ready");
+    expect(packaged).toHaveLength(0);
+    expect(stored.size).toBe(1);
   });
 
   it("throttles progress but always sends the terminal status", async () => {

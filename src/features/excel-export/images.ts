@@ -14,7 +14,7 @@ import { log } from "../../lib/logger";
 import { minio } from "../../lib/minio_storage/clients";
 import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
 import { listResultImageSummariesByResultIds } from "../../db/services/result-media.service";
-import type { MediaRow } from "./workbook";
+import type { MediaRow } from "./package";
 
 // Fetches in flight per lane. Four keeps one lane busy without swamping MinIO.
 const FETCH_CONCURRENCY = 4;

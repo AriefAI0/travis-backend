@@ -14,7 +14,7 @@ import { log } from "../../lib/logger";
 import { minio } from "../../lib/minio_storage/clients";
 import { listVideoClipRecordsByResultIds } from "../../db/repositories/video-clip.repository";
 import { mergeClip, type RemuxResult } from "../recording/jobs/remux";
-import type { MediaRow, MediaThumb } from "./workbook";
+import type { MediaRow, MediaThumb } from "./package";
 
 const THUMBNAIL_BOX = 160;
 const POSTER_TIMEOUT_MS = 30_000;
