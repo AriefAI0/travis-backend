@@ -226,9 +226,7 @@ describe("excel export data", () => {
     const [sheet] = (await gatherExcelExport(1, ["MGI"], targets("partCode:300"), testOrgId, testDb)).sheets;
 
     expect(sheet!.rows).toHaveLength(1);
-    expect(sheet!.rows[0]!.cells).toMatchObject({ result_id: 5005 });
-    // the card prints this text when the tool saved no findings at all
-    expect(sheet!.rows[0]!.cells.no_mg_observed ?? "").toBe("");
+    expect(sheet!.rows[0]!.cells).toMatchObject({ result_id: 5005, no_mg_observed: "No" });
     // no readings, so every reading cell stays blank
     expect(sheet!.rows[0]!.cells.growth_type ?? "").toBe("");
   });
@@ -703,7 +701,7 @@ describe("panel labels and text", () => {
 
     expect(sheet!.columns.some((column) => column.key === "remark")).toBe(false);
     expect(sheet!.rows[0]!.cells).toMatchObject({
-      no_mg_observed: "No MG observed",
+      no_mg_observed: "Yes",
       growth_type: "Soft",
       species_other_text: "plumose anemone",
       coverage_percent: 35,
