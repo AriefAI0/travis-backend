@@ -126,9 +126,8 @@ describe("excel export data", () => {
     expect(row!.cells).toMatchObject({
       result_id: 5001,
       session: "Run 1",
-      task_group: "100",
+      task_code: "101",
       part_code: "P1",
-      type_code: "T1",
       condition: "Good Condition",
       depth_el: 2.5,
     });
@@ -136,7 +135,7 @@ describe("excel export data", () => {
     expect(row!.cells.recorded).toBeInstanceOf(Date);
   });
 
-  it("keeps child lists on their own sheet rows, keyed by result", async () => {
+  it("flattens a child list to one row per reading", async () => {
     await seedTree();
     await addResult({ resultId: 5003, type: "CVI" });
     await testDb.insert(schema.resultCvi).values({ resultId: 5003, datumReference: "D-1" });
@@ -148,14 +147,103 @@ describe("excel export data", () => {
 
     const [sheet] = (await gatherExcelExport(1, ["CVI"], targets("partCode:300"), testOrgId, testDb)).sheets;
 
-    expect(sheet!.rows).toHaveLength(1);
-    expect(sheet!.children.map((child) => child.key)).toEqual(["positions", "cp_findings"]);
-    expect(sheet!.children[0]!.rows).toHaveLength(2);
-    expect(sheet!.children[0]!.rows[0]).toMatchObject({
-      resultId: 5003,
-      cells: { member_type: "CHORD", clock_position: "12:00", ut_mm: 19.8 },
+    expect("children" in sheet!).toBe(false);
+    expect(sheet!.rows).toHaveLength(2);
+    expect(sheet!.rows[0]!.cells).toMatchObject({
+      result_id: 5003,
+      datum_reference: "D-1",
+      member_type: "CHORD",
+      clock_position: "12:00",
+      ut_mm: 19.8,
+      cp_potential_mv: -950,
+      remark: "reading",
     });
-    expect(typeof sheet!.children[0]!.rows[0]!.cells.ut_mm).toBe("number");
+    expect(typeof sheet!.rows[0]!.cells.ut_mm).toBe("number");
+    // the second position pairs with no CP reading, so its CP cell is blank
+    expect(sheet!.rows[1]!.cells.clock_position).toBe("3:00");
+    expect(sheet!.rows[1]!.cells.cp_potential_mv ?? null).toBeNull();
+  });
+
+  it("ships three positions against two CP readings as three rows", async () => {
+    await seedTree();
+    await addResult({ resultId: 5003, type: "CVI" });
+    await testDb.insert(schema.resultCvi).values({ resultId: 5003 });
+    await testDb.insert(schema.resultCviPosition).values(
+      ["12:00", "3:00", "6:00"].map((clockPosition, sortOrder) => ({
+        resultId: 5003,
+        memberType: "brace" as const,
+        clockPosition,
+        sortOrder,
+      })),
+    );
+    await testDb.insert(schema.resultCviFinding).values([
+      { resultId: 5003, value: -900, remark: "one", sortOrder: 0 },
+      { resultId: 5003, value: -910, remark: "two", sortOrder: 1 },
+    ]);
+
+    const [sheet] = (await gatherExcelExport(1, ["CVI"], targets("partCode:300"), testOrgId, testDb)).sheets;
+
+    expect(sheet!.rows).toHaveLength(3);
+    expect(sheet!.rows.map((row) => row.cells.cp_potential_mv ?? null)).toEqual([-900, -910, null]);
+    expect(sheet!.rows[2]!.cells.remark ?? "").toBe("");
+  });
+
+  it("ships one row for a result with no readings", async () => {
+    await seedTree();
+    await addResult({ resultId: 5005, type: "MGI" });
+    await testDb.insert(schema.resultMgi).values({ resultId: 5005 });
+
+    const [sheet] = (await gatherExcelExport(1, ["MGI"], targets("partCode:300"), testOrgId, testDb)).sheets;
+
+    expect(sheet!.rows).toHaveLength(1);
+    expect(sheet!.rows[0]!.cells).toMatchObject({ result_id: 5005, no_mg_observed: "No" });
+    // no readings, so every reading cell stays blank
+    expect(sheet!.rows[0]!.cells.growth_type ?? "").toBe("");
+  });
+
+  it("puts the reading's own time in the Timestamp cell", async () => {
+    await seedTree();
+    const parentAt = new Date("2026-10-19T09:41:00.000Z");
+    const readingAt = new Date("2026-10-19T10:04:00.000Z");
+    await testDb.insert(schema.result).values({
+      resultId: 5006,
+      displayNumber: 6,
+      projectId: 1,
+      sessionId: 101,
+      inspectionTypeCode: "DVI",
+      partCodeId: 300,
+      layer: 1,
+      masterStartMs: 0,
+      createdAt: parentAt,
+    });
+    await testDb.insert(schema.resultDvi).values({ resultId: 5006, memberType: "chord" });
+    await testDb.insert(schema.resultDviPosition).values({
+      resultId: 5006,
+      clockPosition: "12:00",
+      sortOrder: 0,
+      createdAt: readingAt,
+    });
+
+    const [sheet] = (await gatherExcelExport(1, ["DVI"], targets("partCode:300"), testOrgId, testDb)).sheets;
+
+    expect(sheet!.rows[0]!.cells.recorded).toEqual(readingAt);
+  });
+
+  it("leads with seven identity columns", async () => {
+    await seedTree();
+    await addResult({ resultId: 5001, type: "GVI" });
+
+    const [sheet] = (await gatherExcelExport(1, ["GVI"], targets("partCode:300"), testOrgId, testDb)).sheets;
+
+    expect(sheet!.columns.slice(0, 7).map((column) => column.label)).toEqual([
+      "Result ID",
+      "Session",
+      "Task code",
+      "Description",
+      "Part code",
+      "Class",
+      "Timestamp (UTC)",
+    ]);
   });
 
   it("merges custom values by their form label", async () => {

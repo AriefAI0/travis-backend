@@ -16,7 +16,7 @@ import { log } from "../../lib/logger";
 import { publish } from "../../lib/events/bus";
 import { minio } from "../../lib/minio_storage/clients";
 import { parseDatasheetTargets } from "../../db/services/datasheet-data.service";
-import { gatherExcelExport } from "../../db/services/excel-export-data.service";
+import { gatherExcelExport, type ExcelExportData } from "../../db/services/excel-export-data.service";
 import {
   claimExcelExport,
   getExcelExport,
@@ -125,6 +125,20 @@ const readmeLines = (row: ExcelExportView, files: number) => [
   "macOS Archive Utility does not open a ZIP64 archive: use 7-Zip or Keka.",
 ];
 
+// One entry per result. Flat rows repeat a result, so media fetches once.
+export const resultTypesOf = (data: ExcelExportData) => {
+  const seen = new Set<number>();
+  const list: { resultId: number; type: InspectionTypeCode }[] = [];
+  for (const sheet of data.sheets) {
+    for (const row of sheet.rows) {
+      if (seen.has(row.resultId)) continue;
+      seen.add(row.resultId);
+      list.push({ resultId: row.resultId, type: sheet.type });
+    }
+  }
+  return list;
+};
+
 // flow: gather > (media: images > thumbnails) > workbook > zip entries
 const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<BuiltPackage> => {
   const data = await excelWorkerDeps.gather(
@@ -140,9 +154,7 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
   }
 
   const scratch = path.join(env.EXCEL_EXPORT_SCRATCH_DIR, row.id);
-  const resultTypes = data.sheets.flatMap((sheet) =>
-    sheet.rows.map((entry) => ({ resultId: entry.resultId, type: sheet.type })),
-  );
+  const resultTypes = resultTypesOf(data);
 
   const imagePlan =
     row.media === "images" || row.media === "clips"

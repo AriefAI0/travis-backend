@@ -9,7 +9,7 @@ import { writeWorkbook } from "../../../src/features/excel-export/workbook";
 
 const recorded = new Date("2026-10-01T08:30:00Z");
 
-// One GVI row plus one CVI row with a child list
+// One GVI row plus a flat CVI sheet with two readings
 const data: ExcelExportData = {
   projectTitle: "Alpha",
   documentId: "DOC-1",
@@ -28,40 +28,41 @@ const data: ExcelExportData = {
           cells: {
             result_id: 5001,
             session: "Run 1",
-            task_group: "100",
             task_code: "101",
             description: "Leg A",
-            type_code: "T1",
             part_code: "P1",
             class: "normal",
-            remarks: "",
             recorded,
             depth_el: 84.2,
             condition: "Good Condition",
           },
         },
       ],
-      children: [],
     },
     {
       type: "CVI",
       sheet: "CVI",
-      columns: [...IDENTITY_COLUMNS, { key: "datum_reference", label: "Datum ref", type: "text" }],
+      columns: [
+        ...IDENTITY_COLUMNS,
+        { key: "datum_reference", label: "Datum ref", type: "text" },
+        { key: "clock_position", label: "Clock", type: "text" },
+        { key: "ut_mm", label: "UT mm", type: "number" },
+      ],
       rows: [
         {
           resultId: 5003,
-          cells: { result_id: 5003, session: "Run 1", recorded, datum_reference: "D-1" },
+          cells: {
+            result_id: 5003,
+            session: "Run 1",
+            recorded,
+            datum_reference: "D-1",
+            clock_position: "12:00",
+            ut_mm: 19.8,
+          },
         },
-      ],
-      children: [
         {
-          key: "positions",
-          label: "CVI positions",
-          columns: [
-            { key: "clock_position", label: "Clock", type: "text" },
-            { key: "ut_mm", label: "UT mm", type: "number" },
-          ],
-          rows: [{ resultId: 5003, cells: { clock_position: "12:00", ut_mm: 19.8 } }],
+          resultId: 5003,
+          cells: { result_id: 5003, session: "Run 1", recorded, datum_reference: "D-1", clock_position: "3:00" },
         },
       ],
     },
@@ -76,15 +77,9 @@ const read = async () => {
 };
 
 describe("excel workbook", () => {
-  it("writes the index, one sheet per type, one per child list, and media", async () => {
+  it("writes the index and one sheet per type", async () => {
     const workbook = await read();
-    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
-      "Index",
-      "GVI",
-      "CVI",
-      "CVI positions",
-      "Media",
-    ]);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(["Index", "GVI", "CVI", "Media"]);
   });
 
   it("keeps cell types: numbers, dates, and text", async () => {
@@ -96,12 +91,21 @@ describe("excel workbook", () => {
     expect(header[2]).toBe("Session");
 
     const depthColumn = (header as string[]).indexOf("Depth EL");
-    const recordedColumn = (header as string[]).indexOf("Recorded");
+    const recordedColumn = (header as string[]).indexOf("Timestamp (UTC)");
     const row = sheet.getRow(2);
 
     expect(row.getCell(depthColumn).value).toBe(84.2);
     expect(row.getCell(recordedColumn).value).toBeInstanceOf(Date);
     expect(row.getCell(1).value).toBe(5001);
+  });
+
+  it("formats a date cell with its time", async () => {
+    const workbook = await read();
+    const sheet = workbook.getWorksheet("GVI")!;
+    const header = sheet.getRow(1).values as unknown[];
+    const recordedColumn = (header as string[]).indexOf("Timestamp (UTC)");
+
+    expect(sheet.getRow(2).getCell(recordedColumn).numFmt).toBe("yyyy-mm-dd hh:mm:ss");
   });
 
   it("freezes the identity columns and filters every header", async () => {
@@ -123,7 +127,7 @@ describe("excel workbook", () => {
     });
 
     expect(links).toContain("#'GVI'!A1");
-    expect(links).toContain("#'CVI positions'!A1");
+    expect(links).toContain("#'CVI'!A1");
   });
 
   it("notes that the zip must be extracted when media ships", async () => {

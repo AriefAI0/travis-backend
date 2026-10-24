@@ -2,7 +2,7 @@
 //
 // The workbook is the UI: the Index links to every sheet, and each sheet holds
 // typed cells so sorting and filtering work on the value, not its text.
-// flow: gathered data > index + main sheets + child sheets + media > xlsx
+// flow: gathered data > index + one sheet per type + media > xlsx
 
 import ExcelJS from "exceljs";
 
@@ -12,7 +12,6 @@ import {
   type ExcelColumn,
   type ExcelExportData,
   type ExcelRow,
-  type ExcelSheet,
 } from "../../db/services/excel-export-data.service";
 
 export type MediaLevel = "raw" | "images" | "clips";
@@ -68,13 +67,15 @@ const sheetName = (name: string) =>
 // Column width from the heading, with a floor for the type's values.
 const widthFor = (column: ExcelColumn) => Math.min(40, Math.max(10, column.label.length + 4));
 
+// Excel shows only the day without this, and the reading time matters.
+const DATE_FMT = "yyyy-mm-dd hh:mm:ss";
+
 // Header cells, widths, and the autofilter over the full header range.
 const layOut = (sheet: ExcelJS.Worksheet, columns: ExcelColumn[]) => {
   sheet.columns = columns.map((column) => ({
     header: column.label,
     key: column.key,
     width: widthFor(column),
-    outlineLevel: column.group ? 1 : undefined,
   }));
   sheet.views = [{ state: "frozen", xSplit: Math.min(IDENTITY_COLUMNS.length, columns.length), ySplit: 1 }];
   sheet.autoFilter = {
@@ -121,7 +122,7 @@ const placeThumbs = (
   sheet.getRow(rowNumber).height = THUMB_ROW_HEIGHT_PT;
 };
 
-// A data sheet: header plus one row per result, in gather order.
+// A data sheet: header plus one row per reading, in gather order.
 const addDataSheet = (
   workbook: ExcelJS.Workbook,
   name: string,
@@ -137,12 +138,23 @@ const addDataSheet = (
 
   const imageIndex = allColumns.indexOf(IMAGE_COLUMN) + 1;
   const clipIndex = allColumns.indexOf(CLIP_COLUMN) + 1;
+  const seenResults = new Set<number>();
 
   for (const row of rows) {
-    sheet.addRow(allColumns.map((column) => cellValue(row.cells[column.key])));
+    const added = sheet.addRow(allColumns.map((column) => cellValue(row.cells[column.key])));
+
+    // a date cell needs its format, else Excel hides the time
+    allColumns.forEach((column, index) => {
+      const cell = added.getCell(index + 1);
+      if (column.type === "date" && cell.value instanceof Date) cell.numFmt = DATE_FMT;
+    });
+
+    // flat rows repeat a result: its thumbnails land on the first row only
+    const firstRow = !seenResults.has(row.resultId);
+    seenResults.add(row.resultId);
 
     const rowNumber = sheet.rowCount;
-    if (options.imageThumbs) {
+    if (firstRow && options.imageThumbs) {
       placeThumbs(
         workbook,
         sheet,
@@ -152,7 +164,7 @@ const addDataSheet = (
         sheet.getRow(rowNumber).getCell(imageIndex),
       );
     }
-    if (options.clipThumbs) {
+    if (firstRow && options.clipThumbs) {
       const clip = options.clipThumbs.get(row.resultId);
       if (clip) {
         placeThumbs(workbook, sheet, rowNumber, clipIndex, [clip], sheet.getRow(rowNumber).getCell(clipIndex));
@@ -191,18 +203,6 @@ const addIndexSheet = (
       media: mediaCount,
     });
     row.getCell(1).value = { text: typeSheet.sheet, hyperlink: `#'${typeSheet.sheet}'!A1` };
-
-    for (const child of typeSheet.children) {
-      const childRow = sheet.addRow({
-        sheet: `  ${child.label}`,
-        rows: child.rows.length,
-        media: "",
-      });
-      childRow.getCell(1).value = {
-        text: child.label,
-        hyperlink: `#'${sheetName(child.label)}'!A1`,
-      };
-    }
   }
 
   sheet.addRow([]);
@@ -245,7 +245,7 @@ const addMediaSheet = (workbook: ExcelJS.Workbook, rows: MediaRow[]) => {
   return sheet;
 };
 
-// Index first, then one sheet per type, one per child list, Media last.
+// Index first, then one sheet per type, Media last.
 export const buildWorkbook = (data: ExcelExportData, options: WorkbookOptions) => {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "travis";
@@ -256,12 +256,8 @@ export const buildWorkbook = (data: ExcelExportData, options: WorkbookOptions) =
   // the index goes first so it opens on the first tab
   const index = addIndexSheet(workbook, data, options, mediaRows.length);
 
-  for (const typeSheet of data.sheets as ExcelSheet[]) {
+  for (const typeSheet of data.sheets) {
     addDataSheet(workbook, typeSheet.sheet, typeSheet.columns, typeSheet.rows, options);
-    for (const child of typeSheet.children) {
-      // a child list carries no media of its own
-      addDataSheet(workbook, child.label, child.columns, child.rows, { mediaLevel: options.mediaLevel });
-    }
   }
 
   addMediaSheet(workbook, mediaRows);

@@ -1,10 +1,12 @@
 // Everything one excel export needs: the column contract per inspection type,
 // and the typed rows gathered for the ticked targets.
 //
+// One row is one reading. A result with three findings ships three rows, and
+// the identity cells repeat on each. A result with none ships one row.
 // The workbook writer reads this and nothing else, so every cell type is
 // decided here. Numbers stay numbers and dates stay dates, because Excel sorts
 // and filters on the typed value, not on its printed text.
-// flow: ticked targets > results > ticked types > cap > details > typed cells
+// flow: ticked targets > results > ticked types > cap > details > flat rows
 
 import type { DbOrTx } from "../client";
 import { AppError } from "../../lib/error";
@@ -49,27 +51,18 @@ import { type DatasheetTargets, loadTargets } from "./datasheet-data.service";
 // per result, so the cap keeps one job bounded.
 export const MAX_EXCEL_RESULTS = 500;
 
-// Where a preview stops reading details, per type.
+// Where a preview stops adding sheet rows, per type.
 export const PREVIEW_ROWS_PER_TYPE = 10;
 
 export type ExcelCellType = "text" | "number" | "date";
 export type ExcelCell = string | number | Date | null;
 
-// `group` puts the column in a collapsible Excel outline: wide one-to-one
-// blocks collapse so the sheet stays readable.
-export type ExcelColumn = { key: string; label: string; type: ExcelCellType; group?: boolean };
-
-export type ExcelChildSet = {
-  key: string;
-  label: string;
-  columns: ExcelColumn[];
-};
+export type ExcelColumn = { key: string; label: string; type: ExcelCellType };
 
 export type ExcelTypeContract = {
   type: InspectionTypeCode;
   sheet: string;
   columns: ExcelColumn[];
-  children: ExcelChildSet[];
 };
 
 const col = (key: string, label: string, type: ExcelCellType = "text"): ExcelColumn => ({
@@ -78,21 +71,17 @@ const col = (key: string, label: string, type: ExcelCellType = "text"): ExcelCol
   type,
 });
 const num = (key: string, label: string) => col(key, label, "number");
-// a wide block's detail column: collapsed by default
-const wide = (column: ExcelColumn): ExcelColumn => ({ ...column, group: true });
 
 // Identity columns lead every sheet, so a row stays readable out of context.
+// Timestamp is the row's own time in UTC: the reading's, else the result's.
 export const IDENTITY_COLUMNS: ExcelColumn[] = [
   num("result_id", "Result ID"),
   col("session", "Session"),
-  col("task_group", "Task group"),
   col("task_code", "Task code"),
   col("description", "Description"),
-  col("type_code", "Type"),
   col("part_code", "Part code"),
   col("class", "Class"),
-  col("remarks", "Remarks"),
-  col("recorded", "Recorded", "date"),
+  col("recorded", "Timestamp (UTC)", "date"),
 ];
 
 // All 13 types. RA is a gap mark, never a row.
@@ -105,28 +94,18 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       col("gvi_cp", "GVI CP"),
       col("condition", "Condition"),
     ],
-    children: [],
   },
   {
     type: "CVI",
     sheet: "CVI",
-    columns: [col("datum_reference", "Datum ref")],
-    children: [
-      {
-        key: "positions",
-        label: "CVI positions",
-        columns: [
-          col("member_type", "Member type"),
-          col("clock_position", "Clock"),
-          num("ut_mm", "UT mm"),
-          col("findings", "Findings"),
-        ],
-      },
-      {
-        key: "cp_findings",
-        label: "CVI CP readings",
-        columns: [num("cp_potential_mv", "CP mV"), col("remark", "Remark")],
-      },
+    columns: [
+      col("datum_reference", "Datum ref"),
+      col("member_type", "Member type"),
+      col("clock_position", "Clock"),
+      num("ut_mm", "UT mm"),
+      col("findings", "Findings"),
+      num("cp_potential_mv", "CP mV"),
+      col("remark", "Remark"),
     ],
   },
   {
@@ -136,31 +115,22 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       col("datum_reference", "Datum ref"),
       col("member_type", "Member type"),
       num("cp_potential_mv", "CP mV"),
-    ],
-    children: [
-      {
-        key: "positions",
-        label: "DVI positions",
-        columns: [col("clock_position", "Clock"), num("ut_mm", "UT mm"), col("findings", "Findings")],
-      },
+      col("clock_position", "Clock"),
+      num("ut_mm", "UT mm"),
+      col("findings", "Findings"),
     ],
   },
   {
     type: "MGI",
     sheet: "MGI",
-    columns: [col("no_mg_observed", "MG observed"), col("criteria_preset", "Criteria")],
-    children: [
-      {
-        key: "findings",
-        label: "MGI findings",
-        columns: [
-          col("growth_type", "Growth type"),
-          col("species", "Species"),
-          num("coverage_percent", "Coverage %"),
-          num("thickness_mm", "Thickness mm"),
-          col("remarks", "Remarks"),
-        ],
-      },
+    columns: [
+      col("no_mg_observed", "MG observed"),
+      col("criteria_preset", "Criteria"),
+      col("growth_type", "Growth type"),
+      col("species", "Species"),
+      num("coverage_percent", "Coverage %"),
+      num("thickness_mm", "Thickness mm"),
+      col("remarks", "Remarks"),
     ],
   },
   {
@@ -176,7 +146,6 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       num("widest_pit", "Widest pit"),
       num("deepest_pit", "Deepest pit"),
     ],
-    children: [],
   },
   {
     type: "FMD",
@@ -188,7 +157,6 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       col("additional_attempt_2", "Add. 2"),
       col("additional_attempt_3", "Add. 3"),
     ],
-    children: [],
   },
   {
     type: "SCOUR",
@@ -204,7 +172,6 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       col("exp_leg2", "Exp. leg 2"),
       num("height_exp_leg2", "Height exp. 2"),
     ],
-    children: [],
   },
   {
     type: "BSI",
@@ -218,22 +185,21 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       col("hinge_pin", "Hinge pin"),
       num("hinge_bolt_nut_quantity", "Hinge bolts"),
       col("liners", "Liners"),
-      wide(col("inboard_gap_condition", "In. gap")),
-      wide(num("inboard_estimate_gap", "In. est.")),
-      wide(col("inboard_alignment_condition", "In. align.")),
-      wide(col("inboard_misaligned_position", "In. position")),
-      wide(col("inboard_anomaly_recommendation", "In. note")),
-      wide(col("outboard_gap_condition", "Out. gap")),
-      wide(num("outboard_estimate_gap", "Out. est.")),
-      wide(col("outboard_alignment_condition", "Out. align.")),
-      wide(col("outboard_misaligned_position", "Out. position")),
-      wide(col("outboard_anomaly_recommendation", "Out. note")),
+      col("inboard_gap_condition", "In. gap"),
+      num("inboard_estimate_gap", "In. est."),
+      col("inboard_alignment_condition", "In. align."),
+      col("inboard_misaligned_position", "In. position"),
+      col("inboard_anomaly_recommendation", "In. note"),
+      col("outboard_gap_condition", "Out. gap"),
+      num("outboard_estimate_gap", "Out. est."),
+      col("outboard_alignment_condition", "Out. align."),
+      col("outboard_misaligned_position", "Out. position"),
+      col("outboard_anomaly_recommendation", "Out. note"),
       col("clamp_missing_bolts", "Clamp missing bolts"),
       col("clamp_missing_washers", "Clamp missing washers"),
       col("hinge_missing_bolts", "Hinge missing bolts"),
       col("hinge_missing_washers", "Hinge missing washers"),
     ],
-    children: [],
   },
   {
     type: "CGB",
@@ -244,7 +210,6 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       col("debris", "Debris"),
       col("debris_type", "Debris type"),
     ],
-    children: [],
   },
   {
     type: "RISER",
@@ -253,16 +218,15 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       num("touchdown_distance", "TD from bend"),
       num("mudbrace_distance", "Bend to mudbrace"),
       num("bend_height", "Bend height"),
-      wide(col("coating_status", "Coating")),
-      wide(col("coating_condition", "Coating condition")),
-      wide(col("knee_brace", "Knee brace")),
-      wide(col("debris", "Debris")),
-      wide(col("debris_type", "Debris type")),
-      wide(col("anomaly", "Anomaly")),
-      wide(col("recommendation", "Recommendation")),
-      wide(col("restricted_access", "Restricted access")),
+      col("coating_status", "Coating"),
+      col("coating_condition", "Coating condition"),
+      col("knee_brace", "Knee brace"),
+      col("debris", "Debris"),
+      col("debris_type", "Debris type"),
+      col("anomaly", "Anomaly"),
+      col("recommendation", "Recommendation"),
+      col("restricted_access", "Restricted access"),
     ],
-    children: [],
   },
   {
     type: "CAISSON",
@@ -279,23 +243,15 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       col("associated_pipes_note", "Pipes note"),
       col("cp_readings", "CP readings"),
     ],
-    children: [],
   },
   {
     type: "SEABED",
     sheet: "SEABED",
-    columns: [],
-    children: [
-      {
-        key: "findings",
-        label: "Seabed findings",
-        columns: [
-          num("range_meters", "Range m"),
-          col("fixes", "Fixes"),
-          col("debris", "Debris"),
-          col("debris_type", "Debris type"),
-        ],
-      },
+    columns: [
+      num("range_meters", "Range m"),
+      col("fixes", "Fixes"),
+      col("debris", "Debris"),
+      col("debris_type", "Debris type"),
     ],
   },
   {
@@ -305,21 +261,13 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
       col("location", "Location"),
       num("depth_el", "Depth EL"),
       col("orientation", "Orientation"),
-    ],
-    children: [
-      {
-        key: "findings",
-        label: "Pipeline findings",
-        columns: [
-          col("pipeline_category", "Category"),
-          col("pipeline_damage", "Damage type"),
-          col("pipeline_debris", "Debris"),
-          num("anode_cp_value", "Anode CP mV"),
-          col("anode_depletion", "Anode depletion"),
-          col("anode_kp", "Anode KP"),
-          col("remarks", "Remarks"),
-        ],
-      },
+      col("pipeline_category", "Category"),
+      col("pipeline_damage", "Damage type"),
+      col("pipeline_debris", "Debris"),
+      num("anode_cp_value", "Anode CP mV"),
+      col("anode_depletion", "Anode depletion"),
+      col("anode_kp", "Anode KP"),
+      col("remarks", "Remarks"),
     ],
   },
 ];
@@ -327,14 +275,12 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
 export const EXCEL_CONTRACT_BY_TYPE = new Map(EXCEL_CONTRACT.map((entry) => [entry.type, entry]));
 
 export type ExcelRow = { resultId: number; cells: Record<string, ExcelCell> };
-export type ExcelChildRow = { resultId: number; cells: Record<string, ExcelCell> };
 
 export type ExcelSheet = {
   type: InspectionTypeCode;
   sheet: string;
   columns: ExcelColumn[];
   rows: ExcelRow[];
-  children: { key: string; label: string; columns: ExcelColumn[]; rows: ExcelChildRow[] }[];
 };
 
 export type ExcelExportData = {
@@ -367,14 +313,19 @@ const EMPTY_LABEL: TargetLabel = {
   nominal_wall_mm: "",
 };
 
-// Main cells and child sets for one result. Every type in the contract answers.
-// flow: detail read > typed cells > child rows
+// One reading's cells, and its own created_at when it has one.
+type ShapedReading = { cells: Record<string, ExcelCell>; createdAt?: string };
+type ShapedResult = { cells: Record<string, ExcelCell>; readings: ShapedReading[] };
+
+// Result cells and one reading per child row. A type with no child list
+// returns no readings, and the caller ships the result as a single row.
+// flow: detail read > typed cells > reading rows
 const shapeResult = async (
   resultId: number,
   type: InspectionTypeCode,
   database?: DbOrTx,
-): Promise<{ cells: Record<string, ExcelCell>; children: Record<string, Record<string, ExcelCell>[]> }> => {
-  const empty = { cells: {}, children: {} };
+): Promise<ShapedResult> => {
+  const empty: ShapedResult = { cells: {}, readings: [] };
 
   switch (type) {
     case "GVI": {
@@ -386,7 +337,7 @@ const shapeResult = async (
           gvi_cp: joined(detail.cpFindings.map((finding) => txt(finding.value))),
           condition: label(CONDITION_LABEL, detail.condition),
         },
-        children: {},
+        readings: [],
       };
     }
     case "CP": {
@@ -403,7 +354,7 @@ const shapeResult = async (
           widest_pit: number(detail.widestPit),
           deepest_pit: number(detail.deepestPit),
         },
-        children: {},
+        readings: [],
       };
     }
     case "FMD": {
@@ -417,7 +368,7 @@ const shapeResult = async (
           additional_attempt_2: label(ATTEMPT_LABEL, detail.additionalAttempt2),
           additional_attempt_3: label(ATTEMPT_LABEL, detail.additionalAttempt3),
         },
-        children: {},
+        readings: [],
       };
     }
     case "SCOUR": {
@@ -435,28 +386,42 @@ const shapeResult = async (
           exp_leg2: label(YES_NO_LABEL, detail.expLeg2),
           height_exp_leg2: number(detail.heightExpLeg2),
         },
-        children: {},
+        readings: [],
       };
     }
     case "CVI": {
       const detail = await getCviDetailByResultId(resultId, database);
       if (!detail) return empty;
+      const positions = detail.members.flatMap((member) =>
+        member.positions.map((position) => ({
+          cells: {
+            member_type: member.memberType.toUpperCase(),
+            clock_position: position.clockPosition,
+            ut_mm: number(position.utMm),
+            findings: txt(position.findings),
+          },
+          createdAt: position.createdAt,
+        })),
+      );
+      const cpFindings = detail.cpFindings.map((finding) => ({
+        cells: {
+          cp_potential_mv: number(finding.value),
+          remark: txt(finding.remark),
+        },
+        createdAt: finding.createdAt,
+      }));
+      // two parallel lists pair by order; the shorter one leaves blanks
+      const count = Math.max(positions.length, cpFindings.length);
       return {
         cells: { datum_reference: txt(detail.datumReference) },
-        children: {
-          positions: detail.members.flatMap((member) =>
-            member.positions.map((position) => ({
-              member_type: member.memberType.toUpperCase(),
-              clock_position: position.clockPosition,
-              ut_mm: number(position.utMm),
-              findings: txt(position.findings),
-            })),
-          ),
-          cp_findings: detail.cpFindings.map((finding) => ({
-            cp_potential_mv: number(finding.value),
-            remark: txt(finding.remark),
-          })),
-        },
+        readings: Array.from({ length: count }, (_, index) => {
+          const position = positions[index];
+          const cp = cpFindings[index];
+          return {
+            cells: { ...position?.cells, ...cp?.cells },
+            createdAt: position?.createdAt ?? cp?.createdAt,
+          };
+        }),
       };
     }
     case "DVI": {
@@ -468,13 +433,14 @@ const shapeResult = async (
           member_type: detail.memberType.toUpperCase(),
           cp_potential_mv: number(detail.cpPotentialMv),
         },
-        children: {
-          positions: detail.positions.map((position) => ({
+        readings: detail.positions.map((position) => ({
+          cells: {
             clock_position: position.clockPosition,
             ut_mm: number(position.utMm),
             findings: txt(position.findings),
-          })),
-        },
+          },
+          createdAt: position.createdAt,
+        })),
       };
     }
     case "MGI": {
@@ -485,15 +451,16 @@ const shapeResult = async (
           no_mg_observed: detail.detail.noMgObserved ? "Yes" : "No",
           criteria_preset: txt(detail.detail.criteriaPreset),
         },
-        children: {
-          findings: detail.findings.map((finding) => ({
+        readings: detail.findings.map((finding) => ({
+          cells: {
             growth_type: txt(finding.growthType),
             species: txt(finding.species),
             coverage_percent: number(finding.coveragePercent),
             thickness_mm: number(finding.thicknessMm),
             remarks: txt(finding.remarks),
-          })),
-        },
+          },
+          createdAt: finding.createdAt,
+        })),
       };
     }
     case "BSI": {
@@ -525,7 +492,7 @@ const shapeResult = async (
           hinge_missing_bolts: positions(detail.hingeMissingBolts),
           hinge_missing_washers: positions(detail.hingeMissingWashers),
         },
-        children: {},
+        readings: [],
       };
     }
     case "CGB": {
@@ -538,7 +505,7 @@ const shapeResult = async (
           debris: label(YES_NO_LABEL, detail.debris),
           debris_type: txt(detail.debrisType),
         },
-        children: {},
+        readings: [],
       };
     }
     case "RISER": {
@@ -558,7 +525,7 @@ const shapeResult = async (
           recommendation: txt(detail.recommendation),
           restricted_access: label(YES_NO_LABEL, detail.restrictedAccess),
         },
-        children: {},
+        readings: [],
       };
     }
     case "CAISSON": {
@@ -577,7 +544,7 @@ const shapeResult = async (
           associated_pipes_note: txt(detail.associatedPipesRecommendation),
           cp_readings: joined(detail.cpFindings.map((finding) => txt(finding.cpMv))),
         },
-        children: {},
+        readings: [],
       };
     }
     case "SEABED": {
@@ -585,14 +552,15 @@ const shapeResult = async (
       if (!detail) return empty;
       return {
         cells: {},
-        children: {
-          findings: detail.findings.map((finding) => ({
+        readings: detail.findings.map((finding) => ({
+          cells: {
             range_meters: number(finding.rangeMeters),
             fixes: txt(finding.fixes),
             debris: label(YES_NO_LABEL, finding.debris),
             debris_type: txt(finding.debrisType),
-          })),
-        },
+          },
+          createdAt: finding.createdAt,
+        })),
       };
     }
     case "PIPELINE": {
@@ -604,8 +572,8 @@ const shapeResult = async (
           depth_el: number(detail.depthEl),
           orientation: txt(detail.orientation),
         },
-        children: {
-          findings: detail.findings.map((finding) => ({
+        readings: detail.findings.map((finding) => ({
+          cells: {
             pipeline_category: txt(finding.category),
             pipeline_damage: txt(finding.damageType),
             pipeline_debris: txt(finding.debrisType),
@@ -613,8 +581,9 @@ const shapeResult = async (
             anode_depletion: txt(finding.anodeDepletion),
             anode_kp: txt(finding.anodeKp),
             remarks: txt(finding.remarks),
-          })),
-        },
+          },
+          createdAt: finding.createdAt,
+        })),
       };
     }
     default:
@@ -722,9 +691,6 @@ export const gatherExcelExport = async (
     const picked = ticked.filter((record) => record.inspectionTypeCode === contract.type);
 
     const rows: ExcelRow[] = [];
-    const childRows = new Map<string, ExcelChildRow[]>(
-      contract.children.map((child) => [child.key, []]),
-    );
     // a type-wide list: one column per custom label, whatever result brought it
     const customColumns: ExcelColumn[] = [];
 
@@ -743,29 +709,28 @@ export const gatherExcelExport = async (
       // custom values ride after the typed cells, one column per label
       const labels =
         record.inspectionFormId === null ? undefined : customLabels.get(record.inspectionFormId);
+      const customCells = customCellsFor(record.customValues, labels, customColumns);
 
-      rows.push({
-        resultId: record.resultId,
-        cells: {
-          result_id: record.resultId,
-          session: record.sessionId === null ? "" : (sessionNames.get(record.sessionId) ?? ""),
-          task_group: label.task_group,
-          task_code: label.task_code,
-          description: label.description,
-          type_code: label.type_code,
-          part_code: label.part_code,
-          class: record.resultClass,
-          remarks: txt(record.remarks),
-          recorded: record.createdAt,
-          ...shaped.cells,
-          ...customCellsFor(record.customValues, labels, customColumns),
-        },
-      });
-
-      for (const [key, childSet] of childRows) {
-        for (const child of shaped.children[key] ?? []) {
-          childSet.push({ resultId: record.resultId, cells: child });
-        }
+      // one row per reading, or one row for a result with no readings
+      const readings: ShapedReading[] =
+        shaped.readings.length > 0 ? shaped.readings : [{ cells: {} }];
+      for (const reading of readings) {
+        if (rows.length >= maxRowsPerType) break;
+        rows.push({
+          resultId: record.resultId,
+          cells: {
+            result_id: record.resultId,
+            session: record.sessionId === null ? "" : (sessionNames.get(record.sessionId) ?? ""),
+            task_code: label.task_code,
+            description: label.description,
+            part_code: label.part_code,
+            class: record.resultClass,
+            recorded: reading.createdAt ? new Date(reading.createdAt) : record.createdAt,
+            ...shaped.cells,
+            ...reading.cells,
+            ...customCells,
+          },
+        });
       }
     }
 
@@ -774,12 +739,6 @@ export const gatherExcelExport = async (
       sheet: contract.sheet,
       columns: [...IDENTITY_COLUMNS, ...contract.columns, ...customColumns],
       rows,
-      children: contract.children.map((child) => ({
-        key: child.key,
-        label: child.label,
-        columns: child.columns,
-        rows: childRows.get(child.key) ?? [],
-      })),
     });
   }
 
@@ -813,7 +772,8 @@ export const countExcelResults = async (
   return counts;
 };
 
-// The dialog preview: same sheets, ten rows per type.
+// The dialog preview: same sheets, ten rows per type. A result can split at
+// the cut, so the preview is a sample.
 export const previewExcelExport = (
   projectId: number,
   types: InspectionTypeCode[],

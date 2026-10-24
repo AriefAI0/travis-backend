@@ -6,6 +6,7 @@ import {
   emitProgress,
   excelWorkerDeps,
   resetExcelWorkerDeps,
+  resultTypesOf,
   runExcelExport,
 } from "../../../src/features/excel-export/worker";
 
@@ -125,5 +126,30 @@ describe("excel export worker", () => {
 
     excelWorkerDeps.emit(row, "modify");
     expect(events).toHaveLength(2);
+  });
+
+  it("names each result once when its sheet repeats it", () => {
+    const repeated: ExcelExportData = {
+      projectTitle: "Alpha",
+      documentId: "DOC-1",
+      sheets: [
+        {
+          type: "GVI",
+          sheet: "GVI",
+          columns: [],
+          rows: [
+            { resultId: 5001, cells: {} },
+            { resultId: 5001, cells: {} },
+            { resultId: 5001, cells: {} },
+            { resultId: 5002, cells: {} },
+          ],
+        },
+      ],
+    };
+
+    expect(resultTypesOf(repeated)).toEqual([
+      { resultId: 5001, type: "GVI" },
+      { resultId: 5002, type: "GVI" },
+    ]);
   });
 });
