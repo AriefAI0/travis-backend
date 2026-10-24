@@ -11,7 +11,7 @@
 import type { DbOrTx } from "../client";
 import { AppError } from "../../lib/error";
 import { log } from "../../lib/logger";
-import type { InspectionTypeCode } from "../../types/api";
+import type { GviCPFindingDetail, InspectionTypeCode } from "../../types/api";
 import { listResultRecordsByTargetIds } from "../repositories/result.repository";
 import { getProjectById } from "./project.service";
 import { listSessionsByIds } from "./session.service";
@@ -21,13 +21,9 @@ import {
   ALIGN_LABEL,
   ATTEMPT_LABEL,
   BLOCKAGE_LABEL,
-  COATING_CONDITION_LABEL,
-  COATING_STATUS_LABEL,
   CONDITION_LABEL,
   GAP_LABEL,
-  POSITION_LABEL,
   YES_NO_LABEL,
-  collectTargets,
   type TargetLabel,
 } from "./report-data.service";
 import {
@@ -90,8 +86,14 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
     type: "GVI",
     sheet: "GVI",
     columns: [
-      num("depth_el", "Depth EL"),
-      col("gvi_cp", "GVI CP"),
+      num("depth_el", "Depth EL (-)"),
+      num("gvi_contact", "Contact - CP Reading (mV)"),
+      num("gvi_proximity", "Proximity - CP Reading (mV)"),
+      col("gvi_cp_remark", "CP Remarks"),
+      num("mgi_depth", "MGI Depth"),
+      num("mgi_soft", "MGI Soft Coverage"),
+      num("mgi_hard", "MGI Hard Coverage"),
+      col("mgi_remarks", "MGI Remarks"),
       col("condition", "Condition"),
     ],
   },
@@ -99,106 +101,107 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
     type: "CVI",
     sheet: "CVI",
     columns: [
-      col("datum_reference", "Datum ref"),
-      col("member_type", "Member type"),
-      col("clock_position", "Clock"),
-      num("ut_mm", "UT mm"),
-      col("findings", "Findings"),
-      num("cp_potential_mv", "CP mV"),
-      col("remark", "Remark"),
+      col("datum_reference", "Datum Reference"),
+      col("member_type", "Member"),
+      col("clock_position", "Clock position"),
+      num("ut_mm", "UT Value (mm)"),
+      col("findings", "Remarks"),
+      num("cp_potential_mv", "CP Value (mV)"),
+      col("cp_remark", "CP Remarks"),
     ],
   },
   {
     type: "DVI",
     sheet: "DVI",
     columns: [
-      col("datum_reference", "Datum ref"),
-      col("member_type", "Member type"),
-      num("cp_potential_mv", "CP mV"),
-      col("clock_position", "Clock"),
-      num("ut_mm", "UT mm"),
+      col("datum_reference", "Datum Reference"),
+      col("member_type", "Member Type"),
+      col("clock_position", "Clock position"),
+      num("ut_mm", "UT Value (mm)"),
       col("findings", "Findings"),
+      num("cp_potential_mv", "CP Potential (mV)"),
     ],
   },
   {
     type: "MGI",
     sheet: "MGI",
     columns: [
-      col("no_mg_observed", "MG observed"),
-      col("criteria_preset", "Criteria"),
-      col("growth_type", "Growth type"),
+      col("no_mg_observed", "No MG observed"),
+      col("criteria_preset", "Criteria preset"),
+      col("growth_type", "Growth"),
       col("species", "Species"),
+      col("species_other_text", "Other species detail"),
       num("coverage_percent", "Coverage %"),
       num("thickness_mm", "Thickness mm"),
-      col("remarks", "Remarks"),
+      col("remarks", "Finding remarks"),
     ],
   },
   {
     type: "CP",
     sheet: "CP",
     columns: [
-      col("anode_type", "Anode type"),
-      num("voltage_mv", "Voltage mV"),
-      col("depletion", "Depletion"),
-      num("anode_width", "W mm"),
-      num("anode_height", "H mm"),
-      num("anode_length", "L mm"),
-      num("widest_pit", "Widest pit"),
-      num("deepest_pit", "Deepest pit"),
+      col("anode_type", "Anode Type"),
+      num("voltage_mv", "CP potential (mV)"),
+      col("depletion", "Depletion (%)"),
+      num("anode_width", "Width"),
+      num("anode_height", "Height"),
+      num("anode_length", "Length"),
+      num("widest_pit", "Widest"),
+      num("deepest_pit", "Deepest"),
     ],
   },
   {
     type: "FMD",
     sheet: "FMD",
     columns: [
-      num("depth_el", "Depth EL"),
-      col("initial_attempt", "Initial"),
-      col("additional_attempt_1", "Add. 1"),
-      col("additional_attempt_2", "Add. 2"),
-      col("additional_attempt_3", "Add. 3"),
+      num("depth_el", "Depth EL (-)"),
+      col("initial_attempt", "Initial Attempt"),
+      col("additional_attempt_1", "Additional Attempt 1"),
+      col("additional_attempt_2", "Additional Attempt 2"),
+      col("additional_attempt_3", "Additional Attempt 3"),
     ],
   },
   {
     type: "SCOUR",
     sheet: "SCOUR",
     columns: [
-      col("location_leg1", "Location leg 1"),
-      num("dim_a", "A"),
-      num("dim_b", "B"),
-      num("dim_c", "C"),
-      col("exp_leg1", "Exp. leg 1"),
-      num("height_exp_leg1", "Height exp. 1"),
-      col("location_leg2", "Location leg 2"),
-      col("exp_leg2", "Exp. leg 2"),
-      num("height_exp_leg2", "Height exp. 2"),
+      col("location_leg1", "Leg 1"),
+      col("location_leg2", "Leg 2"),
+      num("dim_a", "DIM A"),
+      num("dim_b", "DIM B"),
+      num("dim_c", "DIM C"),
+      col("exp_leg1", "Leg 1 pile exposed"),
+      col("exp_leg2", "Leg 2 pile exposed"),
+      num("height_exp_leg1", "Leg 1 exposed height"),
+      num("height_exp_leg2", "Leg 2 exposed height"),
     ],
   },
   {
     type: "BSI",
     sheet: "BSI",
     columns: [
-      col("clamp_type", "Clamp type"),
-      num("depth_el", "Depth EL"),
-      num("clamp_bolt_nut_quantity", "Clamp bolts"),
-      num("outboard_clamp_cp", "Outboard CP mV"),
-      col("cp_anomaly_recommendation", "CP note"),
-      col("hinge_pin", "Hinge pin"),
-      num("hinge_bolt_nut_quantity", "Hinge bolts"),
+      col("clamp_type", "Clamp Type"),
+      num("depth_el", "Depth EL (-)"),
+      num("clamp_bolt_nut_quantity", "Clamp Bolts & Nuts Quantity"),
+      col("clamp_missing_bolts", "Clamp Missing Bolts"),
+      col("clamp_missing_washers", "Clamp Missing Washer"),
+      num("outboard_clamp_cp", "Outboard Clamp CP"),
+      col("cp_anomaly_recommendation", "CP Anomaly Recommendation"),
+      col("hinge_pin", "Hinge Pin"),
+      num("hinge_bolt_nut_quantity", "Hinge Bolts & Nuts Quantity"),
+      col("hinge_missing_bolts", "Hinge Missing Bolts"),
+      col("hinge_missing_washers", "Hinge Missing Washer"),
       col("liners", "Liners"),
-      col("inboard_gap_condition", "In. gap"),
-      num("inboard_estimate_gap", "In. est."),
-      col("inboard_alignment_condition", "In. align."),
-      col("inboard_misaligned_position", "In. position"),
-      col("inboard_anomaly_recommendation", "In. note"),
-      col("outboard_gap_condition", "Out. gap"),
-      num("outboard_estimate_gap", "Out. est."),
-      col("outboard_alignment_condition", "Out. align."),
-      col("outboard_misaligned_position", "Out. position"),
-      col("outboard_anomaly_recommendation", "Out. note"),
-      col("clamp_missing_bolts", "Clamp missing bolts"),
-      col("clamp_missing_washers", "Clamp missing washers"),
-      col("hinge_missing_bolts", "Hinge missing bolts"),
-      col("hinge_missing_washers", "Hinge missing washers"),
+      col("inboard_gap_condition", "In-board Gap Condition"),
+      num("inboard_estimate_gap", "In-board Estimate Gap"),
+      col("inboard_alignment_condition", "In-board Alignment Condition"),
+      col("inboard_misaligned_position", "In-board Misaligned Position"),
+      col("inboard_anomaly_recommendation", "In-board Anomaly Recommendation"),
+      col("outboard_gap_condition", "Out-board Gap Condition"),
+      num("outboard_estimate_gap", "Out-board Estimate Gap"),
+      col("outboard_alignment_condition", "Out-board Alignment Condition"),
+      col("outboard_misaligned_position", "Out-board Misaligned Position"),
+      col("outboard_anomaly_recommendation", "Out-board Anomaly Recommendation"),
     ],
   },
   {
@@ -206,52 +209,53 @@ export const EXCEL_CONTRACT: ExcelTypeContract[] = [
     sheet: "CGB",
     columns: [
       col("movement", "Movement"),
-      col("movement_remark", "Movement remark"),
+      col("movement_remark", "Movement Remark"),
       col("debris", "Debris"),
-      col("debris_type", "Debris type"),
+      col("debris_type", "Debris Type"),
     ],
   },
   {
     type: "RISER",
     sheet: "RISER",
     columns: [
-      num("touchdown_distance", "TD from bend"),
-      num("mudbrace_distance", "Bend to mudbrace"),
-      num("bend_height", "Bend height"),
+      num("touchdown_distance", "Touchdown - Distance from Riser Bend"),
+      num("mudbrace_distance", "Riser Bend - Distance to Mudbrace Member"),
+      num("bend_height", "Riser Bend - Height to Seabed"),
       col("coating_status", "Coating"),
-      col("coating_condition", "Coating condition"),
-      col("knee_brace", "Knee brace"),
+      col("coating_condition", "Coating Condition"),
+      col("knee_brace", "Knee Brace"),
       col("debris", "Debris"),
-      col("debris_type", "Debris type"),
+      col("debris_type", "Debris Type"),
       col("anomaly", "Anomaly"),
       col("recommendation", "Recommendation"),
-      col("restricted_access", "Restricted access"),
+      col("restricted_access", "Restricted Access"),
     ],
   },
   {
     type: "CAISSON",
     sheet: "CAISSON",
     columns: [
-      col("visual_damage", "Visual damage"),
-      col("visual_damage_note", "Visual damage note"),
-      col("debris_present", "Debris"),
-      col("debris_note", "Debris note"),
-      col("grating_present", "Grating"),
-      col("grating_blockage", "Grating blockage"),
-      col("grating_note", "Grating note"),
+      col("visual_damage", "Caisson Body GVI"),
+      col("visual_damage_recommendation", "Damage Recommendation"),
+      col("debris_present", "Debris Present"),
+      col("debris_recommendation", "Debris Recommendation"),
+      col("grating_present", "Grating Present"),
+      col("grating_blockage", "Grating Blockage"),
+      col("grating_anomaly_recommendation", "Grating Recommendation"),
+      num("cp_mv", "CP Value (mV)"),
+      col("cp_remark", "CP Remarks"),
       col("associated_pipes", "Associated pipes"),
-      col("associated_pipes_note", "Pipes note"),
-      col("cp_readings", "CP readings"),
+      col("associated_pipes_recommendation", "Associated pipes note"),
     ],
   },
   {
     type: "SEABED",
     sheet: "SEABED",
     columns: [
-      num("range_meters", "Range m"),
+      num("range_meters", "Range (m)"),
       col("fixes", "Fixes"),
       col("debris", "Debris"),
-      col("debris_type", "Debris type"),
+      col("debris_type", "Debris Type"),
     ],
   },
   {
@@ -313,6 +317,47 @@ const EMPTY_LABEL: TargetLabel = {
   nominal_wall_mm: "",
 };
 
+/* ---------- panel text ---------- */
+
+// The report's maps print shorter words (`Mid`, `Not present`, `Good`).
+// The excel sheet repeats the panel's own text, so these maps stay local.
+const PANEL_MEMBER: Record<string, string> = { chord: "Chord", brace: "Brace" };
+const PANEL_MISALIGNED: Record<string, string> = { top: "Top", mid: "Mid-Section", bottom: "Bottom" };
+const PANEL_COATING: Record<string, string> = { present: "Present", "not-present": "Not Present" };
+const PANEL_COATING_STATE: Record<string, string> = {
+  good: "Good Condition",
+  "peel-off": "Coating Peel Off",
+};
+const PANEL_GROWTH: Record<string, string> = { soft: "Soft", hard: "Hard" };
+const PANEL_CLASS: Record<string, string> = { normal: "Normal", anomaly: "Anomaly" };
+
+// A presence flag reads as the panel's two choices.
+const presence = (value: boolean | null) => (value === null ? "" : value ? "Present" : "Missing");
+
+// Tools whose panel carries the shared Remark field. It ships last.
+export const REMARK_TYPES: InspectionTypeCode[] = [
+  "GVI",
+  "CVI",
+  "DVI",
+  "CP",
+  "FMD",
+  "SCOUR",
+  "CGB",
+  "RISER",
+  "CAISSON",
+  "SEABED",
+];
+
+const REMARK_COLUMN: ExcelColumn = { key: "remark", label: "Remark", type: "text" };
+
+// The columns a type's sheet ships: identity, the type's own columns, and the
+// shared Remark field when the panel carries one.
+export const sheetColumnsFor = (contract: ExcelTypeContract): ExcelColumn[] => [
+  ...IDENTITY_COLUMNS,
+  ...contract.columns,
+  ...(REMARK_TYPES.includes(contract.type) ? [REMARK_COLUMN] : []),
+];
+
 // One reading's cells, and its own created_at when it has one.
 type ShapedReading = { cells: Record<string, ExcelCell>; createdAt?: string };
 type ShapedResult = { cells: Record<string, ExcelCell>; readings: ShapedReading[] };
@@ -331,13 +376,34 @@ const shapeResult = async (
     case "GVI": {
       const detail = await getGviDetailByResultId(resultId, database);
       if (!detail) return empty;
+
+      // contact and proximity readings. A legacy row carries no method, so the
+      // first free slot takes it, in panel order.
+      let contact: GviCPFindingDetail | undefined;
+      let proximity: GviCPFindingDetail | undefined;
+      for (const finding of detail.cpFindings) {
+        const slot = finding.cpMethod ?? (contact ? "proximity" : "contact");
+        if (slot === "contact" && !contact) contact = finding;
+        if (slot === "proximity" && !proximity) proximity = finding;
+      }
+
       return {
         cells: {
           depth_el: number(detail.depthEl),
-          gvi_cp: joined(detail.cpFindings.map((finding) => txt(finding.value))),
+          gvi_contact: number(contact?.value),
+          gvi_proximity: number(proximity?.value),
+          gvi_cp_remark: txt(contact?.remark || proximity?.remark),
           condition: label(CONDITION_LABEL, detail.condition),
         },
-        readings: [],
+        readings: (detail.mgi?.findings ?? []).map((finding) => ({
+          cells: {
+            mgi_depth: number(finding.depth),
+            mgi_soft: number(finding.softCoveragePercent),
+            mgi_hard: number(finding.hardCoveragePercent),
+            mgi_remarks: txt(finding.remarks),
+          },
+          createdAt: finding.createdAt,
+        })),
       };
     }
     case "CP": {
@@ -395,7 +461,7 @@ const shapeResult = async (
       const positions = detail.members.flatMap((member) =>
         member.positions.map((position) => ({
           cells: {
-            member_type: member.memberType.toUpperCase(),
+            member_type: label(PANEL_MEMBER, member.memberType),
             clock_position: position.clockPosition,
             ut_mm: number(position.utMm),
             findings: txt(position.findings),
@@ -406,7 +472,7 @@ const shapeResult = async (
       const cpFindings = detail.cpFindings.map((finding) => ({
         cells: {
           cp_potential_mv: number(finding.value),
-          remark: txt(finding.remark),
+          cp_remark: txt(finding.remark),
         },
         createdAt: finding.createdAt,
       }));
@@ -430,7 +496,7 @@ const shapeResult = async (
       return {
         cells: {
           datum_reference: txt(detail.datumReference),
-          member_type: detail.memberType.toUpperCase(),
+          member_type: label(PANEL_MEMBER, detail.memberType),
           cp_potential_mv: number(detail.cpPotentialMv),
         },
         readings: detail.positions.map((position) => ({
@@ -453,8 +519,9 @@ const shapeResult = async (
         },
         readings: detail.findings.map((finding) => ({
           cells: {
-            growth_type: txt(finding.growthType),
+            growth_type: label(PANEL_GROWTH, finding.growthType),
             species: txt(finding.species),
+            species_other_text: txt(finding.speciesOtherText),
             coverage_percent: number(finding.coveragePercent),
             thickness_mm: number(finding.thicknessMm),
             remarks: txt(finding.remarks),
@@ -474,18 +541,18 @@ const shapeResult = async (
           clamp_bolt_nut_quantity: number(detail.clampBoltNutQuantity),
           outboard_clamp_cp: number(detail.outboardClampCP),
           cp_anomaly_recommendation: txt(detail.cpAnomalyRecommendation),
-          hinge_pin: bool(detail.hingePin),
+          hinge_pin: presence(detail.hingePin),
           hinge_bolt_nut_quantity: number(detail.hingeBoltNutQuantity),
-          liners: bool(detail.liners),
+          liners: presence(detail.liners),
           inboard_gap_condition: label(GAP_LABEL, detail.inboardGapCondition),
           inboard_estimate_gap: number(detail.inboardEstimateGap),
           inboard_alignment_condition: label(ALIGN_LABEL, detail.inboardAlignmentCondition),
-          inboard_misaligned_position: label(POSITION_LABEL, detail.inboardMisalignedPosition),
+          inboard_misaligned_position: label(PANEL_MISALIGNED, detail.inboardMisalignedPosition),
           inboard_anomaly_recommendation: txt(detail.inboardAnomalyRecommendation),
           outboard_gap_condition: label(GAP_LABEL, detail.outboardGapCondition),
           outboard_estimate_gap: number(detail.outboardEstimateGap),
           outboard_alignment_condition: label(ALIGN_LABEL, detail.outboardAlignmentCondition),
-          outboard_misaligned_position: label(POSITION_LABEL, detail.outboardMisalignedPosition),
+          outboard_misaligned_position: label(PANEL_MISALIGNED, detail.outboardMisalignedPosition),
           outboard_anomaly_recommendation: txt(detail.outboardAnomalyRecommendation),
           clamp_missing_bolts: positions(detail.clampMissingBolts),
           clamp_missing_washers: positions(detail.clampMissingWashers),
@@ -516,8 +583,8 @@ const shapeResult = async (
           touchdown_distance: number(detail.touchdownDistanceFromRiserBend),
           mudbrace_distance: number(detail.riserBendDistanceToMudbraceMember),
           bend_height: number(detail.riserBendHeightToSeabed),
-          coating_status: label(COATING_STATUS_LABEL, detail.coatingStatus),
-          coating_condition: label(COATING_CONDITION_LABEL, detail.coatingCondition),
+          coating_status: label(PANEL_COATING, detail.coatingStatus),
+          coating_condition: label(PANEL_COATING_STATE, detail.coatingCondition),
           knee_brace: label(YES_NO_LABEL, detail.kneeBrace),
           debris: label(YES_NO_LABEL, detail.debris),
           debris_type: txt(detail.debrisType),
@@ -533,18 +600,29 @@ const shapeResult = async (
       if (!detail) return empty;
       return {
         cells: {
-          visual_damage: bool(detail.visualDamage),
-          visual_damage_note: txt(detail.visualDamageRecommendation),
+          visual_damage:
+            detail.visualDamage === null
+              ? ""
+              : detail.visualDamage
+                ? "Visual Damage"
+                : "Good Condition",
+          visual_damage_recommendation: txt(detail.visualDamageRecommendation),
           debris_present: bool(detail.debrisPresent),
-          debris_note: txt(detail.debrisRecommendation),
+          debris_recommendation: txt(detail.debrisRecommendation),
           grating_present: bool(detail.gratingPresent),
           grating_blockage: label(BLOCKAGE_LABEL, detail.gratingBlockage),
-          grating_note: txt(detail.gratingAnomalyRecommendation),
+          grating_anomaly_recommendation: txt(detail.gratingAnomalyRecommendation),
           associated_pipes: joined(detail.gviAssociatedPipes.map((pipe) => pipe.position)),
-          associated_pipes_note: txt(detail.associatedPipesRecommendation),
-          cp_readings: joined(detail.cpFindings.map((finding) => txt(finding.cpMv))),
+          associated_pipes_recommendation: txt(detail.associatedPipesRecommendation),
         },
-        readings: [],
+        // one row per CP reading; the body cells repeat on each
+        readings: detail.cpFindings.map((finding) => ({
+          cells: {
+            cp_mv: number(finding.cpMv),
+            cp_remark: txt(finding.remarks),
+          },
+          createdAt: finding.createdAt,
+        })),
       };
     }
     case "SEABED": {
@@ -697,7 +775,7 @@ export const gatherExcelExport = async (
     for (const record of picked) {
       if (rows.length >= maxRowsPerType) break;
 
-      const label: TargetLabel =
+      const target: TargetLabel =
         (record.descriptionId !== null
           ? byDescriptionId.get(record.descriptionId)
           : record.partCodeId !== null
@@ -721,13 +799,15 @@ export const gatherExcelExport = async (
           cells: {
             result_id: record.resultId,
             session: record.sessionId === null ? "" : (sessionNames.get(record.sessionId) ?? ""),
-            task_code: label.task_code,
-            description: label.description,
-            part_code: label.part_code,
-            class: record.resultClass,
+            task_code: target.task_code,
+            description: target.description,
+            part_code: target.part_code,
+            class: label(PANEL_CLASS, record.resultClass),
             recorded: reading.createdAt ? new Date(reading.createdAt) : record.createdAt,
             ...shaped.cells,
             ...reading.cells,
+            // the panel's shared Remark field, last of the typed columns
+            ...(REMARK_TYPES.includes(contract.type) ? { remark: txt(record.remarks) } : {}),
             ...customCells,
           },
         });
@@ -737,7 +817,7 @@ export const gatherExcelExport = async (
     sheets.push({
       type: contract.type,
       sheet: contract.sheet,
-      columns: [...IDENTITY_COLUMNS, ...contract.columns, ...customColumns],
+      columns: [...sheetColumnsFor(contract), ...customColumns],
       rows,
     });
   }

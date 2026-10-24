@@ -9,9 +9,12 @@ import {
 } from "../helpers/db";
 import * as schema from "../../src/db/schema";
 import {
+  EXCEL_CONTRACT,
+  IDENTITY_COLUMNS,
   MAX_EXCEL_RESULTS,
   gatherExcelExport,
   previewExcelExport,
+  sheetColumnsFor,
 } from "../../src/db/services/excel-export-data.service";
 import { parseDatasheetTargets } from "../../src/db/services/datasheet-data.service";
 
@@ -49,6 +52,7 @@ const addResult = async (values: {
   inspectionFormId?: number | null;
   customValues?: Record<string, unknown>;
   resultClass?: "normal" | "anomaly";
+  remarks?: string | null;
 }) =>
   testDb.insert(schema.result).values({
     resultId: values.resultId,
@@ -62,6 +66,7 @@ const addResult = async (values: {
     inspectionFormId: values.inspectionFormId ?? null,
     customValues: values.customValues ?? null,
     resultClass: values.resultClass ?? "normal",
+    remarks: values.remarks ?? null,
   });
 
 const targets = (...keys: string[]) => parseDatasheetTargets(keys);
@@ -152,11 +157,11 @@ describe("excel export data", () => {
     expect(sheet!.rows[0]!.cells).toMatchObject({
       result_id: 5003,
       datum_reference: "D-1",
-      member_type: "CHORD",
+      member_type: "Chord",
       clock_position: "12:00",
       ut_mm: 19.8,
       cp_potential_mv: -950,
-      remark: "reading",
+      cp_remark: "reading",
     });
     expect(typeof sheet!.rows[0]!.cells.ut_mm).toBe("number");
     // the second position pairs with no CP reading, so its CP cell is blank
@@ -185,7 +190,7 @@ describe("excel export data", () => {
 
     expect(sheet!.rows).toHaveLength(3);
     expect(sheet!.rows.map((row) => row.cells.cp_potential_mv ?? null)).toEqual([-900, -910, null]);
-    expect(sheet!.rows[2]!.cells.remark ?? "").toBe("");
+    expect(sheet!.rows[2]!.cells.cp_remark ?? "").toBe("");
   });
 
   it("ships one row for a result with no readings", async () => {
@@ -334,10 +339,318 @@ describe("excel export data", () => {
   });
 
   it("covers all thirteen types", async () => {
-    const { EXCEL_CONTRACT } = await import("../../src/db/services/excel-export-data.service");
     expect(EXCEL_CONTRACT.map((entry) => entry.type)).toHaveLength(13);
     for (const entry of EXCEL_CONTRACT) {
       expect(entry.sheet.length).toBeLessThanOrEqual(31);
     }
+  });
+});
+
+// The panel's own wording, read from the app tools.
+const PANEL_LABELS: Record<string, string[]> = {
+  GVI: [
+    "Depth EL (-)",
+    "Contact - CP Reading (mV)",
+    "Proximity - CP Reading (mV)",
+    "CP Remarks",
+    "MGI Depth",
+    "MGI Soft Coverage",
+    "MGI Hard Coverage",
+    "MGI Remarks",
+    "Condition",
+    "Remark",
+  ],
+  CVI: [
+    "Datum Reference",
+    "Member",
+    "Clock position",
+    "UT Value (mm)",
+    "Remarks",
+    "CP Value (mV)",
+    "CP Remarks",
+    "Remark",
+  ],
+  DVI: [
+    "Datum Reference",
+    "Member Type",
+    "Clock position",
+    "UT Value (mm)",
+    "Findings",
+    "CP Potential (mV)",
+    "Remark",
+  ],
+  MGI: [
+    "No MG observed",
+    "Criteria preset",
+    "Growth",
+    "Species",
+    "Other species detail",
+    "Coverage %",
+    "Thickness mm",
+    "Finding remarks",
+  ],
+  CP: [
+    "Anode Type",
+    "CP potential (mV)",
+    "Depletion (%)",
+    "Width",
+    "Height",
+    "Length",
+    "Widest",
+    "Deepest",
+    "Remark",
+  ],
+  FMD: [
+    "Depth EL (-)",
+    "Initial Attempt",
+    "Additional Attempt 1",
+    "Additional Attempt 2",
+    "Additional Attempt 3",
+    "Remark",
+  ],
+  SCOUR: [
+    "Leg 1",
+    "Leg 2",
+    "DIM A",
+    "DIM B",
+    "DIM C",
+    "Leg 1 pile exposed",
+    "Leg 2 pile exposed",
+    "Leg 1 exposed height",
+    "Leg 2 exposed height",
+    "Remark",
+  ],
+  BSI: [
+    "Clamp Type",
+    "Depth EL (-)",
+    "Clamp Bolts & Nuts Quantity",
+    "Clamp Missing Bolts",
+    "Clamp Missing Washer",
+    "Outboard Clamp CP",
+    "CP Anomaly Recommendation",
+    "Hinge Pin",
+    "Hinge Bolts & Nuts Quantity",
+    "Hinge Missing Bolts",
+    "Hinge Missing Washer",
+    "Liners",
+    "In-board Gap Condition",
+    "In-board Estimate Gap",
+    "In-board Alignment Condition",
+    "In-board Misaligned Position",
+    "In-board Anomaly Recommendation",
+    "Out-board Gap Condition",
+    "Out-board Estimate Gap",
+    "Out-board Alignment Condition",
+    "Out-board Misaligned Position",
+    "Out-board Anomaly Recommendation",
+  ],
+  CGB: ["Movement", "Movement Remark", "Debris", "Debris Type", "Remark"],
+  RISER: [
+    "Touchdown - Distance from Riser Bend",
+    "Riser Bend - Distance to Mudbrace Member",
+    "Riser Bend - Height to Seabed",
+    "Coating",
+    "Coating Condition",
+    "Knee Brace",
+    "Debris",
+    "Debris Type",
+    "Anomaly",
+    "Recommendation",
+    "Restricted Access",
+    "Remark",
+  ],
+  CAISSON: [
+    "Caisson Body GVI",
+    "Damage Recommendation",
+    "Debris Present",
+    "Debris Recommendation",
+    "Grating Present",
+    "Grating Blockage",
+    "Grating Recommendation",
+    "CP Value (mV)",
+    "CP Remarks",
+    "Associated pipes",
+    "Associated pipes note",
+    "Remark",
+  ],
+  SEABED: ["Range (m)", "Fixes", "Debris", "Debris Type", "Remark"],
+  // PIPELINE keeps its contract labels until T4.
+  PIPELINE: [
+    "Location",
+    "Depth EL",
+    "Orientation",
+    "Category",
+    "Damage type",
+    "Debris",
+    "Anode CP mV",
+    "Anode depletion",
+    "Anode KP",
+    "Remarks",
+  ],
+};
+
+describe("panel labels and text", () => {
+  it("names every column as the panel does", () => {
+    expect(IDENTITY_COLUMNS.map((column) => column.label)).toEqual([
+      "Result ID",
+      "Session",
+      "Task code",
+      "Description",
+      "Part code",
+      "Class",
+      "Timestamp (UTC)",
+    ]);
+
+    for (const contract of EXCEL_CONTRACT) {
+      const labels = sheetColumnsFor(contract)
+        .map((column) => column.label)
+        .slice(IDENTITY_COLUMNS.length);
+      expect({ type: contract.type, labels }).toEqual({
+        type: contract.type,
+        labels: PANEL_LABELS[contract.type] ?? [],
+      });
+    }
+  });
+
+  it("splits the GVI probes into two columns", async () => {
+    await seedTree();
+    await addResult({ resultId: 5001, type: "GVI" });
+    await testDb.insert(schema.resultGvi).values({ resultId: 5001, depthEl: 84.2, condition: "ok" });
+    await testDb.insert(schema.resultGviFinding).values([
+      { resultGviId: 5001, value: -942, remark: "shared note", cpMethod: "contact", sortOrder: 0 },
+      { resultGviId: 5001, value: -8, cpMethod: "proximity", sortOrder: 1 },
+    ]);
+
+    const [row] = (await gatherExcelExport(1, ["GVI"], targets("partCode:300"), testOrgId, testDb)).sheets[0]!
+      .rows;
+
+    expect(row!.cells).toMatchObject({
+      gvi_contact: -942,
+      gvi_proximity: -8,
+      gvi_cp_remark: "shared note",
+      condition: "Good Condition",
+      depth_el: 84.2,
+    });
+  });
+
+  it("maps a legacy GVI pair by order", async () => {
+    await seedTree();
+    await addResult({ resultId: 5002, type: "GVI" });
+    await testDb.insert(schema.resultGvi).values({ resultId: 5002, condition: "not_ok" });
+    await testDb.insert(schema.resultGviFinding).values([
+      { resultGviId: 5002, value: -900, sortOrder: 0 },
+      { resultGviId: 5002, value: -12, sortOrder: 1 },
+    ]);
+
+    const [row] = (await gatherExcelExport(1, ["GVI"], targets("partCode:300"), testOrgId, testDb)).sheets[0]!
+      .rows;
+
+    expect(row!.cells).toMatchObject({ gvi_contact: -900, gvi_proximity: -12, condition: "Visual Damage" });
+  });
+
+  it("renders BSI flags and positions as the panel words them", async () => {
+    await seedTree();
+    await addResult({ resultId: 5007, type: "BSI" });
+    await testDb.insert(schema.resultBsi).values({
+      resultId: 5007,
+      hingePin: true,
+      liners: false,
+      inboardGapCondition: "gap",
+      inboardAlignmentCondition: "misaligned",
+      inboardMisalignedPosition: "mid",
+      outboardGapCondition: "no_gap",
+      outboardAlignmentCondition: "aligned",
+    });
+
+    const [row] = (await gatherExcelExport(1, ["BSI"], targets("partCode:300"), testOrgId, testDb)).sheets[0]!
+      .rows;
+
+    expect(row!.cells).toMatchObject({
+      hinge_pin: "Present",
+      liners: "Missing",
+      inboard_gap_condition: "Gap",
+      inboard_alignment_condition: "Misaligned",
+      inboard_misaligned_position: "Mid-Section",
+      outboard_gap_condition: "No Gap",
+      outboard_alignment_condition: "Aligned",
+    });
+  });
+
+  it("renders RISER coating as the panel words it", async () => {
+    await seedTree();
+    await addResult({ resultId: 5008, type: "RISER" });
+    await testDb.insert(schema.resultRiser).values({
+      resultId: 5008,
+      coatingStatus: "not-present",
+      coatingCondition: "peel-off",
+      debrisType: "",
+      recommendation: "",
+    });
+
+    const [row] = (await gatherExcelExport(1, ["RISER"], targets("partCode:300"), testOrgId, testDb)).sheets[0]!
+      .rows;
+
+    expect(row!.cells).toMatchObject({ coating_status: "Not Present", coating_condition: "Coating Peel Off" });
+  });
+
+  it("ships one CAISSON row per CP reading", async () => {
+    await seedTree();
+    await addResult({ resultId: 5010, type: "CAISSON" });
+    await testDb.insert(schema.resultCi).values({
+      resultId: 5010,
+      visualDamage: false,
+      visualDamageRecommendation: "",
+      debrisPresent: true,
+      debrisRecommendation: "recover",
+      gratingPresent: true,
+      gratingBlockage: "25_50",
+      gratingAnomalyRecommendation: "clean",
+    });
+    await testDb.insert(schema.resultCiCpFinding).values([
+      { resultId: 5010, cpMv: "-980", remarks: "" },
+      { resultId: 5010, cpMv: "-1020", remarks: "near anode" },
+    ]);
+
+    const [sheet] = (await gatherExcelExport(1, ["CAISSON"], targets("partCode:300"), testOrgId, testDb)).sheets;
+
+    expect(sheet!.rows).toHaveLength(2);
+    expect(sheet!.rows.map((row) => row.cells.cp_mv)).toEqual([-980, -1020]);
+    expect(sheet!.rows[1]!.cells.cp_remark).toBe("near anode");
+    // the body cells repeat on every reading row
+    expect(sheet!.rows[1]!.cells).toMatchObject({ visual_damage: "Good Condition", grating_blockage: "25-50%" });
+  });
+
+  it("ships the panel Remark last on the tools that carry it", async () => {
+    await seedTree();
+    await addResult({ resultId: 5011, type: "CVI", remarks: "check next dive" });
+    await testDb.insert(schema.resultCvi).values({ resultId: 5011 });
+
+    const [sheet] = (await gatherExcelExport(1, ["CVI"], targets("partCode:300"), testOrgId, testDb)).sheets;
+
+    expect(sheet!.columns.at(-1)).toMatchObject({ key: "remark", label: "Remark" });
+    expect(sheet!.rows[0]!.cells.remark).toBe("check next dive");
+  });
+
+  it("keeps no Remark column on MGI", async () => {
+    await seedTree();
+    await addResult({ resultId: 5012, type: "MGI" });
+    await testDb.insert(schema.resultMgi).values({ resultId: 5012 });
+    await testDb.insert(schema.resultMgiFinding).values({
+      resultMgiId: 5012,
+      growthType: "soft",
+      species: "Other",
+      speciesOtherText: "plumose anemone",
+      coveragePercent: 35,
+      sortOrder: 0,
+    });
+
+    const [sheet] = (await gatherExcelExport(1, ["MGI"], targets("partCode:300"), testOrgId, testDb)).sheets;
+
+    expect(sheet!.columns.some((column) => column.key === "remark")).toBe(false);
+    expect(sheet!.rows[0]!.cells).toMatchObject({
+      growth_type: "Soft",
+      species_other_text: "plumose anemone",
+      coverage_percent: 35,
+    });
   });
 });
