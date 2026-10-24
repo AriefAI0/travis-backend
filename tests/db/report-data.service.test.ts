@@ -249,6 +249,30 @@ describe("gatherReportData", () => {
     );
   });
 
+  // A corrected row and a rejected image both flow through the same reads.
+  it("reads corrected values and drops a rejected image", async () => {
+    await seed();
+    await testDb
+      .update(schema.result)
+      .set({ remarks: "edited by admin" })
+      .where(eq(schema.result.resultId, 5002));
+    await testDb
+      .update(schema.resultGviFinding)
+      .set({ value: -111, remark: "corrected reading" })
+      .where(eq(schema.resultGviFinding.resultGviId, 5002));
+    await testDb
+      .update(schema.resultImage)
+      .set({ status: "rejected" })
+      .where(eq(schema.resultImage.imageId, 9001));
+
+    const description = (await gatherReportData(1, "all", testOrgId, testDb)).items[0]!;
+    const gvi = description.sections[0]!;
+
+    expect(gvi.rows[0]!.gvi_cp).toBe("-111");
+    expect(gvi.rows[0]!.remarks).toBe("edited by admin");
+    expect(gvi.image_keys).toEqual([]);
+  });
+
   it("keeps a result whose target left the tree", async () => {
     await seed();
     // a description under another project is reachable from this result but
