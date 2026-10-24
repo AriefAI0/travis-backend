@@ -226,7 +226,9 @@ describe("excel export data", () => {
     const [sheet] = (await gatherExcelExport(1, ["MGI"], targets("partCode:300"), testOrgId, testDb)).sheets;
 
     expect(sheet!.rows).toHaveLength(1);
-    expect(sheet!.rows[0]!.cells).toMatchObject({ result_id: 5005, no_mg_observed: "No" });
+    expect(sheet!.rows[0]!.cells).toMatchObject({ result_id: 5005 });
+    // the card prints this text when the tool saved no findings at all
+    expect(sheet!.rows[0]!.cells.no_mg_observed ?? "").toBe("");
     // no readings, so every reading cell stays blank
     expect(sheet!.rows[0]!.cells.growth_type ?? "").toBe("");
   });
@@ -687,7 +689,7 @@ describe("panel labels and text", () => {
   it("keeps no Remark column on MGI", async () => {
     await seedTree();
     await addResult({ resultId: 5012, type: "MGI" });
-    await testDb.insert(schema.resultMgi).values({ resultId: 5012 });
+    await testDb.insert(schema.resultMgi).values({ resultId: 5012, noMgObserved: 1 });
     await testDb.insert(schema.resultMgiFinding).values({
       resultMgiId: 5012,
       growthType: "soft",
@@ -701,6 +703,7 @@ describe("panel labels and text", () => {
 
     expect(sheet!.columns.some((column) => column.key === "remark")).toBe(false);
     expect(sheet!.rows[0]!.cells).toMatchObject({
+      no_mg_observed: "No MG observed",
       growth_type: "Soft",
       species_other_text: "plumose anemone",
       coverage_percent: 35,

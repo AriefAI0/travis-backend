@@ -582,7 +582,8 @@ const shapeResult = async (
       if (!detail) return empty;
       return {
         cells: {
-          no_mg_observed: detail.detail.noMgObserved ? "Yes" : "No",
+          // the card prints this text when the tool saved no findings at all
+          no_mg_observed: detail.detail.noMgObserved ? "No MG observed" : "",
           criteria_preset: txt(detail.detail.criteriaPreset),
         },
         readings: detail.findings.map((finding) => ({
