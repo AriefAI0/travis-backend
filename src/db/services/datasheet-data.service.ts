@@ -130,6 +130,7 @@ const EMPTY_LABEL: TargetLabel = {
   description: "",
   type_code: "",
   part_code: "",
+  nominal_wall_mm: "",
 };
 
 // The two key spellings the app sends, one per tree row kind.

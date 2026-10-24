@@ -364,6 +364,7 @@ const EMPTY_LABEL: TargetLabel = {
   description: "",
   type_code: "",
   part_code: "",
+  nominal_wall_mm: "",
 };
 
 // Main cells and child sets for one result. Every type in the contract answers.
