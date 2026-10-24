@@ -7,7 +7,6 @@
 import ExcelJS from "exceljs";
 
 import {
-  IDENTITY_COLUMNS,
   type ExcelCell,
   type ExcelColumn,
   type ExcelRow,
@@ -78,7 +77,8 @@ const layOut = (sheet: ExcelJS.Worksheet, columns: ExcelColumn[]) => {
     key: column.key,
     width: widthFor(column),
   }));
-  sheet.views = [{ state: "frozen", xSplit: Math.min(IDENTITY_COLUMNS.length, columns.length), ySplit: 1 }];
+  // no column split: the sheet reads as one flat table (user, 2026-10-24)
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
   sheet.autoFilter = {
     from: { row: 1, column: 1 },
     to: { row: 1, column: Math.max(1, columns.length) },
