@@ -85,6 +85,13 @@
       "when": 1792785181187,
       "tag": "0011_tan_ma_gnuci",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792815741624,
+      "tag": "0012_fearless_warlock",
+      "breakpoints": true
     }
   ]
 }
