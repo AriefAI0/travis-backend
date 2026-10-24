@@ -33,7 +33,7 @@ import type { Action, Subject } from "../../lib/auth/permissions";
 import { excelCreateSchema, excelPreviewSchema, type ExcelExportListItem } from "../../types/api";
 import { EXPORT_TTL_MS } from "../../db/services/excel-export.service";
 import { estimateExportSizes } from "./estimate";
-import { bareWorkbook, exportFilename, exportStem } from "./workbook";
+import { bareWorkbook, exportFilename, exportStem, shippedStem } from "./workbook";
 import { kickExcelExportWorker } from "./worker";
 
 const toListItem = (row: Awaited<ReturnType<typeof getExcelExport>>): ExcelExportListItem => ({
@@ -194,9 +194,11 @@ export const excelExportRoutes = (database?: DbOrTx) => {
     );
     const typesWithRows = (row.types as string[]).filter((type) => (counts[type] ?? 0) > 0);
     const bare = bareWorkbook(row.name, typesWithRows.length);
-    // the typed name names only the zip root; the downloaded file keeps the
-    // project-based name
-    const stem = exportStem(project?.title ?? "export", row.createdAt);
+    // a typed name names the zip and its root; a blank one keeps the project
+    // and the day
+    const stem = bare
+      ? exportStem(project?.title ?? "export", row.createdAt)
+      : shippedStem(row.name, project?.title ?? "export", row.createdAt);
     const filename = exportFilename(stem, bare ? "xlsx" : "zip");
     const url = await mintDownloadUrl(env.BUCKET_MEDIA, row.packageKey, filename, ttl);
 

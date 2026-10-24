@@ -220,7 +220,7 @@ describe("excel export routes", () => {
     expect(body.filename).toMatch(/\.xlsx$/);
   });
 
-  it("keeps the project file name when a typed name is set", async () => {
+  it("names the zip after the typed name", async () => {
     await seed();
     const created = await create({ types: ["GVI"], targets: ["partCode:300"], media: "raw" });
     const { id } = await readData<ExportBody>(created);
@@ -239,13 +239,13 @@ describe("excel export routes", () => {
 
     const raw = await request(`/api/v1/excel-exports/${id}/download-url`);
     expect(raw.status).toBe(200);
-    // a typed name always ships a zip, and never enters the file name
-    expect((await readData<{ filename: string }>(raw)).filename).toBe("alpha_2026-10-01.zip");
+    // a typed name names the zip and its root
+    expect((await readData<{ filename: string }>(raw)).filename).toBe("site_b.zip");
 
     await testDb.update(schema.excelExport).set({ media: "images" }).where(eq(schema.excelExport.id, id));
     const zip = await request(`/api/v1/excel-exports/${id}/download-url`);
     expect(zip.status).toBe(200);
-    expect((await readData<{ filename: string }>(zip)).filename).toBe("alpha_2026-10-01.zip");
+    expect((await readData<{ filename: string }>(zip)).filename).toBe("site_b.zip");
   });
 
   it("answers 404 for an unknown project", async () => {
