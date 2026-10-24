@@ -7,6 +7,7 @@
 import { mkdir } from "node:fs/promises";
 
 import { listVideoClipRecordsByResultIds } from "../../db/repositories/video-clip.repository";
+import type { ProgressCallback } from "../../db/services/excel-export-data.service";
 import { mergeClip, type RemuxResult } from "../recording/jobs/remux";
 import type { MediaRow } from "./package";
 
@@ -34,12 +35,16 @@ export const collectClips = async (
   targets: ClipTarget[],
   scratchDirectory: string,
   signal?: AbortSignal,
+  onProgress?: ProgressCallback,
 ): Promise<ClipPlan> => {
   const files: ClipFile[] = [];
   const rows: MediaRow[] = [];
   const errors: string[] = [];
 
   const clips = await listVideoClipRecordsByResultIds(targets.map((entry) => entry.resultId));
+  // every clip counts, merged or failed, so the bar never stalls
+  let mergedCount = 0;
+  await onProgress?.(0, clips.length);
   if (clips.length === 0) return { files, rows, errors };
 
   const targetOf = new Map(targets.map((entry) => [entry.resultId, entry]));
@@ -69,6 +74,9 @@ export const collectClips = async (
       file: name,
       status: merged.status,
     });
+
+    mergedCount += 1;
+    await onProgress?.(mergedCount, clips.length);
 
     if (!ok) {
       if (merged.error) errors.push(`result ${clip.resultId} clip ${clip.clipId}: ${merged.error}`);

@@ -145,6 +145,21 @@ describe("excel export data", () => {
     expect(data.sheets[0]!.rows.map((row) => row.cells.result_id)).toEqual([5001]);
   });
 
+  it("reports shaping progress from zero to the result count", async () => {
+    await seedTree();
+    await addResult({ resultId: 5001, type: "GVI" });
+    await addResult({ resultId: 5002, type: "GVI" });
+
+    const seen: [number, number][] = [];
+    await gatherExcelExport(1, ["GVI"], targets("partCode:300"), testOrgId, testDb, undefined, (done, total) => {
+      seen.push([done, total]);
+    });
+
+    // the opening call is (0, total) and the last is (total, total)
+    expect(seen[0]).toEqual([0, 2]);
+    expect(seen.at(-1)).toEqual([2, 2]);
+  });
+
   it("writes numbers as numbers and recorded as a date", async () => {
     await seedTree();
     await addResult({ resultId: 5001, type: "GVI" });

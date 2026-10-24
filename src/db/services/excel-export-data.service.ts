@@ -812,6 +812,9 @@ const customCellsFor = (
 
 /* ---------- entry point ---------- */
 
+// Shaping progress: the opening call is (0, total), the last is (total, total).
+export type ProgressCallback = (done: number, total: number) => void | Promise<void>;
+
 // Gather every ticked type's rows, in task-tree order. A foreign target id has
 // no rows here: loadTargets keeps only this project's results.
 // flow: tree + results > ticked types > cap > sessions > details > sheets
@@ -822,6 +825,7 @@ export const gatherExcelExport = async (
   organizationId: number,
   database?: DbOrTx,
   maxRowsPerType = Number.POSITIVE_INFINITY,
+  onProgress?: ProgressCallback,
 ): Promise<ExcelExportData> => {
   const started = performance.now();
   const { project, sorted, byDescriptionId, byPartCodeId } = await loadTargets(
@@ -840,6 +844,8 @@ export const gatherExcelExport = async (
     );
   }
 
+  await onProgress?.(0, ticked.length);
+
   const sessionIds = [...new Set(ticked.map((record) => record.sessionId))].filter(
     (id): id is number => id !== null,
   );
@@ -852,6 +858,7 @@ export const gatherExcelExport = async (
   const customLabels = await customLabelsFor(formIds, database);
 
   const sheets: ExcelSheet[] = [];
+  let shapedCount = 0;
 
   for (const contract of EXCEL_CONTRACT) {
     if (!types.includes(contract.type)) continue;
@@ -901,6 +908,10 @@ export const gatherExcelExport = async (
           },
         });
       }
+
+      // one result shaped, whatever its reading count
+      shapedCount += 1;
+      await onProgress?.(shapedCount, ticked.length);
     }
 
     sheets.push({

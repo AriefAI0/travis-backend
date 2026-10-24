@@ -20,6 +20,7 @@ import {
   gatherExcelExport,
   type ExcelExportData,
   type ExcelSheet,
+  type ProgressCallback,
 } from "../../db/services/excel-export-data.service";
 import {
   claimExcelExport,
@@ -57,13 +58,68 @@ const packageKeyFor = (lane: (typeof LANES)[number], extension: string) =>
 const emit = (row: ExcelExportView, action: "create" | "modify") =>
   excelWorkerDeps.emit(row, action);
 
-// Throttled progress, unthrottled terminal status.
-const progressClock = new Map<string, number>();
-export const emitProgress = (row: ExcelExportView) => {
-  const last = progressClock.get(row.id) ?? 0;
-  if (Date.now() - last < PROGRESS_INTERVAL_MS) return;
-  progressClock.set(row.id, Date.now());
-  emit(row, "modify");
+// One run's progress: phase-aware writes through the existing CAS move,
+// throttled to one a second, with the boundaries forced through.
+export type ProgressReporter = {
+  results: ProgressCallback;
+  media: ProgressCallback;
+  packing: () => Promise<void>;
+  // the finished row reads `N results`, whatever the last phase counted
+  resultCount: () => number;
+};
+
+export const progressReporter = (row: ExcelExportView): ProgressReporter => {
+  let phase = "";
+  let done = 0;
+  let total = 0;
+  let resultsTotal = 0;
+  let lastWrite = 0;
+  // false once the row leaves running: cancelled or removed mid-build
+  let live = true;
+  // writes chain, so overlapping callbacks never race a row update
+  let writing: Promise<void> = Promise.resolve();
+
+  const write = async (force: boolean) => {
+    if (!live) return;
+    if (!force && Date.now() - lastWrite < PROGRESS_INTERVAL_MS) return;
+    lastWrite = Date.now();
+    try {
+      live = await excelWorkerDeps.move(row.id, "running", {
+        phase,
+        itemsDone: done,
+        itemsTotal: total,
+      });
+    } catch (error) {
+      log.warn("excel export progress write failed", { id: row.id, err: String(error) });
+      return;
+    }
+    if (live) emit(row, "modify");
+  };
+
+  const onPhase = (name: string): ProgressCallback => async (nextDone, nextTotal) => {
+    // a phase change, a new total, or the last item always lands
+    const force = name !== phase || nextTotal !== total || nextDone === nextTotal;
+    phase = name;
+    if (name === "results") resultsTotal = nextTotal;
+    done = nextDone;
+    total = nextTotal;
+    const next = writing.then(() => write(force));
+    writing = next.catch(() => {});
+    await next;
+  };
+
+  return {
+    results: onPhase("results"),
+    media: onPhase("media"),
+    // packing keeps the last counts: its length is not known up front
+    packing: async () => {
+      phase = "packing";
+      const next = writing.then(() => write(true));
+      writing = next.catch(() => {});
+      await next;
+    },
+    resultCount: () => resultsTotal,
+  };
 };
 
 // The seams the tests replace: the row store, the gather, and object storage.
@@ -206,12 +262,19 @@ const workbookEntries = async (
 };
 
 // flow: gather > (media: images > thumbnails) > one workbook per type > entries
-const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<BuiltPackage> => {
+const buildPackage = async (
+  row: ExcelExportView,
+  signal: AbortSignal,
+  report?: ProgressReporter,
+): Promise<BuiltPackage> => {
   const data = await excelWorkerDeps.gather(
     row.projectId,
     row.types as InspectionTypeCode[],
     parseDatasheetTargets(row.targets),
     row.organizationId,
+    undefined,
+    undefined,
+    report?.results,
   );
 
   // a type with no rows gets no folder. Nothing at all still ships one sheet.
@@ -249,15 +312,29 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
   const scratch = path.join(env.EXCEL_EXPORT_SCRATCH_DIR, row.id);
   const resultTypes = resultTypesOf(data);
 
+  // images and clips share the media phase; clips count past the images, and
+  // the total grows once the clip count is known
+  let mediaBase = 0;
+  const onImage = report
+    ? async (imageDone: number, imageTotal: number) => {
+        if (imageDone === imageTotal) mediaBase = imageTotal;
+        await report.media(imageDone, imageTotal);
+      }
+    : undefined;
+  const onClip = report
+    ? async (clipDone: number, clipTotal: number) =>
+        report.media(mediaBase + clipDone, mediaBase + clipTotal)
+    : undefined;
+
   const imagePlan =
     row.media === "images" || row.media === "clips"
-      ? await collectImages(resultTypes, scratch, signal)
+      ? await collectImages(resultTypes, scratch, signal, onImage)
       : { files: [], rows: [], errors: [] };
 
   // clip merges run after the images, one at a time, inside the clips lane
   const clipPlan =
     row.media === "clips"
-      ? await collectClips(resultTypes, scratch, signal)
+      ? await collectClips(resultTypes, scratch, signal, onClip)
       : { files: [], rows: [], errors: [] };
 
   // the sheet names each result's folders and counts what shipped
@@ -308,6 +385,8 @@ const buildPackage = async (row: ExcelExportView, signal: AbortSignal): Promise<
 export const runExcelExport = async (claimed: ExcelExportView) => {
   const started = Date.now();
   const packageKey = claimed.packageKey;
+  // progress for the run; a build that never starts keeps the claim's 0/0
+  const report = progressReporter(claimed);
 
   try {
     const current = await excelWorkerDeps
@@ -325,10 +404,12 @@ export const runExcelExport = async (claimed: ExcelExportView) => {
       return;
     }
 
+    // the card flips off Queued the moment work starts, before any phase
+    emit(current, "modify");
+
     // one controller per run: a cancel stops the fetches, ffmpeg, and upload
     const controller = new AbortController();
-    const built = await buildPackage(current, controller.signal);
-    progressClock.set(claimed.id, Date.now());
+    const built = await buildPackage(current, controller.signal, report);
 
     // a cancel that landed while the package was building still wins
     const beforeUpload = await excelWorkerDeps.read(
@@ -338,11 +419,18 @@ export const runExcelExport = async (claimed: ExcelExportView) => {
     );
     if (beforeUpload.status === "cancelling") {
       controller.abort();
-      await excelWorkerDeps.move(claimed.id, "cancelling", { status: "cancelled" });
+      await excelWorkerDeps.move(claimed.id, "cancelling", {
+        status: "cancelled",
+        itemsTotal: report.resultCount(),
+        itemsDone: report.resultCount(),
+      });
       emit(beforeUpload, "modify");
       await removePackage(packageKey);
       return;
     }
+
+    // the zip streams and uploads: an indeterminate last leg
+    await report.packing();
 
     const bytes =
       built.kind === "xlsx"
@@ -357,7 +445,9 @@ export const runExcelExport = async (claimed: ExcelExportView) => {
       packageKey,
       packageSize: bytes,
       bytesWritten: bytes,
-      itemsDone: current.itemsTotal,
+      // the finished row reads `N results`, not `N media files`
+      itemsTotal: report.resultCount(),
+      itemsDone: report.resultCount(),
       errors: built.errors.map((message) => ({ message })),
     });
 
@@ -378,6 +468,8 @@ export const runExcelExport = async (claimed: ExcelExportView) => {
     const moved = await excelWorkerDeps.move(claimed.id, "running", {
       status: "failed",
       phase: "failed",
+      itemsTotal: report.resultCount(),
+      itemsDone: report.resultCount(),
       errors: [{ message: String(error) }],
     });
     if (!moved) {
@@ -386,8 +478,6 @@ export const runExcelExport = async (claimed: ExcelExportView) => {
     }
     emit({ ...claimed, status: "failed" }, "modify");
     log.error("excel export failed", { id: claimed.id, err: String(error) });
-  } finally {
-    progressClock.delete(claimed.id);
   }
 };
 

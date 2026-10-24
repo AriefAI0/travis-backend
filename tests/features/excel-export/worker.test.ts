@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import type { ExcelExportData } from "../../../src/db/services/excel-export-data.service";
 import type { ExcelExportRow } from "../../../src/db/repositories/excel-export.repository";
 import {
-  emitProgress,
   excelWorkerDeps,
   mediaCellsFor,
+  progressReporter,
   resetExcelWorkerDeps,
   resultTypesOf,
   runExcelExport,
@@ -173,16 +173,80 @@ describe("excel export worker", () => {
     expect(stored.size).toBe(1);
   });
 
-  it("throttles progress but always sends the terminal status", async () => {
-    // its own id, so the throttle clock of another test cannot affect it
-    const row = rowFor({ id: "00000000-0000-0000-0000-00000000beef" });
+  it("walks the phases and restores the result count at the end", async () => {
+    const phases: { phase: string; done: number; total: number }[] = [];
+    excelWorkerDeps.gather = async (...args) => {
+      const onProgress = args[6];
+      await onProgress?.(0, 2);
+      await onProgress?.(1, 2);
+      await onProgress?.(2, 2);
+      return oneRow;
+    };
+    excelWorkerDeps.move = async (id, from, patch) => {
+      if (current.id !== id || current.status !== from) return false;
+      current = { ...current, ...patch } as ExcelExportRow;
+      phases.push({
+        phase: String(patch.phase),
+        done: patch.itemsDone ?? 0,
+        total: patch.itemsTotal ?? 0,
+      });
+      return true;
+    };
 
-    emitProgress(row);
-    emitProgress(row);
-    expect(events).toHaveLength(1);
+    await runExcelExport(current);
 
-    excelWorkerDeps.emit(row, "modify");
+    // the middle tick falls inside the one-second window, so it never writes
+    expect(phases).toEqual([
+      { phase: "results", done: 0, total: 2 },
+      { phase: "results", done: 2, total: 2 },
+      { phase: "packing", done: 2, total: 2 },
+      { phase: "done", done: 2, total: 2 },
+    ]);
+  });
+
+  it("reports a media phase even when no files ship", async () => {
+    current = rowFor({ media: "images" });
+    const phases: string[] = [];
+    excelWorkerDeps.gather = async (...args) => {
+      const onProgress = args[6];
+      await onProgress?.(0, 1);
+      await onProgress?.(1, 1);
+      return oneRow;
+    };
+    excelWorkerDeps.move = async (id, from, patch) => {
+      if (current.id !== id || current.status !== from) return false;
+      current = { ...current, ...patch } as ExcelExportRow;
+      phases.push(String(patch.phase));
+      return true;
+    };
+
+    await runExcelExport(current);
+
+    // no image rows exist, so media counts 0 of 0 and still shows
+    expect(phases).toEqual(["results", "results", "media", "packing", "done"]);
+    expect(current.itemsTotal).toBe(1);
+    expect(current.itemsDone).toBe(1);
+  });
+
+  it("sends one progress event a second inside a phase", async () => {
+    const report = progressReporter(current);
+
+    await report.results(0, 3); // phase change: writes
+    await report.results(1, 3); // inside the window: skipped
+    await report.results(3, 3); // last item: writes
+
     expect(events).toHaveLength(2);
+  });
+
+  it("stops reporting once the row leaves running", async () => {
+    const report = progressReporter(current);
+    excelWorkerDeps.move = async () => false;
+
+    await report.results(0, 2);
+    await report.results(2, 2);
+
+    // the lost CAS killed the reports, and nothing was emitted
+    expect(events).toHaveLength(0);
   });
 
   it("names each result once when its sheet repeats it", () => {

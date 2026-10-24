@@ -81,6 +81,10 @@ export const claimQueuedExcelExport = async (
     .set({
       status: "running",
       packageKey,
+      // a fresh attempt starts from a clean progress state
+      phase: "",
+      itemsTotal: 0,
+      itemsDone: 0,
       attempts: sql`${excelExport.attempts} + 1`,
       updatedAt: new Date(),
     })

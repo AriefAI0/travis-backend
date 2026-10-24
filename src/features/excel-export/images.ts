@@ -13,6 +13,7 @@ import { log } from "../../lib/logger";
 import { minio } from "../../lib/minio_storage/clients";
 import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
 import { listResultImageSummariesByResultIds } from "../../db/services/result-media.service";
+import type { ProgressCallback } from "../../db/services/excel-export-data.service";
 import type { MediaRow } from "./package";
 
 // Fetches in flight per lane. Four keeps one lane busy without swamping MinIO.
@@ -78,11 +79,15 @@ export const collectImages = async (
   targets: ImageTarget[],
   scratchDirectory: string,
   signal?: AbortSignal,
+  onProgress?: ProgressCallback,
 ): Promise<ImagePlan> => {
   const files: ImageFile[] = [];
   const errors: string[] = [];
 
-  if (targets.length === 0) return { files, rows: [], errors };
+  if (targets.length === 0) {
+    await onProgress?.(0, 0);
+    return { files, rows: [], errors };
+  }
 
   const summaries = await listResultImageSummariesByResultIds(
     targets.map((entry) => entry.resultId),
@@ -119,6 +124,9 @@ export const collectImages = async (
 
   // a failed file is dropped by index, so one bad image never hides its result
   const failed = new Set<number>();
+  // every planned file counts, whatever its outcome, so the bar never stalls
+  let fetched = 0;
+  await onProgress?.(0, files.length);
 
   await mapLimit(
     files.map((file, index) => ({ file, index })),
@@ -150,6 +158,8 @@ export const collectImages = async (
         errors.push(`result ${file.resultId} image ${file.index}: ${String(error)}`);
         log.warn("excel export image failed", { resultId: file.resultId, index: file.index });
       }
+      fetched += 1;
+      await onProgress?.(fetched, files.length);
     },
   );
 
