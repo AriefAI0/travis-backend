@@ -7,6 +7,9 @@ import {
   updateRestrictedAccessRemarks,
 } from "../../db/repositories/result.repository";
 import { findProjectById } from "../../db/repositories/project.repository";
+import { listResultImageRecordsByResultId } from "../../db/repositories/result-image.repository";
+import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
+import { removeExactMediaKeys } from "../../lib/minio_storage/result-image-objects";
 import { projectIdOfTarget } from "../../db/services/task-structure.service";
 import { writeAudit, type AuditAction } from "../../db/services/audit.service";
 import { callerOf, requireCan, requireUser, type AuthVariables } from "../../lib/auth/middleware";
@@ -125,13 +128,24 @@ export const restrictedAccessRoutes = (database?: DbOrTx) => {
     return ok(c, row);
   });
 
+  // Removing the mark cascades its image rows, so the objects go first-collected,
+  // last-removed: the leaves are read inside the tx, storage runs after commit.
   routes.delete("/api/v1/restricted-access/:id", requireCan("remove", "Result"), async (c) => {
     const caller = callerOf(c);
     const markId = parseId(c, "id");
-    const row = await writeMark(caller, "remove", (tx) =>
-      deleteRestrictedAccessById(markId, caller.organizationId, tx),
-    );
+    let imageKeys: string[] = [];
+    const row = await writeMark(caller, "remove", async (tx) => {
+      const images = await listResultImageRecordsByResultId(markId, tx);
+      imageKeys = images.flatMap((image) => {
+        const leaves = imageEvidenceLeaves(image.storageStem, image.imageId, image.contentType);
+        return [leaves.raw.key, leaves.annotated.key];
+      });
+      return deleteRestrictedAccessById(markId, caller.organizationId, tx);
+    });
     if (!row) throw notFound("Restricted access mark");
+
+    // A failure here surfaces: the mark is gone, its objects are not.
+    await removeExactMediaKeys(imageKeys);
     return ok(c, row);
   });
 

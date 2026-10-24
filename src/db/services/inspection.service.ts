@@ -5,7 +5,10 @@ import type { InspectionTypeCode } from "../../types/api";
 import { db, type DbOrTx } from "../client";
 import { AppError, notFound } from "../../lib/error";
 import { removeMediaPrefix } from "../../lib/minio_storage/cleanup";
+import { imageEvidenceLeaves } from "../../lib/minio_storage/paths";
+import { removeExactMediaKeys } from "../../lib/minio_storage/result-image-objects";
 import { listIngestRecordsByClipIds } from "../repositories/recording-ingest.repository";
+import { listResultImageRecordsByResultId } from "../repositories/result-image.repository";
 import { listVideoClipRecordsBySessionId } from "../repositories/video-clip.repository";
 // Internal read: these ids come from a result row the route already scoped.
 import { findSessionByIdInternal } from "./session.service";
@@ -306,8 +309,8 @@ export const stopInspection = async (
 };
 
 // cancel removes the open row, its clip, and the clip's uploaded media.
-// flow: fetch > org guard > open guard > collect clip ingests > delete row >
-// audit — one tx, then the media sweep after commit
+// flow: fetch > org guard > open guard > collect clip ingests + image leaves >
+// delete row > audit — one tx, then the media sweeps after commit
 export const cancelInspection = async (
   resultId: number,
   caller: Caller,
@@ -331,12 +334,18 @@ export const cancelInspection = async (
       );
     }
 
-    // fetch clip ingests before the row delete cascades them away
+    // fetch clip ingests and evidence leaves before the row delete cascades
+    // both away
     const clips = await listVideoClipsByResultId(resultId, tx);
     const ingestRows = await listIngestRecordsByClipIds(
       clips.map((clip) => clip.clipId),
       tx,
     );
+    const images = await listResultImageRecordsByResultId(resultId, tx);
+    const imageKeys = images.flatMap((image) => {
+      const leaves = imageEvidenceLeaves(image.storageStem, image.imageId, image.contentType);
+      return [leaves.raw.key, leaves.annotated.key];
+    });
 
     const deleted = await deleteResult(resultId, tx);
     if (!deleted) throw new Error(`failed to delete result ${resultId}`);
@@ -353,16 +362,22 @@ export const cancelInspection = async (
       tx,
     );
 
-    return { deleted, ingestRows };
+    return { deleted, ingestRows, imageKeys };
   };
 
-  const { deleted, ingestRows } = database ? await run(database) : await db.transaction(run);
+  const { deleted, ingestRows, imageKeys } = database
+    ? await run(database)
+    : await db.transaction(run);
 
-  // The sweep stays outside the transaction: a rollback must not leave the row
+  // The sweeps stay outside the transaction: a rollback must not leave the row
   // behind with its media already gone.
   for (const ingest of ingestRows) {
     await removeMediaPrefix(ingest.keyPrefix);
   }
+
+  // Exact leaves, so a neighbouring result's objects are never touched. A
+  // failure here names the image cleanup: the row is gone, the objects are not.
+  await removeExactMediaKeys(imageKeys);
 
   return deleted;
 };
