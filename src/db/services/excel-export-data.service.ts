@@ -338,7 +338,6 @@ const EMPTY_LABEL: TargetLabel = {
   description: "",
   type_code: "",
   part_code: "",
-  nominal_wall_mm: "",
 };
 
 /* ---------- panel text ---------- */

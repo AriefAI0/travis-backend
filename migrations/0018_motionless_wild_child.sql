@@ -1,0 +1,1 @@
+ALTER TABLE "part_code" DROP COLUMN "nominal_wall_mm";

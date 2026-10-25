@@ -266,6 +266,7 @@ export type CviFindingDetail = {
 export type CviDetail = {
   resultId: number;
   datumReference: string | null;
+  nominalWallMm: number | null;
   members: CviMemberDetail[];
   cpFindings: CviFindingDetail[];
   createdAt: string;
@@ -915,8 +916,6 @@ export const updateItemSchema = z.object({
 export type TaskStructurePartCodeNode = {
   partCodeId: number;
   code: string;
-  // design wall, entered once per part code; the UT sheet reads it
-  nominalWallMm: number | null;
 };
 
 export type TaskStructureTypeNode = {
@@ -977,11 +976,9 @@ export const updateTypeSchema = z.object({
 export const createPartCodeSchema = z.object({
   typeId: id,
   code: z.string().min(1),
-  nominalWallMm: z.number().nullable().optional(),
 });
 export const updatePartCodeSchema = z.object({
   code: z.string().min(1).optional(),
-  nominalWallMm: z.number().nullable().optional(),
 });
 // project type vocabulary: the distinct type codes already used in the tree
 export const typeCatalogQuerySchema = z.object({ q: z.string().min(1).optional() });
@@ -1295,6 +1292,7 @@ export const cviPayloadSchema = z.object({
   version: z.literal(1),
 
   datumReference: z.string().min(1),
+  nominalWallMm: z.number().nullable().nullish(),
 
   members: z.array(
     z.object({

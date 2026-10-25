@@ -167,6 +167,7 @@ const SCENARIOS = [
       kind: "cvi",
       version: 1,
       datumReference: "D-1",
+      nominalWallMm: 22.5,
       members: [
         {
           memberType: "chord",
@@ -180,6 +181,14 @@ const SCENARIOS = [
       kind: "cvi",
       version: 1,
       datumReference: "",
+      members: [],
+      cpFindings: [],
+    },
+    // nominal wall is optional; older payloads leave it out
+    omitted: {
+      kind: "cvi",
+      version: 1,
+      datumReference: "D-1",
       members: [],
       cpFindings: [],
     },
@@ -416,6 +425,20 @@ describe("new inspection types", () => {
       findings: [{ ...PIPELINE_FINDING, damageType: "dent" }],
     });
     expect(stopped.status).toBe(200);
+  });
+
+  it("keeps the nominal wall on the CVI result", async () => {
+    await seedWorld();
+
+    const started = await startInspection("CVI");
+    const resultId = (await json(started)).data.resultId as number;
+    const valid = SCENARIOS.find((scenario) => scenario.type === "CVI")!.valid;
+
+    const stopped = await stopInspection(resultId, valid);
+    expect(stopped.status).toBe(200);
+
+    const read = await authRequest(`/api/v1/results/${resultId}/cvi`);
+    expect((await json(read)).data.nominalWallMm).toBe(22.5);
   });
 
   it("refuses a payload whose kind does not match the result type", async () => {

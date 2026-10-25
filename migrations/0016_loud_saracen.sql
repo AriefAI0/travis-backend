@@ -1,0 +1,1 @@
+ALTER TABLE "result_cvi" ADD COLUMN "nominal_wall_mm" double precision;

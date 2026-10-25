@@ -86,7 +86,6 @@ export type CreateTypeInput = {
 export type CreatePartCodeInput = {
   typeId: number;
   code: string;
-  nominalWallMm?: number | null;
 };
 
 const normalizeRequired = (value: string, fieldName: string) => {
@@ -138,7 +137,6 @@ export const listProjectTaskStructureTree = async (
       partCodes: (partCodesByType.get(typeRow.typeId) ?? []).map((part) => ({
         partCodeId: part.partCodeId,
         code: part.code,
-        nominalWallMm: part.nominalWallMm,
       })),
     };
     const bucket = typesByDescription.get(typeRow.descriptionId) ?? [];
@@ -629,7 +627,6 @@ export const createPartCode = async (
         {
           typeId: data.typeId,
           code: normalizeRequired(data.code, "Part code"),
-          nominalWallMm: data.nominalWallMm ?? null,
         },
         tx,
       ),
@@ -649,14 +646,12 @@ export const getPartCodeById = async (
 
 export const updatePartCode = async (
   partCodeId: number,
-  data: Partial<{ code: string; nominalWallMm: number | null }>,
+  data: Partial<{ code: string }>,
   caller: Caller,
   database?: DbOrTx,
 ) => {
   const next: Partial<Parameters<typeof updatePartCodeById>[1]> = {};
   if (data.code !== undefined) next.code = normalizeRequired(data.code, "Part code");
-  // null clears the value, undefined leaves it alone
-  if (data.nominalWallMm !== undefined) next.nominalWallMm = data.nominalWallMm;
 
   return writeAsCaller(
     "partCode",

@@ -615,6 +615,7 @@ const writeCviDetail = async (
       {
         resultId,
         datumReference: payload.datumReference,
+        nominalWallMm: payload.nominalWallMm ?? null,
       },
       tx,
     );

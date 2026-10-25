@@ -5,6 +5,7 @@ import { resultCvi } from "../schema";
 export type CreateResultCviInput = {
   resultId: number;
   datumReference: string | null;
+  nominalWallMm?: number | null;
 };
 
 export const createResultCvi = async (

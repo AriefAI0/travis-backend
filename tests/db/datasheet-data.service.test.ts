@@ -146,7 +146,7 @@ describe("datasheet data", () => {
   it("renders UT as one row per CVI clock reading", async () => {
     await seedTree();
     await addResult({ resultId: 5005, type: "CVI", partCodeId: 300 });
-    await testDb.insert(schema.resultCvi).values({ resultId: 5005 });
+    await testDb.insert(schema.resultCvi).values({ resultId: 5005, nominalWallMm: 22.5 });
     await testDb.insert(schema.resultCviPosition).values([
       { resultId: 5005, memberType: "chord", clockPosition: "12", utMm: 20.1, findings: "coating intact", sortOrder: 0 },
       { resultId: 5005, memberType: "chord", clockPosition: "3", utMm: 19.8, findings: "", sortOrder: 1 },
@@ -159,7 +159,7 @@ describe("datasheet data", () => {
     expect(table.rows).toHaveLength(2);
     expect(table.rows[0]).toMatchObject({
       component_id: "P1",
-      wall_mm: "",
+      wall_mm: "22.5",
       clock_12: "20.1",
       clock_3: "",
       remarks: "coating intact",

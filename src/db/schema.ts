@@ -331,9 +331,6 @@ export const partCode = pgTable(
 
     code: text("code").notNull(),
 
-    // design wall entered once per part code; the UT sheet reads it
-    nominalWallMm: doublePrecision("nominal_wall_mm"),
-
     ...createdAt,
     ...updatedAt,
     ...archivedAt,
@@ -764,6 +761,9 @@ export const resultCvi = pgTable("result_cvi", {
     .references(() => result.resultId, { onDelete: "cascade" }),
 
   datumReference: text("datum_reference"),
+
+  // design wall for this UT reading; the UT sheet's NOMINAL WALL column
+  nominalWallMm: doublePrecision("nominal_wall_mm"),
 
   ...createdAt,
   ...updatedAt,

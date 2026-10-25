@@ -130,7 +130,6 @@ const EMPTY_LABEL: TargetLabel = {
   description: "",
   type_code: "",
   part_code: "",
-  nominal_wall_mm: "",
 };
 
 // The two key spellings the app sends, one per tree row kind.
@@ -275,7 +274,7 @@ const utRows = (detail: CviDetail, label: TargetLabel): Record<string, string>[]
     .filter((position) => position.utMm !== null || (position.findings ?? "").trim() !== "")
     .map((position) => ({
       component_id: componentId(label),
-      wall_mm: label.nominal_wall_mm,
+      wall_mm: reading(detail.nominalWallMm),
       clock_12: position.clockPosition === "12" ? reading(position.utMm) : "",
       clock_3: position.clockPosition === "3" ? reading(position.utMm) : "",
       clock_6: position.clockPosition === "6" ? reading(position.utMm) : "",
