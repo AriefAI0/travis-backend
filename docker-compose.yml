@@ -58,7 +58,7 @@ services:
       # excel export scratch space; boot clears this directory and nothing else
       EXCEL_EXPORT_SCRATCH_DIR: /app/data/excel-export
     volumes:
-      - app-data:/app/data # sqlite tracker + finalize tmp survive redeploys
+      - /mnt/wsl/rustfs/minio/server_clone/backend-data:/app/data # sqlite tracker + finalize tmp survive redeploys
     networks:
       - travis
     restart: always
